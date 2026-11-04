@@ -36,6 +36,9 @@ model User {
   Question       Question[]
   McpAccessToken McpAccessToken[]
   ChatConversation ChatConversation?
+  applicationPackages ApplicationPackage[]
+  gmailAccount        GmailAccount?
+  sentEmails          SentEmail[]
   defaultResumeId String?
   defaultResume   Resume?          @relation("UserDefaultResume", fields: [defaultResumeId], references: [id], onDelete: SetNull)
 }
@@ -109,6 +112,7 @@ model File {
   fileType   String
   uploadedAt DateTime @default(now())
   Resume     Resume?
+  applicationPackages ApplicationPackage[]
 }
 
 model ResumeSection {
@@ -313,6 +317,7 @@ model Job {
   coverLetterId String?
   Notes         Note[]
   tags        Tag[]
+  applicationPackages ApplicationPackage[]
 
   // Automation discovery fields
   automationId    String?
@@ -537,4 +542,72 @@ model ChatConversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Cockpit V0: application packages submitted by an external bot (via MCP)
+// and reviewed / sent from the UI. See cockpit/SPEC.md §2.
+model ApplicationPackage {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId            String
+  job              Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  version          Int                       // 1, 2, 3 ... per job
+  status           String    @default("pending") // pending|approved|rejected|changes_requested|sent|superseded
+  emailTo          String?                   // null/empty = "apply via link"
+  emailSubject     String
+  emailBody        String
+  letterMd         String?
+  fitGrade         String?                   // "A" | "B"
+  fitAnalysis      String?                   // JSON text (object)
+  cvJson           String?                   // JSON text (object)
+  cvFileId         String?
+  cvFile           File?     @relation(fields: [cvFileId], references: [id], onDelete: SetNull)
+  cvPdfStale       Boolean   @default(false) // true after a manual cvJson edit, until a new version arrives
+  sourceFolder     String?                   // bot's local folder name, informational
+  idempotencyKey   String?
+  rejectReason     String?
+  changeRequest    String?
+  changeRequestedAt DateTime?
+  changeRequestHandledAt DateTime?
+  changeRequestResponse  String?            // note from the bot via mark_change_request_done
+  editedAt         DateTime?                 // last manual edit in the UI
+  approvedAt       DateTime?
+  rejectedAt       DateTime?
+  sendStartedAt    DateTime?                 // send lock; while set, the package is frozen (SPEC §6.4)
+  sendOutcome      String?                   // null | "unknown" (Gmail result ambiguous, SPEC §6.4)
+  sentAt           DateTime?
+  sentVia          String?                   // "gmail" | "manual"
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  sentEmail        SentEmail?
+
+  @@unique([jobId, version])
+  @@unique([userId, idempotencyKey])
+  @@index([userId, status, createdAt])
+}
+
+model GmailAccount {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email                 String
+  encryptedRefreshToken String
+  iv                    String
+  scopes                String   // space-separated, as granted by Google
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model SentEmail {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  packageId      String   @unique
+  package        ApplicationPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  fromAddress    String
+  toAddress      String
+  gmailMessageId String
+  threadId       String
+  sentAt         DateTime @default(now())
 }
