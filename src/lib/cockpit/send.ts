@@ -1,10 +1,10 @@
 import "server-only";
 import fs from "fs/promises";
-import path from "path";
 import { Prisma, type ApplicationPackage } from "@prisma/client";
 import prisma from "@/lib/db";
 import { decrypt } from "@/lib/encryption";
 import { log } from "@/lib/telemetry";
+import { sanitizePdfName } from "./attachments";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
 import type { GmailClient } from "./gmail/client";
@@ -25,10 +25,17 @@ export type SendResult = { id: string; sentAt: Date };
 
 // Fields the MIME is built from, validated again at send time (defense in depth
 // against rows written by older code paths, SPEC §6.4 step 1 and 3).
-type Content = { to: string; subject: string; body: string; filePath: string };
+type Content = {
+  to: string;
+  subject: string;
+  body: string;
+  filePath: string;
+  // Display name the recipient sees; the on-disk name is a generated uuid.
+  fileName: string;
+};
 
 type PackageWithFile = ApplicationPackage & {
-  cvFile: { filePath: string } | null;
+  cvFile: { filePath: string; fileName: string } | null;
 };
 
 async function checkContent(
@@ -53,13 +60,14 @@ async function checkContent(
     subject: pkg.emailSubject,
     body: pkg.emailBody,
     filePath,
+    fileName: sanitizePdfName(pkg.cvFile?.fileName ?? ""),
   };
 }
 
 const withFile = (userId: string, id: string) =>
   prisma.applicationPackage.findFirst({
     where: { id, userId },
-    include: { cvFile: { select: { filePath: true } } },
+    include: { cvFile: { select: { filePath: true, fileName: true } } },
   });
 
 // Job -> applied, same update as markPackageAppliedManually (SPEC §6.4 step 6).
@@ -161,7 +169,7 @@ export async function sendApplicationPackage(
     }
     content = await checkContent(userId, fresh);
     const attachment = {
-      fileName: path.basename(content.filePath),
+      fileName: content.fileName,
       content: await fs.readFile(content.filePath),
     };
     raw = encodeRaw(

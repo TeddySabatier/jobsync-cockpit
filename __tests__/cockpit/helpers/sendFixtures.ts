@@ -84,7 +84,8 @@ export async function seedSend(prisma: PrismaClient, uploadsDir: string) {
     const filePath = path.join(dir, `${crypto.randomUUID()}.pdf`);
     fs.writeFileSync(filePath, pdfBytes);
     const row = await prisma.file.create({
-      data: { fileName: "cv.pdf", filePath, fileType: "application/pdf" },
+      // Unsanitized on purpose: the send path must sanitize the display name.
+      data: { fileName: "Jane Doe CV.pdf", filePath, fileType: "application/pdf" },
     });
     return row.id;
   };

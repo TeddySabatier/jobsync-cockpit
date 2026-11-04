@@ -107,6 +107,12 @@ describe("sendApplicationPackage: success (AC-25)", () => {
     expect(mime).toContain("To: jobs@example.com\r\n");
     expect(mime).toMatch(/Subject: =\?UTF-8\?B\?/); // en dash is non-ASCII
     expect(mime).toContain(pdfBytes.toString("base64").slice(0, 60));
+    // The recipient sees the sanitized display name, never the generated uuid.
+    const file = await prisma.file.findUniqueOrThrow({ where: { id: pkg.cvFileId as string } });
+    const uuidName = path.basename(file.filePath);
+    expect(mime).toContain('Content-Type: application/pdf; name="Jane_Doe_CV.pdf"');
+    expect(mime).toContain('filename="Jane_Doe_CV.pdf"');
+    expect(mime).not.toContain(uuidName);
     expect(mime).toContain(
       Buffer.from("Hello,\r\nI am Jane Doe.\r\nBODY-SECRET-TEXT").toString("base64"),
     );
