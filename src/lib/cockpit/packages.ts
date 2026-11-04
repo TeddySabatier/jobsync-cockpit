@@ -142,6 +142,7 @@ async function submitInTransaction(
   const open = await tx.applicationPackage.findMany({
     where: {
       jobId: job.id,
+      userId,
       status: { in: ["pending", "approved", "changes_requested"] },
       sendStartedAt: null,
     },
@@ -156,13 +157,13 @@ async function submitInTransaction(
     .map((p) => p.id);
   if (plainIds.length) {
     await tx.applicationPackage.updateMany({
-      where: { id: { in: plainIds }, sendStartedAt: null },
+      where: { id: { in: plainIds }, userId, sendStartedAt: null },
       data: { status: "superseded" },
     });
   }
   if (changeIds.length) {
     await tx.applicationPackage.updateMany({
-      where: { id: { in: changeIds }, sendStartedAt: null },
+      where: { id: { in: changeIds }, userId, sendStartedAt: null },
       data: { status: "superseded", changeRequestHandledAt: now },
     });
   }
