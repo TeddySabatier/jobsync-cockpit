@@ -109,12 +109,37 @@ describe("MCP import graph (AC-35)", () => {
     expect(violations(entries, SRC)).toEqual([]);
   });
 
-  it("send.ts and gmail/client.ts, when present, start with import \"server-only\"", () => {
-    for (const rel of ["lib/cockpit/send.ts", "lib/cockpit/gmail/client.ts"]) {
+  it("send.ts, mime.ts and gmail/client.ts start with import \"server-only\"", () => {
+    for (const rel of [
+      "lib/cockpit/send.ts",
+      "lib/cockpit/gmail/mime.ts",
+      "lib/cockpit/gmail/client.ts",
+    ]) {
       const file = path.join(SRC, rel);
-      if (!fs.existsSync(file)) continue; // added by a later ticket
-      expect(fs.readFileSync(file, "utf8")).toMatch(/import\s+["']server-only["']/);
+      expect(fs.existsSync(file), rel).toBe(true);
+      expect(fs.readFileSync(file, "utf8").trimStart()).toMatch(
+        /^import\s+["']server-only["']/,
+      );
     }
+  });
+
+  // AC-28: the send service has exactly one caller, the sendPackage action file.
+  it("only cockpitSend.actions.ts imports the send service or calls sendApplicationPackage", () => {
+    const importers = listFiles(SRC)
+      .filter((f) => {
+        const code = fs.readFileSync(f, "utf8");
+        return /cockpit\/send["']|\.\/send["']|sendApplicationPackage/.test(code);
+      })
+      .map((f) => path.relative(SRC, f).split(path.sep).join("/"))
+      .sort();
+    expect(importers).toEqual(["actions/cockpitSend.actions.ts", "lib/cockpit/send.ts"]);
+  });
+
+  it("only the send and Gmail settings actions import gmail/mime", () => {
+    const importers = listFiles(SRC)
+      .filter((f) => /gmail\/mime["']|\.\/gmail\/mime["']|\.\/mime["']/.test(fs.readFileSync(f, "utf8")))
+      .map((f) => path.relative(SRC, f).split(path.sep).join("/"));
+    expect(importers).toEqual(["lib/cockpit/send.ts"]);
   });
 
   describe("the walker catches violations (fixture tree)", () => {
