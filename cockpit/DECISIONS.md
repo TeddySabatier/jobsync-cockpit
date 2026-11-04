@@ -4,22 +4,22 @@ Format: id, decision, why, cost if wrong.
 
 ## D-001 GitHub issues/PRs pending; stacked branches
 - **Status: superseded by D-003** (the real issue/PR flow is used; the stacked-branch idea is kept for ordering only).
-- **Decision:** `gh` cannot act as TeddySabatier (stored token rejected: "Failed to log in"). Only the work account is valid, and rule 4 forbids it here. So no issues or PRs are created and nothing is merged. Each ticket gets its own branch `cockpit/<n>-<slug>`, pushed over the `github.com-perso` SSH alias. Branches are **stacked**: ticket N branches from ticket N-1's branch, because later tickets need earlier code. The issue and PR bodies go in `cockpit/pending-github/<n>-<slug>.md`, with the PR base noted. The reviewer verdict is written into that same file in place of a PR comment.
+- **Decision:** `gh` was not authenticated for the repo owner at the time, so no issues or PRs are created and nothing is merged. Each ticket gets its own branch `cockpit/<n>-<slug>`, pushed to the `private` remote. Branches are **stacked**: ticket N branches from ticket N-1's branch, because later tickets need earlier code. The issue and PR bodies are written to files in `cockpit/pending-github/<n>-<slug>.md`, with the PR base noted. The reviewer verdict is written into that same file in place of a PR comment. Superseded by D-003.
 - **Why:** follows the prompt's fallback ("keep working on branches ... never merge locally into the default branch").
-- **Cost if wrong:** The owner has to open the PRs in order (or retarget each to `main` after its parent merges). If he squash-merges them in order, the later PRs need a rebase. The handoff gives the exact sequence.
+- **Cost if wrong:** The owner has to open the PRs in order (or retarget each to `main` after its parent merges). If they are squash-merged them in order, the later PRs need a rebase. The handoff gives the exact sequence.
 
 ## D-002 Work in a separate worktree
-- **Decision:** work in `~/work/jobsync-cockpit` (a git worktree of the jobsync repo, branched from `private/main`), not in `C:\...\dev\jobsync`.
-- **Why:** the Windows checkout shows ~939 files modified (line endings) and may hold the owner's own work. A worktree never touches it. The Linux filesystem also makes `npm ci` and the tests much faster.
+- **Decision:** work in a separate git worktree branched from `private/main`; the primary checkout is left untouched.
+- **Why:** the primary checkout shows many files modified (line-ending noise) and may hold the owner's own work. A worktree never touches it, and it is faster for `npm ci` and the tests.
 - **Cost if wrong:** none for the code. The worktree is listed in `git worktree list` and can be removed after the push.
 
 ## D-003 `gh` is authenticated as TeddySabatier; real issue/PR flow
 - **Decision:** `gh` is now authenticated as TeddySabatier (verified with `gh api user --jq .login`). The D-001 fallback is superseded: use the real issue/PR flow via `gh ... --repo TeddySabatier/jobsync-cockpit`, after `gh auth switch --hostname github.com --user TeddySabatier`. The original prompt's "don't use gh" line is overridden by its later explicit gh instructions. No `cockpit/pending-github/` files are needed.
 - **Why:** the blocker behind D-001 (stored token rejected) is gone, and the prompt's later instructions ask for issues, PRs and reviewer comments.
-- **Cost if wrong:** if the wrong account is active, an issue or PR lands under the work account. Run `gh api user --jq .login` before each `gh` write and check it prints `TeddySabatier`.
+- **Cost if wrong:** if the wrong account is active, an issue or PR lands under the wrong account. Run `gh api user --jq .login` before each `gh` write and check it prints `TeddySabatier`.
 
 ## D-004 Security review rulings (review-security.md, SPEC v1.1)
-All 15 items accepted, with the details below. Source of authority: TAKEOVER "Rulings already made on the reviews".
+All 15 items accepted, with the details below. Source of authority: the owner's handoff rulings on the reviews (kept outside the repo).
 
 | # | Item | Ruling | SPEC |
 |---|---|---|---|
@@ -72,7 +72,7 @@ All 15 items accepted, with the details below. Source of authority: TAKEOVER "Ru
 | U9 | No guidance when Gmail is disconnected | Accept. Queue callout when Gmail is disconnected and an approved email package exists | §5.2, AC-47 |
 | U10 | Too many actions in the phone bar | Accept. One primary CTA per state, the rest in a menu sheet on mobile | §5.3, AC-48 |
 
-- **Spec choices made while applying these (not in TAKEOVER, flag if you disagree):** (a) an approved package with empty `emailTo` gets "Open job posting" as its primary CTA, since Mark applied manually moved to the overflow menu; (b) a lock older than 60 s with no outcome counts as unresolved, so a crash needs no manual DB fix; (c) the Gmail chip means "package has an `emailTo` and Gmail is not connected".
+- **Spec choices made while applying these (not in the handoff rulings, flag if you disagree):** (a) an approved package with empty `emailTo` gets "Open job posting" as its primary CTA, since Mark applied manually moved to the overflow menu; (b) a lock older than 60 s with no outcome counts as unresolved, so a crash needs no manual DB fix; (c) the Gmail chip means "package has an `emailTo` and Gmail is not connected".
 - **Cost if wrong:** UI tickets C-06, C-07 and C-10 carry a little more work. Rejected U6 may annoy a power user who wants `j` / `k` from the list.
 
 ## D-007 Next.js review rulings (review-nextjs.md, SPEC v1.1 → v2)

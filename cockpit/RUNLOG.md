@@ -9,12 +9,12 @@ Tiers available in this harness: T0/T1 = `@fast` (composer-2.5-fast), T1+ = `@me
 |---|---|
 | Previous run (`cockpit/`) | none, fresh start |
 | GitHub `main` | seeded (`3af4f70 Seed from upstream JobSync v1.1.19 (#2)`), not LICENSE-only. OK to branch |
-| `ssh -T git@github.com-perso` | greets TeddySabatier. OK |
-| `git remote -v` | `private` uses `github.com-perso`; `origin` push disabled. OK |
+| SSH access to the `private` remote | authenticates as TeddySabatier. OK |
+| `git remote -v` | `private` points to TeddySabatier/jobsync-cockpit; `origin` push disabled. OK |
 | `jobsyncdb/` ignored | `.gitignore:54:/jobsyncdb/`. OK |
-| `AUTH_SECRET` / `ENCRYPTION_KEY` | not the compose placeholders (checked in compose and the running container, values never printed). Gmail token storage allowed |
-| `gh` as TeddySabatier | **token invalid** (`Failed to log in`); only the work account is valid. See DECISIONS D-001 |
-| Local main checkout | ~939 files show as modified (line-ending noise, the owner's working copy). Work happens in a separate worktree off `private/main` so that checkout is never touched |
+| `AUTH_SECRET` / `ENCRYPTION_KEY` | not the placeholder values (checked in the deployment config, values never printed). Gmail token storage allowed |
+| `gh` as TeddySabatier | not authenticated for the repo owner at that point. See DECISIONS D-001 (superseded by D-003) |
+| Local main checkout | ~939 files show as modified (line-ending noise, the owner's own working copy). Work happens in a separate worktree off `private/main` so that checkout is never touched |
 | Workflows | `ci.yml` (PR on main/dev), `release.yml` (manual, pushes images/releases), `wiki.yml` (push to main, publishes wiki) |
 | Latest upstream migration | `20260904120000_remove_jsearch_rapidapi` |
 
@@ -32,9 +32,9 @@ Tiers available in this harness: T0/T1 = `@fast` (composer-2.5-fast), T1+ = `@me
 | 4 | P1 SME | @medium (claude-sonnet) | security review | 1 | 15 issues → `cockpit/reviews/review-security.md` |
 | 5 | P1 SME | @fast (composer-2.5-fast) | data-model review | 1 | 12 issues → `cockpit/reviews/review-data.md` |
 | 6 | P1 SME | @fast (composer-2.5-fast) | product/UX review | 1 | 10 issues → `cockpit/reviews/review-ux.md` |
-| 7 | P1 SME | @fast (composer-2.5-fast) | Next.js conventions review | 1 | still running at handover (target `/tmp/opencode/cockpit-recon/review-nextjs.md`) |
+| 7 | P1 SME | @fast (composer-2.5-fast) | Next.js conventions review | 1 | still running at handover (target `review-nextjs.md`) |
 
-**Run paused by the owner after the Phase 1 SME round. See `cockpit/TAKEOVER.md`.**
+**Run paused by the owner after the Phase 1 SME round. Handoff notes are kept outside the repo.**
 
 | # | Phase/ticket | Agent (model) | Purpose | Attempts | Result |
 |---|---|---|---|---|---|
