@@ -32,7 +32,7 @@ Tiers available in this harness: T0/T1 = `@fast` (composer-2.5-fast), T1+ = `@me
 | 4 | P1 SME | @medium (claude-sonnet) | security review | 1 | 15 issues → `cockpit/reviews/review-security.md` |
 | 5 | P1 SME | @fast (composer-2.5-fast) | data-model review | 1 | 12 issues → `cockpit/reviews/review-data.md` |
 | 6 | P1 SME | @fast (composer-2.5-fast) | product/UX review | 1 | 10 issues → `cockpit/reviews/review-ux.md` |
-| 7 | P1 SME | @fast (composer-2.5-fast) | Next.js conventions review | 1 | still running at handover (target `review-nextjs.md`) |
+| 7 | P1 SME | @fast (composer-2.5-fast) | Next.js conventions review | 1 | ended without a result (no file). Must be re-run on resume |
 
 **Run paused by the owner after the Phase 1 SME round. Handoff notes are kept outside the repo.**
 
@@ -49,3 +49,5 @@ Tiers available in this harness: T0/T1 = `@fast` (composer-2.5-fast), T1+ = `@me
 | 16 | C-09 | @medium (claude-sonnet) | Gmail OAuth connect/callback (PKCE, state cookie, id_token checks, encrypted refresh token, revoke on reconnect), `gmail/client.ts` typed Google errors, `disconnectGmail`, settings page + `GmailCard`, backup exclusion test + tests | 1 | PR opened; vitest matches baseline (see PR) |
 | 17 | C-10 | @medium (claude-sonnet) | MIME builder, send service (conditional lock, re-read, definitive vs ambiguous failures, `sendOutcome`), actions `sendPackage` / `markSendUnknownAsSent` / `releaseSendLock`, Send button + dialog, send-outcome panel, import-graph + export-allowlist updates + tests (mocked Gmail only) | 1 | PR opened; vitest matches baseline (1 pre-existing failure) |
 | 18 | C-11 | @fast (composer-2.5-fast) | `docs/cockpit.md`, `.env.example` cockpit block | 1 | PR opened; lint exit 0 |
+| 19 | Phase 4 integration | @medium (claude-sonnet) | migration on DB copy, local image `jobsync-cockpit:v0`, MCP E2E on 3738, curl/file-route checks | 1 | **PASS** — `20261104120000_cockpit_v0` clean; row counts unchanged; 3 new tables empty; image `463c02fc5c70` (~364 MB, `2297ca3`); MCP tools/list (6, no send/approve/reject/edit), submit/resubmit/idempotency/change-request flows, scope and PDF validation; unauthenticated file route **307 → /signin** (D-011); `/` **X-Frame-Options: DENY** |
+| 20 | Phase 5 handoff | @fast (composer-2.5-fast) | `HANDOFF-CLAUDE-CODE.md`, D-011, RUNLOG rows | 1 | Free models unavailable (3 tried); draft by composer-2.5-fast; reviewed by orchestrator (claude-opus) |
