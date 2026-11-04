@@ -247,7 +247,11 @@ function exec(args: string[], timeoutMs: number): Promise<ExecResult> {
     let stderr = "";
     let timedOut = false;
     let settled = false;
-    const child = spawn("opencode", args, {
+    // QA_OC_SERVER: a private `opencode serve` so engine load can't take down the shared background service
+    const server = process.env.QA_OC_SERVER;
+    const at = args[0] === "session" ? 2 : 1;
+    const full = server ? [...args.slice(0, at), "--server", server, ...args.slice(at)] : args;
+    const child = spawn("opencode", full, {
       cwd: ROOT,
       stdio: ["ignore", "pipe", "pipe"],
       detached: true, // own process group so a timeout kills opencode's children too

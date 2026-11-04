@@ -145,7 +145,7 @@ export function buildReviewPrompt(lane: string, shard: Shard, ctx: string, seed:
 }
 
 export function buildVerifyPrompt(f: Finding, code: string): string {
-  assertSendable(f.file, code);
+  assertSendable(f.file, `${code}\n${f.claim}\n${f.failureScenario}`);
   return [
     "You are a skeptical senior engineer. Another reviewer reported the issue below. Try to REFUTE it: look for guards, callers, types or framework behaviour that make the failure scenario impossible.",
     `\n## Claim (${f.severity}, lens ${f.lens})\n${f.claim}`,
