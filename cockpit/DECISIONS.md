@@ -108,3 +108,9 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 - **Ruling:** an `idempotencyKey` that matches an existing package of the same user but a **different job** is `CONFLICT` (checked in the pre-check and in the `P2002` race path). The same job still replays the existing package with `idempotent: true`.
 - **Reason:** silently returning the other job's package would make the bot believe the new job was submitted (wrong-job replay). `CONFLICT` tells the bot to pick a fresh key.
 - **Scope:** `src/lib/cockpit/packages.ts` (`submitPackage`) and its integration tests only. SPEC stays frozen; this entry is the amendment of record.
+
+## D-009 Backup finding (C-09, closes N18)
+
+- **Finding:** the backup export (`src/lib/backup/export.ts`) is not a generic table dump. It reads only the models listed in the `INSERT_ORDER` / `MODEL_SPECS` allow-list (`src/lib/backup/ordering.ts`), and `BackupDataSchema` parses the result. `GmailAccount`, `SentEmail` and `ApplicationPackage` are not in that list, so none of them is exported. `backupRoundTrip.spec.ts` is unaffected.
+- **Ruling:** no change to the backup code (the "core edit only if it dumps tables generically" condition is false). AC-39 is covered by `__tests__/cockpit/backupExclusion.spec.ts` (a seeded `GmailAccount` appears nowhere in `collectBackupData` or the zip, and `GmailAccount` is not in the model list). Packages in backups stay a V1 hook (SPEC §11).
+- **Risk if wrong:** if someone adds `GmailAccount` to `ordering.ts`, that test fails.
