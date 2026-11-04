@@ -31,6 +31,8 @@ import { handleFindJob } from "@/lib/mcp/tools/findJob";
 import { handleUpdateJob } from "@/lib/mcp/tools/updateJob";
 import { handleAddJobsBatch } from "@/lib/mcp/tools/addJobsBatch";
 import { handleSaveMatchResultsBatch } from "@/lib/mcp/tools/saveMatchResultsBatch";
+import { isCockpitEnabled } from "@/lib/cockpit/config";
+import { registerCockpitTools } from "@/lib/mcp/tools/cockpit";
 
 function isMcpEnabled(): boolean {
   const env = process.env.MCP_ENABLED;
@@ -264,6 +266,11 @@ async function handler(req: Request): Promise<Response> {
       return handleSaveResumeReview(parsed.data, userId, tokenName);
     },
   );
+
+  // Read per request: the server is built per request (cockpit/SPEC.md §3).
+  if (isCockpitEnabled()) {
+    registerCockpitTools(server, { userId, tokenName, scopes: auth.scopes });
+  }
 
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless mode
