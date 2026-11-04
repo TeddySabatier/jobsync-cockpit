@@ -9,6 +9,19 @@ import { getAllJobTitles } from "@/actions/jobtitle.actions";
 import { getAllJobLocations } from "@/actions/jobLocation.actions";
 import { getAllTags } from "@/actions/tag.actions";
 import { notFound } from "next/navigation";
+import { isCockpitEnabled } from "@/lib/cockpit/config";
+import { getCurrentUser } from "@/utils/user.utils";
+import { listJobVersions } from "@/lib/cockpit/packages";
+
+// Active package of the job (highest non-superseded version), only with the
+// cockpit flag on and a session; null otherwise.
+async function getActivePackageCard(jobId: string) {
+  if (!isCockpitEnabled()) return null;
+  const user = await getCurrentUser();
+  if (!user) return null;
+  const versions = await listJobVersions(user.id, jobId);
+  return versions.find((v) => v.status !== "superseded") ?? null;
+}
 
 async function JobDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -27,6 +40,8 @@ async function JobDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   // otherwise crash JobDetails on the first job.* read.
   if (!job) notFound();
 
+  const cockpitPackage = await getActivePackageCard(job.id);
+
   return (
     <div className="col-span-3">
       <JobDetails
@@ -37,6 +52,7 @@ async function JobDetailsPage({ params }: { params: Promise<{ id: string }> }) {
         locations={locations}
         sources={sources}
         tags={tags ?? []}
+        cockpitPackage={cockpitPackage}
       />
     </div>
   );

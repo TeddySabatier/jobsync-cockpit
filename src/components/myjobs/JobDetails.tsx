@@ -35,6 +35,7 @@ import {
   Trash,
   Trash2,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAgentChat } from "@/components/agent/AgentChatProvider";
 import {
@@ -79,6 +80,9 @@ type JobDetailsProps = {
   locations: JobLocation[];
   sources: JobSource[];
   tags: Tag[];
+  // Cockpit: active package of this job. The page passes it only when
+  // COCKPIT_ENABLED is on, so the card is absent otherwise.
+  cockpitPackage?: { id: string; version: number; status: string } | null;
 };
 
 function JobDetails({
@@ -89,6 +93,7 @@ function JobDetails({
   locations,
   sources,
   tags,
+  cockpitPackage = null,
 }: JobDetailsProps) {
   const {
     open: openChat,
@@ -376,6 +381,18 @@ function JobDetails({
                   {tag.label}
                 </Badge>
               ))}
+            </div>
+          )}
+          {cockpitPackage && (
+            <div className="mx-4 my-3 flex items-center justify-between gap-2 rounded-lg border p-3 text-sm">
+              <span className="font-medium">Application package</span>
+              <Link
+                href={`/dashboard/review/${cockpitPackage.id}`}
+                className="underline"
+                data-testid="job-details-package-link"
+              >
+                {`v${cockpitPackage.version} · ${cockpitPackage.status}`}
+              </Link>
             </div>
           )}
           <div className="my-4 ml-4">
