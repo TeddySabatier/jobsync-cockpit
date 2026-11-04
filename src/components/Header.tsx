@@ -13,7 +13,11 @@ import { SIDEBAR_LINKS } from "@/lib/constants";
 import SidebarToggle from "./SidebarToggle";
 import { AgentChatTrigger } from "./AgentChatTrigger";
 
-async function Header() {
+async function Header({
+  cockpitEnabled = false,
+}: {
+  cockpitEnabled?: boolean;
+}) {
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
       <Sheet>
@@ -38,6 +42,9 @@ async function Header() {
             {SIDEBAR_LINKS.map((item) => {
               // Only show dev-only items in development mode
               if (item.devOnly && process.env.NODE_ENV !== "development") {
+                return null;
+              }
+              if (item.cockpitOnly && !cockpitEnabled) {
                 return null;
               }
               return (

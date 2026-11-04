@@ -14,9 +14,11 @@ import { CurrentUser } from "@/models/user.model";
 interface SidebarProps {
   user: CurrentUser | null;
   signOutAction: () => void;
+  // Read from COCKPIT_ENABLED by the server layout: a client component cannot.
+  cockpitEnabled?: boolean;
 }
 
-function Sidebar({ user, signOutAction }: SidebarProps) {
+function Sidebar({ user, signOutAction, cockpitEnabled = false }: SidebarProps) {
   const path = usePathname();
   const { expanded } = useSidebar();
   const isOnDashboard = path === "/dashboard";
@@ -60,6 +62,9 @@ function Sidebar({ user, signOutAction }: SidebarProps) {
           {SIDEBAR_LINKS.map((item) => {
             // Only show dev-only items in development mode
             if (item.devOnly && process.env.NODE_ENV !== "development") {
+              return null;
+            }
+            if (item.cockpitOnly && !cockpitEnabled) {
               return null;
             }
             return (

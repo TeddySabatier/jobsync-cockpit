@@ -13,6 +13,7 @@ import { APP_CONSTANTS } from "@/lib/constants";
 import { getCurrentUser } from "@/utils/user.utils";
 import StaleSessionSignOut from "@/components/StaleSessionSignOut";
 import { signOut } from "@/auth";
+import { isCockpitEnabled } from "@/lib/cockpit/config";
 
 export default async function RootLayout({
   children,
@@ -27,6 +28,7 @@ export default async function RootLayout({
   // is merged against an empty transcript and then persisted.
   const conversation = await getChatConversation();
   const user = await getCurrentUser();
+  const cockpitEnabled = isCockpitEnabled();
 
   const signOutAction = async () => {
     "use server";
@@ -46,9 +48,13 @@ export default async function RootLayout({
         <RightRailProvider>
           <AgentChatProvider initialMessages={conversation.data ?? []}>
             <div className="flex min-h-screen w-full flex-col bg-muted/40">
-              <Sidebar user={user} signOutAction={signOutAction} />
+              <Sidebar
+                user={user}
+                signOutAction={signOutAction}
+                cockpitEnabled={cockpitEnabled}
+              />
               <SidebarInset>
-                <Header />
+                <Header cockpitEnabled={cockpitEnabled} />
                 <GlobalActivityBanner />
                 {/* Container, not viewport, queries: the docked chat panel
                     shrinks this box without changing the viewport width. */}

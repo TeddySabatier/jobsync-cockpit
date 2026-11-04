@@ -8,6 +8,7 @@ import {
   Wrench,
   Zap,
   BookOpen,
+  Inbox,
 } from "lucide-react";
 
 export const APP_CONSTANTS = {
@@ -308,6 +309,12 @@ export const SIDEBAR_LINKS = [
     icon: BriefcaseBusiness,
     route: "/dashboard/myjobs",
     label: "Jobs",
+  },
+  {
+    icon: Inbox,
+    route: "/dashboard/review",
+    label: "Review",
+    cockpitOnly: true,
   },
   {
     icon: Zap,
