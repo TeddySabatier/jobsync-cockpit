@@ -331,7 +331,7 @@ describe("action bar: one primary CTA per state (AC-48)", () => {
       ok(detailFixture({ status: "approved", cvPdfStale: true })),
     );
     await renderPage();
-    expect(within(bar()).getByText(/Ask the bot to re-render/)).toBeInTheDocument();
+    expect(within(bar()).getByText(/The CV PDF is out of date/)).toBeInTheDocument();
     expect(names()).not.toContain("Approve");
   });
 
