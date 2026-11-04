@@ -16,7 +16,11 @@ const ALLOWED: Record<string, string[]> = {
     "getAdjacentPackageIds",
   ],
   "cockpitGmail.actions.ts": ["getGmailSettings", "disconnectGmail"],
-  // C-10 adds its own entry (cockpitSend.actions.ts).
+  "cockpitSend.actions.ts": [
+    "sendPackage",
+    "markSendUnknownAsSent",
+    "releaseSendLock",
+  ],
 };
 
 const dir = path.join(process.cwd(), "src", "actions");
@@ -48,10 +52,14 @@ describe("cockpit*.actions.ts exports (AC-44)", () => {
     expect([...names].sort()).toEqual([...ALLOWED[file]].sort());
     // No re-exports or export lists hiding non-functions.
     expect(src).not.toMatch(/^export\s*(\{|\*|default)/m);
-    // No send module and no handleError anywhere (AC-49); only the Gmail
-    // settings actions may import cockpit/gmail (revoke on disconnect).
-    expect(src).not.toMatch(/cockpit\/send|handleError/);
-    if (file !== "cockpitGmail.actions.ts") {
+    // No handleError anywhere (AC-49). Only the send actions may import the
+    // send module; only they and the Gmail settings actions may import
+    // cockpit/gmail (client: revoke on disconnect, send).
+    expect(src).not.toMatch(/handleError/);
+    if (file !== "cockpitSend.actions.ts") {
+      expect(src).not.toMatch(/cockpit\/send/);
+    }
+    if (file !== "cockpitGmail.actions.ts" && file !== "cockpitSend.actions.ts") {
       expect(src).not.toMatch(/cockpit\/gmail/);
     }
   });

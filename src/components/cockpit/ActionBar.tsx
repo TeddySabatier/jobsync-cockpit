@@ -48,6 +48,8 @@ import {
 } from "@/components/ui/sheet";
 import EditRerender from "./EditRerender";
 import type { PackageDetail } from "./Panels";
+import SendDialog from "./SendDialog";
+import SendOutcomePanel from "./SendOutcomePanel";
 
 type DialogKind = "reject" | "changes" | "applied" | null;
 
@@ -114,8 +116,8 @@ function TextDialog({
 }
 
 // Sticky action bar (SPEC §5.3). Hidden entirely on non-active versions by the
-// caller. One primary CTA per state; the rest are secondary. The Send button,
-// its dialog and the send-outcome panel are mounted here by C-10.
+// caller. One primary CTA per state; the rest are secondary. Hosts the Send
+// button, its dialog and (when locked) the send-outcome panel.
 export default function ActionBar({
   detail,
   onEdit,
@@ -127,6 +129,7 @@ export default function ActionBar({
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
 
   const locked = !!pkg.sendStartedAt;
   const open = pkg.status === "pending" || pkg.status === "approved";
@@ -139,11 +142,13 @@ export default function ActionBar({
     );
   }
   if (!open) return null;
-  if (locked) {
+  if (locked && pkg.sendStartedAt) {
     return (
-      <p role="status" className="py-3 text-sm text-muted-foreground">
-        A send is in progress or its result is unknown. This package is locked.
-      </p>
+      <SendOutcomePanel
+        packageId={pkg.id}
+        sendStartedAt={pkg.sendStartedAt}
+        sendOutcome={pkg.sendOutcome}
+      />
     );
   }
 
@@ -198,23 +203,28 @@ export default function ActionBar({
       );
     }
   } else {
-    // C-10 mounts the Send button here when the package is send-ready.
     const blocked = sendBlockedReason(detail);
-    reason = blocked ? (
-      <p className="text-sm text-muted-foreground">
-        {blocked}
-        {!detail.gmail && (
-          <>
-            {" "}
-            <Link href="/dashboard/review/settings" className="underline">
-              Open settings
-            </Link>
-          </>
-        )}
-      </p>
-    ) : (
-      <p className="text-sm text-muted-foreground">Ready to send.</p>
-    );
+    if (blocked) {
+      reason = (
+        <p className="text-sm text-muted-foreground">
+          {blocked}
+          {!detail.gmail && (
+            <>
+              {" "}
+              <Link href="/dashboard/review/settings" className="underline">
+                Open settings
+              </Link>
+            </>
+          )}
+        </p>
+      );
+    } else {
+      primary = (
+        <Button className="w-full @md/main:w-auto" disabled={busy} onClick={() => setSendOpen(true)}>
+          Send
+        </Button>
+      );
+    }
   }
 
   const secondary = (
@@ -300,6 +310,7 @@ export default function ActionBar({
         </div>
       </div>
 
+      <SendDialog detail={detail} open={sendOpen} onOpenChange={setSendOpen} />
       <TextDialog
         open={dialog === "reject"}
         onOpenChange={(o) => !o && setDialog(null)}

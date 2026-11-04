@@ -18,6 +18,12 @@ vi.mock("@/actions/cockpit.actions", () => ({
   markPackageAppliedManually,
 }));
 
+vi.mock("@/actions/cockpitSend.actions", () => ({
+  sendPackage: vi.fn(),
+  markSendUnknownAsSent: vi.fn(),
+  releaseSendLock: vi.fn(),
+}));
+
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
@@ -314,15 +320,16 @@ describe("action bar: one primary CTA per state (AC-48)", () => {
     expect(approvePackage).toHaveBeenCalledWith("p2");
   });
 
-  it("approved and send-ready: no primary button, and no Send button in this ticket", async () => {
+  it("approved and send-ready: Send is the primary CTA", async () => {
     getPackageDetail.mockResolvedValue(ok(detailFixture({ status: "approved" })));
     await renderPage();
-    expect(within(bar()).getByText("Ready to send.")).toBeInTheDocument();
+    expect(
+      within(bar()).getByRole("button", { name: "Send" }),
+    ).toBeInTheDocument();
     expect(names()).toEqual(
-      expect.arrayContaining(["Unapprove", "Reject", "Request changes"]),
+      expect.arrayContaining(["Send", "Unapprove", "Reject", "Request changes"]),
     );
     expect(names()).not.toContain("Approve");
-    expect(names()).not.toContain("Send");
     expect(screen.queryByRole("link", { name: "Open job posting" })).toBeNull();
   });
 
@@ -358,13 +365,13 @@ describe("action bar: one primary CTA per state (AC-48)", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  it("locked package: no actions, only a status line", async () => {
+  it("freshly locked package: no actions, only a 'Sending…' status line", async () => {
     getPackageDetail.mockResolvedValue(
       ok(detailFixture({ status: "approved", sendStartedAt: new Date() })),
     );
     await renderPage();
     expect(screen.queryByRole("region", { name: "Actions" })).toBeNull();
-    expect(screen.getByRole("status")).toHaveTextContent(/locked/);
+    expect(screen.getByRole("status")).toHaveTextContent(/Sending….*locked/);
     expect(screen.queryByRole("button", { name: /approve|reject/i })).toBeNull();
   });
 

@@ -1,7 +1,6 @@
 "use server";
 
 import fs from "fs/promises";
-import path from "path";
 import { revalidatePath } from "next/cache";
 import prisma from "@/lib/db";
 import { requireUser } from "./shared";
@@ -11,6 +10,7 @@ import {
   toActionResult,
   type CockpitResult,
 } from "@/lib/cockpit/errors";
+import { sanitizePdfName } from "@/lib/cockpit/attachments";
 import { resolveCockpitFile } from "@/lib/cockpit/files";
 import {
   QUEUE_TAB_STATUSES,
@@ -139,7 +139,7 @@ export async function getPackageDetail(id: string) {
       if (real) {
         try {
           attachment = {
-            fileName: path.basename(real),
+            fileName: sanitizePdfName(cvFile.fileName),
             size: (await fs.stat(real)).size,
           };
         } catch {

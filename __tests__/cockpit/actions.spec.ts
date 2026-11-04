@@ -209,7 +209,7 @@ describe("getPackageDetail", () => {
       id: "p2",
       jobId: "j1",
       cvJson: null,
-      cvFile: { id: "f1", fileName: "stored-name.pdf", filePath },
+      cvFile: { id: "f1", fileName: "Jane Doe CV.pdf", filePath },
       job: { id: "j1" },
     });
     m(svc.listJobVersions).mockResolvedValue([
@@ -229,7 +229,8 @@ describe("getPackageDetail", () => {
       data: {
         activePackageId: "p3",
         isActive: false,
-        attachment: { fileName: "abc.pdf", size: 14 },
+        // Display name (sanitized), not the generated on-disk name.
+        attachment: { fileName: "Jane_Doe_CV.pdf", size: 14 },
         gmail: { email: "you@example.com", scopes: "gmail.send" },
       },
     });
