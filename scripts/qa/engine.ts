@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 import {
-  ask, askJson, benchModel, flushBudget, getLast429, killAll, laneBlockedUntil,
+  ask, askJson, benchModel, unbenchAll, flushBudget, getLast429, killAll, laneBlockedUntil,
   modelBenchedUntil, setConcurrency, spentTokens,
 } from "./ask.ts";
 import { ROOT, TMP, headFile, splitLines } from "./git.ts";
@@ -314,8 +314,10 @@ async function runReview(job: Job): Promise<void> {
   const model = pickReviewer();
   if (!model) {
     st.failedJobs++;
-    log("no healthy reviewer model, sleeping");
-    await sleep(5000);
+    // whole pool benched usually means the OpenCode service blipped, not that every model died
+    log("no healthy reviewer model, sleeping 60s then unbenching all");
+    await sleep(60_000);
+    unbenchAll();
     return;
   }
   let prompt: string;

@@ -117,6 +117,10 @@ export const modelBenchedUntil = (model: string): number => modelUntil.get(model
 export function benchModel(model: string, ms: number): void {
   modelUntil.set(model, Date.now() + ms);
 }
+export function unbenchAll(): void {
+  modelUntil.clear();
+  modelFails.clear();
+}
 
 function recordLane(lane: string, ok: boolean): void {
   const now = Date.now();
