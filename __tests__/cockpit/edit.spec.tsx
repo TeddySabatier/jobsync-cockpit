@@ -3,6 +3,11 @@ import userEvent from "@testing-library/user-event";
 
 const updatePackageContent = vi.hoisted(() => vi.fn());
 const requestPackageChanges = vi.hoisted(() => vi.fn());
+vi.mock("@/actions/cockpitSend.actions", () => ({
+  sendPackage: vi.fn(),
+  markSendUnknownAsSent: vi.fn(),
+  releaseSendLock: vi.fn(),
+}));
 vi.mock("@/actions/cockpit.actions", () => ({
   updatePackageContent,
   requestPackageChanges,
