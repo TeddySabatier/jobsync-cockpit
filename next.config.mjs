@@ -11,6 +11,12 @@ const nextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
         ],
       },
+      // Appended after the global rule: Next applies the last matching entry
+      // per header key, so the PDF route may be framed by our own pages.
+      {
+        source: "/api/cockpit/files/:packageId",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
     ];
   },
 };
