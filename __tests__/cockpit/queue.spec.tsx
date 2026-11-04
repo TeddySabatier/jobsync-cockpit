@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import fs from "fs";
 import path from "path";
 
@@ -111,13 +111,19 @@ describe("review queue page", () => {
     expect(screen.getByText("Link apply")).toBeInTheDocument();
   });
 
-  it("shows an empty state per tab and the keys hint", async () => {
+  it("shows an empty state per tab and the keys hint only on To do", async () => {
     getReviewQueue.mockResolvedValue(ok([]));
-    await renderPage("changes");
+    const { unmount } = await renderPage("changes");
     expect(screen.getByText(/No packages are waiting/)).toBeInTheDocument();
+    expect(screen.queryByText("j / k: next / previous in To do")).toBeNull();
+    unmount();
+    await renderPage("todo");
     expect(
       screen.getByText("j / k: next / previous in To do"),
     ).toBeInTheDocument();
+    cleanup();
+    await renderPage("sent");
+    expect(screen.queryByText("j / k: next / previous in To do")).toBeNull();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 

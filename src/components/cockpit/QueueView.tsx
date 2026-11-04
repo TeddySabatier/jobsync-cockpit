@@ -70,9 +70,11 @@ export default function QueueView({
         </ul>
       )}
 
-      <p className="text-xs text-muted-foreground">
-        j / k: next / previous in To do
-      </p>
+      {tab === "todo" && (
+        <p className="text-xs text-muted-foreground">
+          j / k: next / previous in To do
+        </p>
+      )}
     </div>
   );
 }
