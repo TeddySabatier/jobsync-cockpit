@@ -121,3 +121,12 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 - **Disconnect still revokes** (it ends the whole grant, which is the intent).
 - **Rejected post-exchange tokens** (bad `id_token`, wrong address, missing scope) are revoked only when no `GmailAccount` is stored for the user; with a stored connection the new token may share its grant and revoking it would kill the working connection.
 - **Scope:** `src/app/api/cockpit/gmail/callback/route.ts` and `__tests__/cockpit/gmailOauth.spec.ts`. SPEC §6.2 stays frozen; this entry is the amendment of record.
+
+## D-011 Phase 4 behaviour vs SPEC wording (integration checks)
+
+| # | Topic | Ruling | SPEC / AC |
+|---|---|---|---|
+| (a) | Unauthenticated `/api/cockpit/files/**` | **Accept.** No session → the middleware's **307 redirect to `/signin`**, not the **401** in SPEC §4 / AC-16. Access is still denied and no file data is returned. Changing global middleware is a core edit outside V0 scope. | §4, AC-16, D-007 N13 |
+| (b) | Send preconditions and lock errors | **Accept.** Sending when the package is already **locked**, **not approved**, **stale** (`expectedUpdatedAt` mismatch), or **not the active version** returns **`CONFLICT`** (SPEC §6.4 says `INVALID_STATE` for the lock case). One code tells the UI to reload. **`sendStartedAt` stays set** after a sent / manual-sent package (`sent` is terminal). | §6.4, AC-25, AC-33 |
+
+- **Cost if wrong:** handoff and E2E docs must describe 307 vs 401 for the file route; UI must handle `CONFLICT` on send reload paths consistently.
