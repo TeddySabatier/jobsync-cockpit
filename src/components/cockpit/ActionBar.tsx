@@ -46,6 +46,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import EditRerender from "./EditRerender";
 import type { PackageDetail } from "./Panels";
 
 type DialogKind = "reject" | "changes" | "applied" | null;
@@ -115,7 +116,13 @@ function TextDialog({
 // Sticky action bar (SPEC §5.3). Hidden entirely on non-active versions by the
 // caller. One primary CTA per state; the rest are secondary. The Send button,
 // its dialog and the send-outcome panel are mounted here by C-10.
-export default function ActionBar({ detail }: { detail: PackageDetail }) {
+export default function ActionBar({
+  detail,
+  onEdit,
+}: {
+  detail: PackageDetail;
+  onEdit?: () => void;
+}) {
   const pkg = detail.package;
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -221,6 +228,11 @@ export default function ActionBar({ detail }: { detail: PackageDetail }) {
           Unapprove
         </Button>
       )}
+      {onEdit && (
+        <Button variant="outline" disabled={busy} onClick={onEdit}>
+          Edit
+        </Button>
+      )}
       <Button variant="outline" disabled={busy} onClick={() => pickDialog("reject")}>
         Reject
       </Button>
@@ -237,6 +249,11 @@ export default function ActionBar({ detail }: { detail: PackageDetail }) {
       className="sticky bottom-0 z-10 flex flex-col gap-2 border-t bg-background py-3"
     >
       {reason}
+      {pkg.cvPdfStale && (
+        <div>
+          <EditRerender packageId={pkg.id} />
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {primary}
         {/* Wide containers: secondary buttons inline, Mark applied in the overflow menu. */}

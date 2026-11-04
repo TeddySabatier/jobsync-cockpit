@@ -1,11 +1,13 @@
 "use client";
 import Link from "next/link";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { formatUrl } from "@/lib/utils";
 import ActionBar from "./ActionBar";
+import EditForm, { canEditPackage } from "./EditForm";
 import {
   CvPanel,
   EmailPanel,
@@ -36,9 +38,12 @@ export default function DetailView({
   adjacent: Adjacent;
 }) {
   const router = useRouter();
-  useQueueKeys(adjacent);
+  const [editing, setEditing] = useState(false);
+  // j / k must not navigate away from unsaved edits.
+  useQueueKeys(editing ? { previousId: null, nextId: null } : adjacent);
 
   const { package: pkg, versions, activePackageId, isActive } = detail;
+  const canEdit = canEditPackage(detail);
   const activeVersion = versions.find((v) => v.id === activePackageId);
 
   return (
@@ -81,6 +86,7 @@ export default function DetailView({
             <Badge variant="secondary">
               {STATUS_LABELS[pkg.status] ?? pkg.status}
             </Badge>
+            {pkg.cvPdfStale && <Badge variant="outline">PDF stale</Badge>}
             <select
               aria-label="Version"
               value={pkg.id}
@@ -121,17 +127,28 @@ export default function DetailView({
 
       <PreviousReviewInfo pkg={pkg} />
 
-      <div className="grid grid-cols-1 gap-4 @3xl/main:grid-cols-2">
-        <PostingPanel pkg={pkg} />
-        <CvPanel detail={detail} />
-        <FitPanel pkg={pkg} />
-        <EmailPanel detail={detail} />
-        <div className="@3xl/main:col-span-2">
-          <LetterPanel pkg={pkg} />
-        </div>
-      </div>
+      {editing && canEdit ? (
+        <EditForm detail={detail} onClose={() => setEditing(false)} />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-4 @3xl/main:grid-cols-2">
+            <PostingPanel pkg={pkg} />
+            <CvPanel detail={detail} />
+            <FitPanel pkg={pkg} />
+            <EmailPanel detail={detail} />
+            <div className="@3xl/main:col-span-2">
+              <LetterPanel pkg={pkg} />
+            </div>
+          </div>
 
-      {isActive && <ActionBar detail={detail} />}
+          {isActive && (
+            <ActionBar
+              detail={detail}
+              onEdit={canEdit ? () => setEditing(true) : undefined}
+            />
+          )}
+        </>
+      )}
     </div>
   );
 }
