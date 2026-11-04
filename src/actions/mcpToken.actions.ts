@@ -5,6 +5,7 @@ import { requireUser } from "./shared";
 import { handleError } from "@/lib/utils";
 import { generateToken } from "@/lib/mcp/tokens";
 import { APP_CONSTANTS } from "@/lib/constants";
+import { COCKPIT_SCOPES } from "@/lib/cockpit/config";
 
 export interface PublicTokenMeta {
   id: string;
@@ -43,7 +44,12 @@ export async function createMcpToken(input: {
         name: input.name.trim(),
         tokenHash: hash,
         tokenPrefix: prefix,
-        scopes: JSON.stringify(["jobs:write", "questions:write", "resume:write"]),
+        scopes: JSON.stringify([
+          "jobs:write",
+          "questions:write",
+          "resume:write",
+          ...COCKPIT_SCOPES,
+        ]),
         expiresAt,
       },
     });

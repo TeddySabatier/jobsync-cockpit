@@ -41,3 +41,4 @@ Tiers available in this harness: T0/T1 = `@fast` (composer-2.5-fast), T1+ = `@me
 | 8 | C-01 | @medium (claude-sonnet) | fork hygiene: workflows, jsdom, docs scrub | 1 | PR opened; vitest matches baseline (1 pre-existing failure) |
 | 9 | C-02 | @medium (claude-sonnet) | Prisma models, migration `20261104120000_cockpit_v0`, `errors.ts`, temp-SQLite harness | 1 | PR opened; vitest matches baseline (1 pre-existing failure) |
 | 10 | C-03 | @medium (claude-sonnet) | domain service: config, schemas, files (`resolveCockpitFile`), packages (submit, lifecycle, queries) + unit/integration tests | 1 | PR opened; vitest matches baseline (1 pre-existing failure) |
+| 11 | C-04 | @medium (claude-sonnet) | six cockpit MCP tools (`registerCockpitTools`), `attach_file` storage + quota, `checkMcpRateLimit` buckets, default token scopes + tests | 1 | PR opened; vitest matches baseline (1 pre-existing failure) |

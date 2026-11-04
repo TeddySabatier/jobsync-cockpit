@@ -11,12 +11,26 @@ const MAX = APP_CONSTANTS.MCP_RATE_LIMIT_MAX;
 const WINDOW = APP_CONSTANTS.MCP_RATE_LIMIT_WINDOW_MS;
 const CLEANUP_THRESHOLD = 500;
 
-export function checkMcpRateLimit(userId: string): {
+export interface McpRateLimitOptions {
+  bucket?: string;
+  max?: number;
+  windowMs?: number;
+}
+
+// Without `opts` the key, limit and window are unchanged (existing callers).
+// With `opts.bucket` the key is `<userId>:<bucket>`, an independent counter.
+export function checkMcpRateLimit(
+  userId: string,
+  opts?: McpRateLimitOptions,
+): {
   allowed: boolean;
   remaining: number;
   resetIn: number;
 } {
   const now = Date.now();
+  const key = opts?.bucket ? `${userId}:${opts.bucket}` : userId;
+  const max = opts?.max ?? MAX;
+  const windowMs = opts?.windowMs ?? WINDOW;
 
   if (store.size > CLEANUP_THRESHOLD) {
     for (const [key, entry] of store) {
@@ -24,17 +38,17 @@ export function checkMcpRateLimit(userId: string): {
     }
   }
 
-  const entry = store.get(userId);
+  const entry = store.get(key);
 
   if (!entry || now > entry.resetTime) {
-    store.set(userId, { count: 1, resetTime: now + WINDOW });
-    return { allowed: true, remaining: MAX - 1, resetIn: WINDOW };
+    store.set(key, { count: 1, resetTime: now + windowMs });
+    return { allowed: true, remaining: max - 1, resetIn: windowMs };
   }
 
-  if (entry.count >= MAX) {
+  if (entry.count >= max) {
     return { allowed: false, remaining: 0, resetIn: entry.resetTime - now };
   }
 
   entry.count++;
-  return { allowed: true, remaining: MAX - entry.count, resetIn: entry.resetTime - now };
+  return { allowed: true, remaining: max - entry.count, resetIn: entry.resetTime - now };
 }
