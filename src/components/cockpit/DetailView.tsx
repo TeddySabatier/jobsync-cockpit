@@ -1,0 +1,137 @@
+"use client";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { TriangleAlert } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { formatUrl } from "@/lib/utils";
+import ActionBar from "./ActionBar";
+import {
+  CvPanel,
+  EmailPanel,
+  FitPanel,
+  LetterPanel,
+  PostingPanel,
+  PreviousReviewInfo,
+  type PackageDetail,
+} from "./Panels";
+import { useQueueKeys } from "./useQueueKeys";
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Pending",
+  approved: "Approved",
+  changes_requested: "Changes requested",
+  sent: "Sent",
+  rejected: "Rejected",
+  superseded: "Superseded",
+};
+
+export type Adjacent = { previousId: string | null; nextId: string | null };
+
+export default function DetailView({
+  detail,
+  adjacent,
+}: {
+  detail: PackageDetail;
+  adjacent: Adjacent;
+}) {
+  const router = useRouter();
+  useQueueKeys(adjacent);
+
+  const { package: pkg, versions, activePackageId, isActive } = detail;
+  const activeVersion = versions.find((v) => v.id === activePackageId);
+
+  return (
+    <div className="flex flex-col gap-4 py-4">
+      <header className="flex flex-col gap-2">
+        <Link
+          href="/dashboard/review"
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
+          ← Review queue
+        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold">
+              {pkg.job.Company.label}
+            </h1>
+            <p className="truncate text-sm text-muted-foreground">
+              {pkg.job.JobTitle.label}
+              {pkg.job.jobUrl && (
+                <>
+                  {" · "}
+                  <a
+                    href={formatUrl(pkg.job.jobUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline"
+                  >
+                    Job posting
+                  </a>
+                </>
+              )}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {pkg.fitGrade && (
+              <Badge variant="outline" aria-label={`Fit grade ${pkg.fitGrade}`}>
+                {pkg.fitGrade}
+              </Badge>
+            )}
+            <Badge variant="secondary">
+              {STATUS_LABELS[pkg.status] ?? pkg.status}
+            </Badge>
+            <select
+              aria-label="Version"
+              value={pkg.id}
+              onChange={(e) => router.push(`/dashboard/review/${e.target.value}`)}
+              className="h-9 rounded-md border bg-background px-2 text-sm"
+            >
+              {versions.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {`v${v.version} · ${v.status}`}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </header>
+
+      {!isActive && (
+        <Alert variant="destructive" data-testid="version-banner">
+          <TriangleAlert />
+          <AlertDescription className="font-medium">
+            {`Viewing v${pkg.version} — ${pkg.status}. `}
+            {activeVersion && activePackageId ? (
+              <>
+                <Link
+                  href={`/dashboard/review/${activePackageId}`}
+                  className="underline"
+                >
+                  {`Open v${activeVersion.version}`}
+                </Link>
+                {" to act."}
+              </>
+            ) : (
+              "There is no active version."
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <PreviousReviewInfo pkg={pkg} />
+
+      <div className="grid grid-cols-1 gap-4 @3xl/main:grid-cols-2">
+        <PostingPanel pkg={pkg} />
+        <CvPanel detail={detail} />
+        <FitPanel pkg={pkg} />
+        <EmailPanel detail={detail} />
+        <div className="@3xl/main:col-span-2">
+          <LetterPanel pkg={pkg} />
+        </div>
+      </div>
+
+      {isActive && <ActionBar detail={detail} />}
+    </div>
+  );
+}
