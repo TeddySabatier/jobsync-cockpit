@@ -49,7 +49,7 @@ describe("DataSettings", () => {
       pickFile(),
     );
 
-    await waitFor(() => expect(screen.getByText(/12/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("12")).toBeInTheDocument());
     const preflightCall = fetchMock.mock.calls.find(
       (c) => c[0] === "/api/backup/import/preflight",
     );
