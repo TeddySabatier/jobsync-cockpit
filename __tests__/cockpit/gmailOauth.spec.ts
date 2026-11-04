@@ -188,23 +188,49 @@ describe("callback (AC-23)", () => {
     expect(arg.select).toEqual({ id: true });
   });
 
-  it("revokes the previous refresh token before replacing it", async () => {
-    const old = encrypt("refresh-old");
-    findAccount.mockResolvedValue({ encryptedRefreshToken: old.encrypted, iv: old.iv });
+  // findUnique is called with different selects; answer each from one row.
+  const storeAccount = (email: string, token = "refresh-old") => {
+    const old = encrypt(token);
+    findAccount.mockImplementation(async (args: { select: Record<string, boolean> }) => {
+      const row: Record<string, string> = {
+        id: "g1",
+        email,
+        encryptedRefreshToken: old.encrypted,
+        iv: old.iv,
+      };
+      return Object.fromEntries(Object.keys(args.select).map((k) => [k, row[k]]));
+    });
+  };
+  const revokeCalls = () =>
+    fetchMock.mock.calls.filter((c) => String(c[0]).includes("/revoke"));
+  const revokedTokens = () =>
+    revokeCalls().map((c) => new URLSearchParams(c[1].body as string).get("token"));
+
+  it("same-email reconnect does not revoke (shared grant, D-010) and stores the new token", async () => {
+    storeAccount(ALLOWED.toUpperCase());
     const res = await callCallback();
     expect(location(res)).toContain("connected=1");
+    expect(revokeCalls()).toHaveLength(0);
+    expect(upsert).toHaveBeenCalledTimes(1);
+    const arg = upsert.mock.calls[0][0];
+    expect(decrypt(arg.update.encryptedRefreshToken, arg.update.iv)).toBe("refresh-new");
+    // The old token is not even read in this case.
+    expect(findAccount.mock.calls.every((c) => !("encryptedRefreshToken" in c[0].select))).toBe(true);
+  });
 
-    const revokeCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("/revoke"));
-    expect(new URLSearchParams(revokeCall![1].body as string).get("token")).toBe("refresh-old");
+  it("different-email reconnect revokes the old token after the exchange, then stores", async () => {
+    storeAccount("other@example.com");
+    const res = await callCallback();
+    expect(location(res)).toContain("connected=1");
+    expect(revokedTokens()).toEqual(["refresh-old"]);
     expect(fetchedUrls().findIndex((u) => u.includes("/revoke"))).toBeGreaterThan(
       fetchedUrls().findIndex((u) => u.includes("/token")),
     );
     expect(upsert).toHaveBeenCalledTimes(1);
   });
 
-  it("still stores the new token when revoking the old one fails", async () => {
-    const old = encrypt("refresh-old");
-    findAccount.mockResolvedValue({ encryptedRefreshToken: old.encrypted, iv: old.iv });
+  it("still stores the new token when revoking the old account's token fails", async () => {
+    storeAccount("other@example.com");
     fetchMock.mockImplementation(async (url: string) =>
       String(url).includes("/revoke")
         ? new Response("{}", { status: 400 })
@@ -285,15 +311,26 @@ describe("callback (AC-23)", () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
-  it("revokes the just-issued token when it refuses to store it", async () => {
+  const rejectNewToken = () =>
     fetchMock.mockImplementation(async (url: string) =>
       String(url).includes("/revoke")
         ? new Response("{}", { status: 200 })
         : tokenResponse({}, { email: "someone@example.com" }),
     );
+
+  it("rejection with no stored connection revokes the just-issued token", async () => {
+    rejectNewToken();
     await callCallback();
-    const revokeCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("/revoke"));
-    expect(new URLSearchParams(revokeCall![1].body as string).get("token")).toBe("refresh-new");
+    expect(revokedTokens()).toEqual(["refresh-new"]);
+  });
+
+  it("rejection with a stored connection does not revoke and leaves the row untouched", async () => {
+    storeAccount(ALLOWED);
+    rejectNewToken();
+    const res = await callCallback();
+    expect(location(res)).toContain("error=address_not_allowed");
+    expect(revokeCalls()).toHaveLength(0);
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it("flag off → 404, no session → 401, both delete the cookie", async () => {

@@ -97,15 +97,24 @@ export async function GET(req: NextRequest) {
     const { email } = verifyIdToken(tokens.idToken, cfg, cookie.nonce);
     assertScopeAndAddress(email, tokens.scope, cfg);
 
-    // Explicit select; the old token is read here only to be revoked.
+    // Same client + account share one Google grant, and revoking any token
+    // revokes the grant, so a same-email reconnect must not revoke (D-010).
+    // Only a different account is a different grant: revoke its old token,
+    // read with an explicit select.
     const existing = await prisma.gmailAccount.findUnique({
       where: { userId },
-      select: { encryptedRefreshToken: true, iv: true },
+      select: { email: true },
     });
-    if (existing) {
-      await quietly(() =>
-        revokeToken(decrypt(existing.encryptedRefreshToken, existing.iv)),
-      );
+    if (existing && existing.email.toLowerCase() !== email.toLowerCase()) {
+      const old = await prisma.gmailAccount.findUnique({
+        where: { userId },
+        select: { encryptedRefreshToken: true, iv: true },
+      });
+      if (old) {
+        await quietly(() =>
+          revokeToken(decrypt(old.encryptedRefreshToken, old.iv)),
+        );
+      }
     }
 
     const { encrypted, iv } = encrypt(tokens.refreshToken);
@@ -126,7 +135,16 @@ export async function GET(req: NextRequest) {
   } catch (e) {
     if (unstoredToken) {
       const token = unstoredToken;
-      await quietly(() => revokeToken(token));
+      // With a stored connection the new token may share its grant, and
+      // revoking it would kill the working connection (D-010). If the lookup
+      // itself fails, do not revoke.
+      await quietly(async () => {
+        const stored = await prisma.gmailAccount.findUnique({
+          where: { userId },
+          select: { id: true },
+        });
+        if (!stored) await revokeToken(token);
+      });
     }
     const code = e instanceof OAuthError ? e.code : "token_exchange_failed";
     // Code only: never the error text, tokens or Google's response.
