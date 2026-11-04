@@ -233,6 +233,44 @@ describe("submitPackage", () => {
     expect(res.package.id).toBe(winner.id);
   });
 
+  it("returns CONFLICT when the key belongs to a package of another job (D-008)", async () => {
+    const jobA1 = await newJob(userA);
+    const jobA2 = await newJob(userA);
+    const first = await submitPackage(
+      userA,
+      input(jobA1, { idempotencyKey: "cross-1" }),
+    );
+    await expect(
+      submitPackage(userA, input(jobA2, { idempotencyKey: "cross-1" })),
+    ).rejects.toMatchObject(code("CONFLICT"));
+    expect(
+      await prisma.applicationPackage.count({ where: { jobId: jobA2 } }),
+    ).toBe(0);
+    // The same job still replays.
+    const again = await submitPackage(
+      userA,
+      input(jobA1, { idempotencyKey: "cross-1" }),
+    );
+    expect(again).toMatchObject({ idempotent: true });
+    expect(again.package.id).toBe(first.package.id);
+  });
+
+  it("the P2002 loser on a key held by another job gets CONFLICT, not that package (D-008)", async () => {
+    const jobA1 = await newJob(userA);
+    const jobA2 = await newJob(userA);
+    await mk("pending", { jobId: jobA1, idempotencyKey: "cross-2" });
+    vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("unique", {
+        code: "P2002",
+        clientVersion: "test",
+        meta: { target: ["userId", "idempotencyKey"] },
+      }),
+    );
+    await expect(
+      submitPackage(userA, input(jobA2, { idempotencyKey: "cross-2" })),
+    ).rejects.toMatchObject(code("CONFLICT"));
+  });
+
   it("reports a P2002 on (jobId, version) as CONFLICT", async () => {
     const jobId = await newJob(userA);
     vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(

@@ -102,3 +102,9 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 - **Ticket ownership changes (TICKETS.md final):** `errors.ts` and the SQLite harness → C-02; MCP `cockpit.ts`, `cockpitDescriptions.ts`, `attachments.ts`, `rate-limit.ts`, `mcpToken.actions.ts` (+ test), `route.ts` → C-04; `next.config.mjs` → C-05; `layout.tsx`, `Sidebar`, `Header` → C-06; `markdown.ts` → C-07; backup → C-09.
 - **New ACs:** AC-49 (result shape and error mapping), AC-50 (rate limit). No renumbering.
 - **Cost if wrong:** C-04 and C-05 carry more tests (shape vs schema, rate-limit compatibility, headers order). The unverified assumptions are: Next applies the last matching `headers()` entry per key, and the SDK 1.30 shape-validation text. Both are covered by tests or the Phase 4 `curl -I` check.
+
+## D-008 Idempotency key reused across jobs (C-03 alignment check, refines SPEC §2.2 step 2)
+
+- **Ruling:** an `idempotencyKey` that matches an existing package of the same user but a **different job** is `CONFLICT` (checked in the pre-check and in the `P2002` race path). The same job still replays the existing package with `idempotent: true`.
+- **Reason:** silently returning the other job's package would make the bot believe the new job was submitted (wrong-job replay). `CONFLICT` tells the bot to pick a fresh key.
+- **Scope:** `src/lib/cockpit/packages.ts` (`submitPackage`) and its integration tests only. SPEC stays frozen; this entry is the amendment of record.

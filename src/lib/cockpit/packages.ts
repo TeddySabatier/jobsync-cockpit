@@ -51,6 +51,13 @@ function p2002Target(e: unknown): string | null {
   return Array.isArray(target) ? target.join(",") : String(target ?? "");
 }
 
+// Same key, same job: the existing package. Same key, other job: CONFLICT
+// (D-008), so the bot never believes a different job was submitted.
+function replay(existing: ApplicationPackage, jobId: string): SubmitResult {
+  if (existing.jobId !== jobId) throw new CockpitError("CONFLICT");
+  return { package: existing, supersededIds: [], idempotent: true };
+}
+
 export async function submitPackage(
   userId: string,
   input: SubmitApplicationPackageInput,
@@ -67,9 +74,7 @@ export async function submitPackage(
       const existing = await prisma.applicationPackage.findFirst({
         where: { userId, idempotencyKey: input.idempotencyKey },
       });
-      if (existing) {
-        return { package: existing, supersededIds: [], idempotent: true };
-      }
+      if (existing) return replay(existing, input.jobId);
     }
     // Version race (or anything else unique): the caller replays the submit.
     throw new CockpitError("CONFLICT");
@@ -93,9 +98,7 @@ async function submitInTransaction(
     const existing = await tx.applicationPackage.findFirst({
       where: { userId, idempotencyKey: input.idempotencyKey },
     });
-    if (existing) {
-      return { package: existing, supersededIds: [], idempotent: true };
-    }
+    if (existing) return replay(existing, job.id);
   }
 
   // 3. Any past sent package blocks every later submit (no double apply).
