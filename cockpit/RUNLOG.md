@@ -51,3 +51,9 @@ Tiers available in this harness: T0/T1 = `@fast` (composer-2.5-fast), T1+ = `@me
 | 18 | C-11 | @fast (composer-2.5-fast) | `docs/cockpit.md`, `.env.example` cockpit block | 1 | PR opened; lint exit 0 |
 | 19 | Phase 4 integration | @medium (claude-sonnet) | migration on DB copy, local image `jobsync-cockpit:v0`, MCP E2E on 3738, curl/file-route checks | 1 | **PASS** — `20261104120000_cockpit_v0` clean; row counts unchanged; 3 new tables empty; image `463c02fc5c70` (~364 MB, `2297ca3`); MCP tools/list (6, no send/approve/reject/edit), submit/resubmit/idempotency/change-request flows, scope and PDF validation; unauthenticated file route **307 → /signin** (D-011); `/` **X-Frame-Options: DENY** |
 | 20 | Phase 5 handoff | @fast (composer-2.5-fast) | `HANDOFF-CLAUDE-CODE.md`, D-011, RUNLOG rows | 1 | Free models unavailable (3 tried); draft by composer-2.5-fast; reviewed by orchestrator (claude-opus) |
+
+**QA run 2026-11-05** (details in `cockpit/qa/QA-REPORT.md`)
+
+| # | Phase/ticket | Agent (model) | Purpose | Attempts | Result |
+|---|---|---|---|---|---|
+| 21 | QA overnight | free models via `opencode run` (engine in `scripts/qa/`); paid models for triage, property tests, E2E and fixes | review lanes L1–L4, L6, L7, L10; mechanical quote check; triage; property tests (#32); E2E with fake Google; fixes #34, #37 | 1 night | About 5M tokens against a 100M target (2,349 calls, 722 failed: model unavailable, rate limits). 274 findings indexed, 2 confirmed P3 (fixed), 9 known, 193 rejected. Gates on `f8192ff` green (one upstream test timed out once in 3 runs). E2E: 47 pass, 2 fixme (P3, #38, #39). AC-30 PDF render and real Google not verified. |

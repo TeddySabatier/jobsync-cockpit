@@ -1,0 +1,212 @@
+# Rejected, unclear and known findings
+
+Format: ids — file:line — reason. Ids are not unique across lanes (many lanes reused F1, SEC-001...), so use file:line.
+
+## Known (matches HANDOFF §7 or a DECISIONS ruling): 9
+- F1 — src/lib/cockpit/attachments.ts:65 — HANDOFF §7 + SPEC §2 notes: File has no userId column, ownership is path-based (cockpitUserDir, files.ts:8; resolveCockpitFile). No endpoint serves a File by id: the file route looks up by packageId with userId in the where (api/cockpit/files/[packageId]/route.ts:37-44)
+- F-002 — prisma/schema.prisma:577 — SPEC §6.4 stale-lock rule covers a crash between lock and outcome: panel after 60 s (send.ts:267-278, SendOutcomePanel.tsx:37-47)
+- F-008 — prisma/schema.prisma:560 — HANDOFF §7: edits have no optimistic-concurrency check (last write wins; Send re-checks updatedAt)
+- F8 — src/lib/cockpit/send.ts:224 — SPEC §6.4 step 6 / stale-lock rule: crash or failed record step leaves lock + unknown outcome, recovered via markSendUnknownAsSent (send.ts:249-257,290-309). Finding itself concludes this is by design
+- F-006 — src/app/api/mcp/route.ts:243 — Upstream decision documented in route.ts:238-242 (tokens predating resume:write must keep working); SPEC §3 says cockpit tools do not copy it
+- L1-001 — src/lib/cockpit/config.ts:8 — D-007 N9 ruling: COCKPIT_SCOPES is spread into default token scopes always; HANDOFF §3 recommends a dedicated bot token
+- F001 — src/components/cockpit/QueueRow.tsx:21 — D-006 spec choice (c): the Gmail chip means 'package has an emailTo and Gmail is not connected'; the AC-47 callout is a separate element (QueueView.tsx:44-59, queue gmailCalloutNeeded)
+- L2-02 — prisma/migrations/20261104120000_cockpit_v0/migration.sql:32 — SPEC §6.4 'Stale lock': enforced in application code by design (recoverable(), send.ts:267-278)
+- L2-06 — prisma/migrations/20261104120000_cockpit_v0/migration.sql:83 — SPEC §6.4 step 6 / markSendUnknownAsSent: 'sent' without SentEmail is the manual-recovery state by design (send.ts:290-309)
+
+## Unclear: 0
+- none
+
+## Rejected: 193
+- AC-10-FAIL-1 — src/lib/mcp/tokens.ts:1 — Scopes are assigned in createMcpToken (mcpToken.actions.ts:47-52), not in generateToken; AC-10 is satisfied there
+- AC-10-FAIL-2 — src/lib/mcp/tokens.ts:5 — generateToken only makes the secret; scopes are stored by createMcpToken (mcpToken.actions.ts:47-52)
+- L1-F1 — src/lib/cockpit/gmail/oauth.ts:74 — GOOGLE_REDIRECT_URI is operator-set env, not attacker input; originOf only decides which origin our own redirects use (SPEC §6.2 'Origin')
+- L1-F6 — src/lib/cockpit/gmail/oauth.ts:90 — missingGmailEnv() adds GOOGLE_REDIRECT_URI when originOf is null (oauth.ts:86), so getGoogleConfig returns null before the `as string` cast (:97)
+- F-001 — prisma/schema.prisma:586 — Replay of the same key returns the existing package (SPEC §2.2 step 2); unique(userId, idempotencyKey) deliberately ignores status
+- F003 — src/components/cockpit/QueueRow.tsx:61 — Accessibility/UX nit; the control has visible text and no SPEC AC requires the suggested change
+- L2-F2 — src/app/api/mcp/route.ts:275 — Upstream request pattern; McpServer is created per request and holds no timers, handleRequest returns error responses instead of throwing. Cosmetic (could wrap in try/finally)
+- SEC-006 — src/components/cockpit/ActionBar.tsx:199 — formatUrl prefixes anything not starting with http:// or https:// with https:// (utils.ts:32-37), so javascript:/data: cannot form a scheme
+- L1-F002 — src/components/cockpit/EditForm.tsx:166 — Ownership is checked server-side (packages.ts:384,211); another user's id gives NOT_FOUND with a fixed message (errors.ts:11), no enumeration signal beyond 'Not found'
+- L1-01 — src/lib/mcp/tools/cockpit.ts:61 — userId is closed over from ctx in registerCockpitTools (cockpit.ts:94) and passed explicitly: attachFile(userId,..) :102, submitPackage(userId,..) :118, markChangeRequestDone(userId,..) :293
+- SEC-002 — src/lib/cockpit/gmail/oauth.ts:105 — Relative Location is the documented fallback when no usable origin exists (oauth.ts:104); same-origin relative redirect is not an open redirect, and getGoogleConfig fails first with not_configured
+- L2-01 — prisma/migrations/20261104120000_cockpit_v0/migration.sql:11 — 'sending' is not a status; the lock is sendStartedAt and the 60 s stale rule recovers a crash (send.ts:267-278)
+- L2-04 — prisma/migrations/20261104120000_cockpit_v0/migration.sql:77 — SPEC §2 notes / D-005 D8: nullable idempotencyKey, any number of keyless packages is intended
+- L1-003 — src/components/cockpit/QueueRow.tsx:68 — Showing the recipient to the user is the feature; the Send dialog adds the domain warning (SendDialog.tsx:58-78)
+- L7-001 — src/components/cockpit/Panels.tsx:1 — Panels.tsx exports Posting/Cv/Fit/Email/Letter panels (:58,89,150,187,212) and DetailView renders all five (DetailView.tsx:134-141)
+- L7-002 — src/components/cockpit/Panels.tsx:1 — LetterPanel exists at Panels.tsx:212 and uses renderLetterMarkdown
+- AC-24-deviation-2, AC-24-deviation-1 — src/lib/cockpit/gmail/mime.ts:60 (+1 more) — mime.ts:24-29 header() throws on CR/LF for From/To/Subject/attachment name, mime.ts:66 enforces printable ASCII without quotes, schemas.ts:7-23 reject CR/LF in emailTo/emailSubject, body and PDF are base64 (mime.ts:90,96)
+- L6-001 — src/components/cockpit/EditForm.tsx:105 — EditForm.tsx line 1 is "use client"
+- NG-003 — src/actions/cockpitGmail.actions.ts:33 — A read action needs no revalidatePath
+- F001 — src/components/cockpit/ActionBar.tsx:188 — Accessibility/UX nit; the control has visible text and no SPEC AC requires the suggested change
+- F003 — src/components/cockpit/ActionBar.tsx:256 — Sticky bar is the SPEC §5.3 design ('sticky at the bottom on mobile'); H-check AC-20, not a code defect
+- SEC-001, L1-F003 — src/components/cockpit/EditForm.tsx:44 (+1 more) — mime.ts:24-29 header() throws on CR/LF for From/To/Subject/attachment name, mime.ts:66 enforces printable ASCII without quotes, schemas.ts:7-23 reject CR/LF in emailTo/emailSubject, body and PDF are base64 (mime.ts:90,96)
+- SEC-003 — src/components/cockpit/EditForm.tsx:4 — updatePackageContent -> reload(userId,id) and transition() with userId (packages.ts:229-235, 384, 402)
+- FIND-001 — src/lib/cockpit/send.ts:316 — SPEC §6.4 'Recovery actions' explicitly act on a locked approved package (recoverable(), send.ts:267-278); AC-34 freezes every other transition, not these two
+- F1 — src/app/api/cockpit/gmail/callback/route.ts:81 — Not a defect: finding concludes the code matches AC-23 (state checked before ?error=, callback/route.ts:81-86)
+- F2 — src/app/api/cockpit/gmail/callback/route.ts:84 — Not a defect: finding concludes the code matches AC-23 (session_mismatch, :84)
+- F3 — src/app/api/cockpit/gmail/callback/route.ts:94 — Not a defect: no_refresh_token is thrown at :94
+- F4 — src/app/api/cockpit/gmail/callback/route.ts:97 — verifyIdToken checks aud/iss/exp/nonce/email_verified (oauth.ts:188-222) and assertScopeAndAddress checks scope + allow-list (:224-235)
+- F7 — src/app/api/cockpit/gmail/callback/route.ts:39 — Not a defect: every exit goes through finish() which expires the cookie (:38-44)
+- F002 — src/app/dashboard/review/[packageId]/page.tsx:21 — AC-16 (401/404) concerns the file route; this page maps NOT_FOUND to notFound() and UNAUTHENTICATED to /signin (page.tsx:22-24)
+- L6-F001 — src/app/api/mcp/route.ts:222 — save_match_results_batch checks jobs:write at route.ts:220; no deleteJob tool exists
+- F1 — src/components/cockpit/DetailView.tsx:11 — PreviousReviewInfo is required by SPEC §5.3 'Previous review info'; the five-panel AC-18 count does not exclude it
+- S5 — prisma/schema.prisma:481 — Upstream Tag model, untouched by cockpit
+- F-003 — src/lib/cockpit/schemas.ts:77 — A zod schema holds no query; list_jobs builds the where with userId (mcp/tools/cockpit.ts:136)
+- F2 — src/components/cockpit/QueueView.tsx:68 — React key only; rows are already user-scoped by listPackagesByTab (packages.ts:416)
+- F3 — src/components/cockpit/QueueView.tsx:31 — getReviewQueue -> listPackagesByTab(userId,..) with userId in the where (packages.ts:414-416)
+- F-002 — src/components/cockpit/GmailCard.tsx:102 — disconnectGmail calls requireUser() first (cockpitGmail.actions.ts:43) and deletes only user.id's row (:58)
+- F-003 — src/lib/cockpit/schemas.ts:62 — cvFile relation is onDelete: SetNull (SPEC §2); orphan files are an accepted V0 follow-up (SPEC §3 'Unreferenced files are not cleaned up')
+- L7-001 — src/lib/cockpit/packages.ts:84 — SPEC §2.2 step 2: an idempotent replay returns the existing package unchanged whatever its status; AC-15 is about updatePackageContent, not submit
+- L7-002 — src/lib/cockpit/packages.ts:105 — A rejected active package is blocked at step 4 (packages.ts:112-117 JOB_REJECTED); superseded packages are by design replaced by a new version
+- SEC-004 — src/components/cockpit/EditRerender.tsx:21 — Authorization is server-side per action (cockpit.actions.ts:40, packages.ts:211)
+- AC-37-order-violation, AC-37-global-entry-content — next.config.mjs:16 — next.config.mjs:6-20 is exactly AC-37: global entry first, then a scoped entry with only X-Frame-Options: SAMEORIGIN. The global entry's nosniff is upstream and AC-37 only constrains the scoped entry
+- L1-001 — src/components/cockpit/SendOutcomePanel.tsx:1 — Actions are server-authorized: markSendUnknownAsSent/releaseSendLock where includes userId (send.ts:267-272)
+- SEC-002 — src/lib/mcp/tools/addJobsBatch.ts:15 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only; scope jobs:write is checked in route.ts:197
+- L1-SCR-001 — src/lib/mcp/tools/saveResumeReview.ts:57 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only; no-scope design noted at route.ts:238-242
+- L1-001 — src/actions/cockpit.actions.ts:78 — Ownership is enforced inside the service: transition() where carries userId (packages.ts:211-218). 'Attack surface' is not a bug; the claim's 'stolen MCP token' cannot call server actions (session only)
+- F-001 — src/app/api/cockpit/gmail/callback/route.ts:135 — Error `code` is a closed enum (OAuthError.code or the literal token_exchange_failed, :149) and Location is built from the env origin (redirectLocation, oauth.ts:105-108); no user input reaches the URL
+- L2-2 — src/lib/cockpit/packages.ts:135 — Writes are conditional updateMany (packages.ts:211-219) and unique indexes backstop version/idempotency races (P2002 -> CONFLICT, packages.ts:69-81; SPEC §2.2 Concurrency)
+- L2-3 — src/lib/cockpit/packages.ts:211 — The state change is the single conditional updateMany (packages.ts:211-219); the findFirst only classifies a count of 0 as NOT_FOUND vs INVALID_STATE (:221-226). No later step assumes it won
+- F001, L2-05, F002, SEC-003, L2-02, L2-03, SEC-003, SEC-004, SEC-002, SEC-004, L2-07 — src/lib/mcp/tools/addJobsBatch.ts:27 (+10 more) — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
+- F-003 — src/app/api/mcp/route.ts:169 — There is no matches:write scope in the system; save_match_result uses jobs:write by upstream design
+- F1 — src/lib/mcp/tools/updateJob.ts:7 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only; checkMcpRateLimit is synchronous (rate-limit.ts:22-54)
+- F1 — src/lib/cockpit/packages.ts:56 — Same key + same job returns the existing package by SPEC §2.2 step 2; same key + other job throws CONFLICT (packages.ts:57, D-008). Claim contradicts itself
+- F001, F002, SEC-002, F004, SEC-003, SEC-004, SEC-005 — src/lib/mcp/tools/saveMatchResult.ts:21 (+6 more) — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
+- SEC-001, F-004 — src/lib/mcp/tools/reviewResume.ts:29 (+1 more) — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only; Handlers/services are only called with the userId from the session/token (cockpit.actions.ts:40, mcp/route.ts:58,272); there is no caller-supplied userId path
+- F001 — src/actions/cockpit.actions.ts:28 — updatePackageContent re-parses with UpdatePackageContentSchema in the service (packages.ts:383); type-only import has no runtime role
+- L1-004 — src/lib/mcp/tools/saveMatchResultsBatch.ts:13 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only; the schema caps the array at MCP_BATCH_MAX_ITEMS (mcp.schema.ts:225-235)
+- L1-CHK-01 — src/lib/cockpit/gmail/client.ts:40 — For kind 'send' any non-2xx becomes GMAIL_SEND with definitive only for 400/401/403 (client.ts:68-75); 404/5xx are ambiguous by SPEC §6.4. The claim 'falls through to GMAIL_TOKEN' is false
+- L6-F001 — src/components/cockpit/SendDialog.tsx:1 — AC-28 is checked by grep/AC-35 test; sendPackage calls sendApplicationPackage directly (cockpitSend.actions.ts:59)
+- L6-F004 — src/components/cockpit/SendDialog.tsx:14 — Panels.tsx imports only a type from the actions module (Panels.tsx:14) and formatBytes is local; neither pulls server code into the client bundle
+- F005 — prisma/schema.prisma:1 — Not a finding: the migration is 8 CREATE statements and no ALTER/INSERT/UPDATE/DELETE/DROP (migration.sql; __tests__/cockpit/migration.spec.ts exists for AC-01)
+- L2-001 — src/lib/cockpit/send.ts:92 — releaseQuietly runs only for the call that just took the lock and failed definitively before/at Gmail (send.ts:191-196, 203-206); sendOutcome is still null then. The only overlap needs a send in flight >60 s (bounded by 2x20 s timeouts)
+- L1-F8 — src/lib/cockpit/gmail/oauth.ts:224 — Google returns a space-separated scope string; split(/\s+/).includes(GMAIL_SEND_SCOPE) handles any whitespace run; email compare is lowercase on both sides (oauth.ts:232)
+- SECURITY-001 — src/actions/cockpit.actions.ts:129 — getPackageWithJob uses findFirst({ id, userId }) (packages.ts:441-443) and throws NOT_FOUND
+- F-003 — prisma/schema.prisma:556 — Writes are conditional updateMany (packages.ts:211-219) and unique indexes backstop version/idempotency races (P2002 -> CONFLICT, packages.ts:69-81; SPEC §2.2 Concurrency); a double approve: second updateMany matches 0 rows -> INVALID_STATE
+- F-004 — prisma/schema.prisma:555 — Writes are conditional updateMany (packages.ts:211-219) and unique indexes backstop version/idempotency races (P2002 -> CONFLICT, packages.ts:69-81; SPEC §2.2 Concurrency)
+- F-007 — prisma/schema.prisma:580 — sentVia is set by the two code paths that own it (send.ts:227, packages.ts:327, send.ts:298); nothing else writes status 'sent'
+- F1 — src/lib/mcp/rate-limit.ts:8 — Keys are userId(+bucket) of authenticated token holders only (cockpit.ts:71-74), so cardinality equals the number of users; entries expire and are swept past 500 (rate-limit.ts:35-39)
+- F001, F2 — src/lib/mcp/tools/updateJob.ts:11 (+1 more) — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
+- SEC-001 — src/components/cockpit/ActionBar.tsx:188 — Authorization is server-side (packages.ts:249-253, transition where userId)
+- SEC-002 — src/components/cockpit/ActionBar.tsx:233 — Authorization is server-side (packages.ts:256-262)
+- F-001 — src/lib/mcp/tools/addJob.ts:8 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only; Handlers/services are only called with the userId from the session/token (cockpit.actions.ts:40, mcp/route.ts:58,272); there is no caller-supplied userId path
+- L7-P1-003 — src/app/api/mcp/route.ts:1 — The transport import is used at route.ts:275
+- L1-02 — src/lib/mcp/tools/cockpit.ts:52 — submit returns only {packageId, version, status, supersededIds, idempotent} (cockpit.ts:119-125); get_job returns the token owner's own rows (cockpit.ts:194-230)
+- SEC-001 — src/lib/cockpit/gmail/oauth.ts:70 — SPEC §6.2 / AC-22: Secure iff the redirect URI is https; the http localhost default is intentional (cfg.secure, oauth.ts:98)
+- SECL-001 — src/app/dashboard/review/[packageId]/page.tsx:15 — getPackageDetail -> getPackageWithJob findFirst({ id, userId }) (packages.ts:441-443); another user's id gives NOT_FOUND -> notFound() (page.tsx:23-24)
+- SECL-003 — src/app/dashboard/review/[packageId]/page.tsx:1 — SPEC §1 P5 design: requireUser() runs first inside every action (cockpit.actions.ts:40) before any DB access; page maps UNAUTHENTICATED to redirect (page.tsx:22)
+- AC-43 — src/app/dashboard/review/settings/page.tsx:31 — getGmailSettings selects only { email, scopes } (cockpitGmail.actions.ts:29-32); encryptedRefreshToken/iv are never loaded for this page
+- L2-03 — prisma/migrations/20261104120000_cockpit_v0/migration.sql:74 — Writes are conditional updateMany (packages.ts:211-219) and unique indexes backstop version/idempotency races (P2002 -> CONFLICT, packages.ts:69-81; SPEC §2.2 Concurrency); CONFLICT means the caller replays (D-005 D7)
+- F2 — src/actions/mcpToken.actions.ts:47 — Defaults are jobs:write, questions:write, resume:write + COCKPIT_SCOPES (= jobs:read, package:write) (mcpToken.actions.ts:47-52) = AC-10's five scopes
+- F3 — src/actions/mcpToken.actions.ts:28 — AC-09 scope-before-DB applies to cockpit MCP tools (cockpit.ts:69), not to token creation, which requires a session (requireUser first)
+- S-003 — src/lib/cockpit/send.ts:175 — mime.ts:24-29 header() throws on CR/LF for From/To/Subject/attachment name, mime.ts:66 enforces printable ASCII without quotes, schemas.ts:7-23 reject CR/LF in emailTo/emailSubject, body and PDF are base64 (mime.ts:90,96)
+- L1-002 — src/components/cockpit/QueueRow.tsx:21 — emailTo is rendered as a React text node (QueueRow.tsx:68), so markup is escaped; schema also restricts it to a single email address
+- SCH-001 — prisma/schema.prisma:282 — Upstream Interview model, untouched by cockpit
+- MIME-001 — src/lib/cockpit/gmail/mime.ts:84 — mime.ts:24-29 header() throws on CR/LF for From/To/Subject/attachment name, mime.ts:66 enforces printable ASCII without quotes, schemas.ts:7-23 reject CR/LF in emailTo/emailSubject, body and PDF are base64 (mime.ts:90,96); attachment name is checked at mime.ts:63 before interpolation at :92-93
+- L6-002 — src/components/cockpit/EditForm.tsx:1 — "use client" is present (EditForm.tsx:1); importing a server action from a client component is the normal Next pattern
+- L1-001 — src/actions/cockpitGmail.actions.ts:51 — Best-effort revoke is the SPEC §6.2 ruling: a lost key or dead token must not block deleting the row (cockpitGmail.actions.ts:54-56)
+- NG-001 — src/actions/cockpitGmail.actions.ts:60 — revalidatePath of the two affected pages is sufficient; /dashboard/review/[id] pages do not display Gmail state beyond the queue indicator which is covered by revalidating /dashboard/review (layout cache)
+- L7-001 — src/lib/cockpit/schemas.ts:65 — idempotencyKey is optional by SPEC §2.3 with exactly this regex; no key = no dedupe by design (SQLite NULLs distinct, D-005 D8)
+- L7-002 — src/lib/cockpit/schemas.ts:62 — SPEC §2.3 makes cvJson and cvFileId optional; Send requires a CV file (send.ts:54-57, ActionBar sendBlockedReason)
+- L2-01 — src/actions/cockpitSend.actions.ts:55 — Double send is prevented by the conditional lock updateMany with expected updatedAt (send.ts:148-158) -> second call gets CONFLICT; no idempotency key needed
+- F4, F6, F5, F7 — src/lib/mcp/tools/saveResumeReview.ts:1 (+3 more) — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
+- L4-F001 — src/components/cockpit/GmailCard.tsx:70 — Accessibility/UX nit; the control has visible text and no SPEC AC requires the suggested change
+- L4-F002 — src/components/cockpit/GmailCard.tsx:69 — Accessibility/UX nit; the control has visible text and no SPEC AC requires the suggested change; the scopes are already a <ul>
+- L7-001 — src/lib/cockpit/gmail/client.ts:33 — fail() logs only { kind, code, status } (client.ts:33); bodies are never read into logs (AC-36)
+- F002 — src/components/cockpit/ActionBar.tsx:222 — Button is disabled while busy; the action completes quickly and toasts. UX nit
+- F5 — src/app/api/cockpit/gmail/callback/route.ts:98 — assertScopeAndAddress throws missing_scope / address_not_allowed (oauth.ts:229-234)
+- L2-002 — src/components/cockpit/GmailCard.tsx:33 — disconnectGmail is idempotent (deleteMany, revoke best-effort, cockpitGmail.actions.ts:46-58); a second click is harmless
+- f1-session-token-validation — src/lib/mcp/tools/matchDirective.ts:72 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only; Handlers/services are only called with the userId from the session/token (cockpit.actions.ts:40, mcp/route.ts:58,272); there is no caller-supplied userId path
+- F-001 — src/app/api/mcp/route.ts:90 — find_job calls McpFindJobSchema.safeParse and handleFindJob (route.ts:102-109); SPEC §3 says find_job stays on jobs:write
+- f1 — src/components/cockpit/Panels.tsx:89 — Panels.tsx starts with "use client" (:1); CvPanel receives only already-selected display props (no filePath: cockpit.actions.ts:127-129)
+- L4-001 — src/components/cockpit/EditForm.tsx:156 — window.confirm for discard is acceptable (SPEC §5.4 'asks for confirmation'); a11y nit
+- SEC-001 — src/lib/mcp/tools/cockpit.ts:293 — markChangeRequestDone -> transition() where { id, userId, status, sendStartedAt: null } (packages.ts:211-218); another user's id gives NOT_FOUND
+- F-002 — src/lib/cockpit/schemas.ts:19 — emailSubject regex rejects \r and \n; any other control char (VT, U+2028) fails the printable-ASCII test in mime.ts:37 and is base64 RFC 2047 encoded, so it cannot start a header line; emailTo uses .email() which rejects whitespace
+- F-004 — src/lib/cockpit/schemas.ts:86 — get_job uses findFirst({ id, userId }) -> NOT_FOUND for another user's job (mcp/tools/cockpit.ts:194-214)
+- F-001, L1-001, L1-005 — src/lib/mcp/tools/saveMatchResultsBatch.ts:25 (+2 more) — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
+- F-L2-001 — src/components/cockpit/EditRerender.tsx:27 — Server enforces sendStartedAt: null in the transition where (packages.ts:215); ActionBar renders the locked panel instead of EditRerender when locked (ActionBar.tsx:145-153)
+- F-001 — src/lib/mcp/tools/saveResumeReview.ts:57 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only; AC-14 applies to ApplicationPackage transitions
+- F001 — src/components/cockpit/Panels.tsx:75 — Job description is rendered through TipTapContentViewer exactly as upstream JobDetails does; TipTap drops unknown tags/scripts. Not changed by cockpit
+- F002 — src/components/cockpit/Panels.tsx:65 — Same: formatUrl(jobUrl) always yields an http(s) URL (utils.ts:32-37); the MCP schema also requires z.string().url() for jobUrl on add_job
+- f1-user-not-from-session — src/lib/cockpit/gmail/client.ts:97 — exchangeAuthCode is only called from the callback after auth(), state check and cookie.userId === session userId (callback/route.ts:55-93)
+- f2-no-userid-scoping — src/lib/cockpit/gmail/client.ts:121 — The refresh token is decrypted from the caller's own GmailAccount row (send.ts:137-139,186); getAccessToken takes a token, never a user-supplied id
+- F-003 — src/components/cockpit/GmailCard.tsx:1 — Same: requireUser() first inside the action
+- finding-2 — prisma/migrations/20261104120000_cockpit_v0/migration.sql:79 — No such route exists; GmailAccount is only read with explicit select scoped by userId (cockpit.actions.ts:71-76)
+- SEC-001 — src/components/cockpit/EditRerender.tsx:30 — requestPackageChanges -> transition() with userId (packages.ts:279-294)
+- SEC-002 — src/components/cockpit/EditRerender.tsx:66 — Server caps instruction at 2000 chars (schemas.ts:35,109)
+- MIME-001 — src/lib/cockpit/gmail/mime.ts:102 — encodeRaw is a pure base64url of text that buildMimeMessage already built after header() checks (mime.ts:24-29 header() throws on CR/LF for From/To/Subject/attachment name, mime.ts:66 enforces printable ASCII without quotes, schemas.ts:7-23 reject CR/LF in emailTo/emailSubject, body and PDF are base64 (mime.ts:90,96))
+- F2 — src/actions/cockpitGmail.actions.ts:29 — AC-26 lock is a package concept; the Gmail settings read has no lock to check
+- SEC-001 — src/components/cockpit/GmailCard.tsx:45 — errorMessage is a React text node; the string comes only from the fixed OAUTH_ERROR_MESSAGES map or a generic fallback (oauth.ts:47-52; settings/page.tsx:34)
+- L1-002 — src/actions/cockpit.actions.ts:127 — getPackageWithJob is scoped by userId (packages.ts:441-443)
+- F-002 — src/app/api/cockpit/gmail/callback/route.ts:81 — Cookie decode is a base64+JSON parse of the caller's own cookie; state compare is timing-safe (safeEqual, oauth.ts:177-181). No secret is revealed
+- L2-1 — src/lib/cockpit/packages.ts:105 — D-008 is implemented: replay() throws CONFLICT when the key's package belongs to another job (packages.ts:56-58)
+- L6-BND-001 — src/components/cockpit/EditRerender.tsx:3 — cockpit.actions.ts starts with "use server" and exports only async actions (AC-44 test)
+- F-001 — src/app/api/mcp/route.ts:95 — SPEC §3: 'find_job stays on jobs:write (it predates jobs:read; do not fix it)'
+- F-008 — src/app/api/mcp/route.ts:287 — 405 on GET is correct for a stateless Streamable HTTP endpoint (comment :287)
+- L7-F002 — src/lib/cockpit/markdown.ts:11 — Restates intended behaviour: html:false escapes raw HTML (markdown.ts:11), AC-41
+- SEC-002, SEC-004, F-003 — src/lib/mcp/tools/reviewResume.ts:42 (+2 more) — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
+- SECL-002 — src/lib/cockpit/gmail/oauth.ts:232 — The id_token came straight from Google's token endpoint over TLS (oauth.ts:185-187) with aud/iss/exp/nonce verified; Unicode-lookalike email would have to be issued by Google as a verified email
+- F002 — src/actions/cockpit.actions.ts:103 — markPackageAppliedManually -> transition() where includes userId (packages.ts:319-329)
+- F003 — src/actions/cockpit.actions.ts:136 — cvFile.fileName was already sanitized at attach time (attachments.ts:59) and is sanitized again for display (cockpit.actions.ts:142); it is never used as a path
+- SEC-001 — src/lib/cockpit/packages.ts:330 — JobStatus is a global lookup table looked up by unique `value` (it has no userId column); the Job update is scoped by userId (packages.ts:338-341)
+- SEC-001 — src/components/cockpit/EditForm.tsx:256 — letterHtml comes from renderLetterMarkdown with link/image/autolink disabled and html:false (markdown.ts:11-12); javascript: URLs stay inert text
+- L2-002 — src/components/cockpit/EditForm.tsx:208 — Client validation mirrors server schemas (EditForm.tsx:41-64); a server INVALID_STATE is the conflict banner, not an email error
+- L6-F002 — src/components/cockpit/SendDialog.tsx:3 — cockpitSend.actions.ts is "use server" and exports three async actions only (:55,63,67)
+- L6-F003 — src/components/cockpit/SendDialog.tsx:4 — @/lib/toast is already used by many upstream client components
+- SEC-001 — src/lib/mcp/tools/addJobsBatch.ts:15 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only; output is MCP text, not HTML
+- F001 — prisma/schema.prisma:108 — Orphan files are an accepted V0 limit (SPEC §3: no cleanup); File deletion cascade is upstream's model
+- S-001 — prisma/schema.prisma:213 — Upstream Contact/Interview models, untouched by cockpit
+- F3 — src/lib/cockpit/attachments.ts:48 — contentBase64 is capped at 7,000,000 chars by AttachFileInputShape before the handler runs (schemas.ts:49), so decode allocation is bounded to ~5 MB
+- L4-001 — src/app/dashboard/review/layout.tsx:4 — col-span-3 is the SPEC §5 / N17 requirement for review pages; the grid is container-query based and the pages stack below @md/main
+- L4-002 — src/app/dashboard/review/layout.tsx:6 — Wrapper div has no colours to adapt; dark mode comes from child components
+- L1-F5 — src/lib/cockpit/gmail/oauth.ts:168 — Cookie Path=/api/cockpit/gmail is required by SPEC §6.2/AC-22; connect and callback both live under it
+- F3 — src/lib/mcp/rate-limit.ts:31 — Upstream pattern or per-request design; cockpit tools scope with ctx userId (cockpit.ts:94) and rate-limit per bucket (cockpit.ts:71-76)
+- L2-F3, L7-P2-004, L6-F003, L6-F004, SEC-002, L7-P3-005, L7-P3-006 — src/app/api/mcp/route.ts:271 (+6 more) — Upstream pattern or per-request design; cockpit tools scope with ctx userId (cockpit.ts:94) and rate-limit per bucket (cockpit.ts:71-76)
+- L1-F004 — src/components/cockpit/EditForm.tsx:214 — Server re-validates with UpdatePackageContentSchema (packages.ts:383; max 254 at schemas.ts:12)
+- L1-03, L1-04, f1-userid-scope — src/lib/mcp/tools/cockpit.ts:71 (+2 more) — Upstream pattern or per-request design; cockpit tools scope with ctx userId (cockpit.ts:94) and rate-limit per bucket (cockpit.ts:71-76)
+- L2-03, L2-04, F004, L4-A4 — src/components/cockpit/ActionBar.tsx:145 (+3 more) — UI nit or server-enforced elsewhere (actions authorize with userId; React escapes text)
+- F2 — src/app/dashboard/review/page.tsx:22 — React escapes text; result.message is from the fixed COCKPIT_ERROR_MESSAGES map (errors.ts:7-29)
+- F3 — src/app/dashboard/review/page.tsx:17 — Unknown codes show a fixed generic message (errors.ts); no internal detail can leak (SPEC §1 P6)
+- F4 — src/actions/mcpToken.actions.ts:63 — The P2002 message only tells the logged-in owner that their own token name is taken (upstream behaviour, per-user unique)
+- S-001, S-002, S-004, F7, f2, F6 — src/lib/cockpit/send.ts:112 (+5 more) — userId comes from the action (cockpitSend.actions.ts:27-29); path/lock/lock-age checks exist (send.ts:54-57, 148-158, 267-278)
+- L1-001 — src/components/cockpit/QueueRow.tsx:41 — UI nit or server-enforced elsewhere (actions authorize with userId; React escapes text)
+- MIME-002 — src/lib/cockpit/gmail/mime.ts:32 — /.{1,76}/g is linear (no nested quantifier, no backtracking); input is base64 without newlines
+- MIME-003 — src/lib/cockpit/gmail/mime.ts:46 — Subject is capped at 300 chars (schemas.ts:22) and re-validated in checkContent (send.ts:45-52)
+- L2-01, L1-001, L1-003, L1-004 — src/lib/mcp/tools/addQuestion.ts:11 (+3 more) — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
+- L7-003 — src/lib/cockpit/schemas.ts:91 — SPEC §3 table gives list_change_requests only `limit` (1-100); no offset required
+- L7-005 — src/lib/cockpit/schemas.ts:60 — SPEC §2.3: fitGrade is "A" or "B"
+- L7-006 — src/lib/cockpit/schemas.ts:78 — SPEC §3: status is a free JobStatus value string; an unknown value just matches no rows (cockpit.ts:138)
+- L2-03 — src/actions/cockpitSend.actions.ts:43 — Revalidating after non-auth failures is intentional (comment :41-42); stale-lock recovery is spec'd (send.ts:267)
+- L2-04 — src/actions/cockpitSend.actions.ts:63 — recoverable() enforces 'unknown outcome OR lock older than 60 s' in the service where clause (send.ts:267-278)
+- L4-F003 — src/components/cockpit/GmailCard.tsx:50 — Accessibility/UX nit; the control has visible text and no SPEC AC requires the suggested change; Alert role="status" is a live region
+- L4-F004 — src/components/cockpit/GmailCard.tsx:82 — Accessibility/UX nit; the control has visible text and no SPEC AC requires the suggested change; button is disabled while pending
+- XSS-01 — src/lib/cockpit/markdown.ts:14 — letterMd is capped at 20,000 chars (schemas.ts:26) and markdown-it is linear; renderLetterMarkdown runs only in client components (Panels.tsx:213, EditForm.tsx:140), not on a route
+- L1-04 — src/lib/cockpit/gmail/oauth.ts:203 — azp is only required by OIDC when aud has several values; Google single-aud tokens are checked via aud.includes(clientId) (oauth.ts:203-206)
+- L2-003 — src/components/cockpit/GmailCard.tsx:31 — Cosmetic: toast then refresh; no wrong state
+- PANEL-001, F002, PANEL-002 — src/components/cockpit/Panels.tsx:91 (+2 more) — UI nit or server-enforced elsewhere (actions authorize with userId; React escapes text)
+- F1 — src/app/api/cockpit/gmail/connect/route.ts:46 — cfg.secure is `uri.startsWith("https:")` (oauth.ts:98), i.e. exactly 'Secure iff https'
+- ux-001 — src/app/dashboard/review/settings/page.tsx:31 — UI nit or server-enforced elsewhere (actions authorize with userId; React escapes text)
+- F4, F2, SECL-004, L1-05, L2-003, SECL-005 — src/lib/cockpit/gmail/oauth.ts:84 (+5 more) — Speculative; flow follows SPEC §6.2 (state/nonce/aud/iss/exp checks, fixed error enum); no concrete bypass
+- L7-1 — src/components/cockpit/QueueTabs.tsx:17 — parseQueueTab maps unknown values to 'todo' (queueTabs.ts:12-14) so rows and highlighted tab agree
+- F-001 — src/lib/cockpit/schemas.ts:45 — fileName is only a display name: sanitizePdfName (attachments.ts:17-24) strips to [A-Za-z0-9._-]; the stored path is generated (attachments.ts:60)
+- F2, L1-003 — src/components/cockpit/SendOutcomePanel.tsx:110 (+1 more) — UI nit or server-enforced elsewhere (actions authorize with userId; React escapes text)
+- SEC-004, f-003, f-004, F008 — prisma/schema.prisma:330 (+3 more) — Upstream models or already-reviewed cockpit schema (D-005); no concrete failing input
+- F3, F2 — src/lib/mcp/tools/matchDirective.ts:31 (+1 more) — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
+- f5-secret-exposure, L1-CHK-02 — src/lib/cockpit/gmail/client.ts:122 (+1 more) — Speculative; flow follows SPEC §6.2 (state/nonce/aud/iss/exp checks, fixed error enum); no concrete bypass
+- L7-003 — src/lib/cockpit/packages.ts:127 — cvJson shape validation is in updatePackageContent/compareCv (packages.ts:393-399), not in the file check; AC-15 is covered there
+- SEC-003 — src/components/cockpit/EditRerender.tsx:30 — Stored and displayed as text only (Panels.tsx:250); no interpreter
+- L1-001, L1-003 — prisma/migrations/20261104120000_cockpit_v0/migration.sql:44 (+1 more) — Schema matches SPEC §2; encryption of the token is done in the callback (callback/route.ts:120), not in DDL
+- SEC-002, SEC-003, L4-F005, L2-004, SEC-004 — src/components/cockpit/GmailCard.tsx:28 (+4 more) — UI nit or server-enforced elsewhere (actions authorize with userId; React escapes text)
+- F-003 — src/app/api/cockpit/gmail/callback/route.ts:104 — Speculative; flow follows SPEC §6.2 (state/nonce/aud/iss/exp checks, fixed error enum); no concrete bypass
+- L2-4 — src/lib/cockpit/packages.ts:164 — changeRequestHandledAt is set to now for changes_requested packages (packages.ts:164-168) as SPEC §2.2 step 8 requires
+- S1 — src/components/cockpit/queueTabs.ts:11 — UI nit or server-enforced elsewhere (actions authorize with userId; React escapes text)
+- L7-RATE-001 — src/lib/mcp/rate-limit.ts:44 — AC-50's isError/RATE_LIMITED is produced by the cockpit callers (cockpit.ts:71-76), not by the limiter, which stays backward compatible (SPEC §3)
+- F004 — src/actions/cockpit.actions.ts:158 — scopes are the user's own Gmail grant, shown on the settings card by design (SPEC §5.5)
+- SEC-002, SEC-003, SEC-005, L2-004 — src/components/cockpit/EditForm.tsx:57 (+3 more) — UI nit or server-enforced elsewhere (actions authorize with userId; React escapes text)
+- L2-003, L2-004 — src/lib/cockpit/send.ts:90 (+1 more) — Quiet release/mark helpers log and rely on the 60 s stale-lock rule by design (send.ts:88-110)
+- L2-002 — src/lib/cockpit/errors.ts:33 — Matches SPEC §2.2/§2.3 or is bounded by the zod caps; no concrete failing input
+- F-003 — src/lib/mcp/tools/addJob.ts:13 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
+- L2-06 — src/components/cockpit/ActionBar.tsx:280 — Mark applied is conditional on status pending/approved + empty emailTo + unlocked (packages.ts:322-329); a sent package cannot be marked again
+- L7-008 — src/lib/cockpit/schemas.ts:28 — SPEC §2.3 limits are in characters of the serialized JSON; key order does not change length
+- F3, F4 — src/app/api/cockpit/gmail/connect/route.ts:28 (+1 more) — Speculative; flow follows SPEC §6.2 (state/nonce/aud/iss/exp checks, fixed error enum); no concrete bypass
+- F-006 — src/lib/cockpit/schemas.ts:10 — Single ASCII address enforced by .email() + max 254 + no comma/CRLF (SPEC §2.3); IDN is out of scope
+- L1-001 — src/lib/mcp/tokens.ts:6 — Upstream tool, not modified by cockpit (git log shows only pre-cockpit commits); out of cockpit scope, and AC-46/49/50 govern cockpit tools only
