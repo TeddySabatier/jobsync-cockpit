@@ -350,6 +350,65 @@ describe("backup import with cockpit data", () => {
     expect(fs.readdirSync(cockpitUserDir(dst))).toEqual([`${pkgs[0].cvFileId}.pdf`]);
   });
 
+  it("restoring over one account never touches another user's packages, files or bytes", async () => {
+    const a = await seedCockpit("victim-a@example.com");
+    const b = await seedCockpit("bystander-b@example.com");
+    const { buffer } = await buildBackupZip(a.userId, "victim-a@example.com");
+    await importBackup(buffer, a.userId, "victim-a@example.com", true);
+
+    expect(await prisma.file.findUnique({ where: { id: b.fileId } })).not.toBeNull();
+    expect(fs.readFileSync(b.filePath)).toEqual(PDF);
+    expect(await prisma.applicationPackage.findUnique({ where: { id: b.pkgId } })).not.toBeNull();
+    expect(await prisma.sentEmail.count({ where: { userId: b.userId } })).toBe(1);
+    expect(await prisma.gmailAccount.count({ where: { userId: b.userId } })).toBe(1);
+  });
+
+  it("drops a DOCX under a cockpit CV id: cockpit CVs are PDF only", async () => {
+    const src = await seedCockpit("docx@example.com");
+    const { buffer } = await buildBackupZip(src.userId, "docx@example.com");
+    const zip = await JSZip.loadAsync(buffer);
+    const docx = new JSZip();
+    docx.file("[Content_Types].xml", "<Types/>");
+    docx.file("word/document.xml", "<w:document/>");
+    zip.file(entryFor(zip, src.fileId), await docx.generateAsync({ type: "nodebuffer" }));
+    const tampered = await zip.generateAsync({ type: "nodebuffer" });
+
+    const dst = await seedAccount(prisma, "docxdst@example.com");
+    await importBackup(tampered, dst, "docxdst@example.com", false);
+    const pkg = await prisma.applicationPackage.findFirstOrThrow({
+      where: { userId: dst },
+      include: { cvFile: true },
+    });
+    expect(fs.existsSync(pkg.cvFile!.filePath)).toBe(false);
+    expect(fs.readdirSync(cockpitUserDir(dst))).toEqual([]);
+  });
+
+  it("a failed import changes nothing: old rows and bytes stay, no new CV bytes are left", async () => {
+    const a = await seedCockpit("fail@example.com");
+    const { buffer } = await buildBackupZip(a.userId, "fail@example.com");
+    const zip = await JSZip.loadAsync(buffer);
+    const data = await dataOf(zip);
+    // A second package with the same job and version breaks a unique
+    // constraint in the middle of the transaction.
+    data.ApplicationPackage.push({
+      ...data.ApplicationPackage[0],
+      id: randomUUID(),
+      idempotencyKey: null,
+    });
+    zip.file("data.json", JSON.stringify(data));
+    const broken = await zip.generateAsync({ type: "nodebuffer" });
+
+    await expect(
+      importBackup(broken, a.userId, "fail@example.com", true),
+    ).rejects.toThrow(/nothing was changed/i);
+
+    expect(fs.readFileSync(a.filePath)).toEqual(PDF);
+    expect(fs.readdirSync(cockpitUserDir(a.userId))).toEqual([path.basename(a.filePath)]);
+    expect(await prisma.file.findUnique({ where: { id: a.fileId } })).not.toBeNull();
+    expect(await prisma.applicationPackage.findUnique({ where: { id: a.pkgId } })).not.toBeNull();
+    expect(await prisma.sentEmail.count({ where: { userId: a.userId } })).toBe(1);
+  });
+
   it("restores a package whose CV file was missing at export time", async () => {
     const src = await seedCockpit("gone@example.com");
     fs.unlinkSync(src.filePath);

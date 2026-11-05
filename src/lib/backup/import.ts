@@ -310,9 +310,10 @@ export async function importBackup(
   }
 
   // Captured before the wipe so the old bytes can be unlinked after it commits,
-  // and so the rows can be deleted by id: the cockpit branch of the File scope
-  // stops matching once the wipe has deleted the packages (DELETE_ORDER removes
-  // them before File), which would otherwise leave their File rows behind.
+  // and so the rows can be deleted by id: by the time wipe() reaches File, the
+  // Resume and package rows are already deleted (DELETE_ORDER), so neither
+  // branch of the File scope matches any more and the scoped delete there is a
+  // no-op. Without this explicit delete the File rows would be left behind.
   const oldFiles = await db.file.findMany({
     where: MODEL_SPECS.File.scope(userId),
     select: { id: true, filePath: true },

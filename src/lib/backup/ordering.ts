@@ -68,10 +68,10 @@ export const MODEL_SPECS: Record<BackupModel, ModelSpec> = {
   // File holds no foreign key — Resume.FileId points at it — so it is scoped
   // through the back-relation, matching deleteFile in profile.actions.ts. The
   // second branch picks up the CV PDFs that cockpit packages point at
-  // (ApplicationPackage.cvFileId); those files belong to no resume. NOTE: the
-  // package branch only matches while the packages still exist, and DELETE_ORDER
-  // removes packages before File, so a wipe cannot rely on this scope to find
-  // them: import.ts captures their ids first and deletes them explicitly.
+  // (ApplicationPackage.cvFileId); those files belong to no resume. NOTE: both
+  // branches only match while the Resume / package rows still exist, and
+  // DELETE_ORDER removes those before File, so a wipe cannot rely on this scope
+  // to find them: import.ts captures the ids first and deletes them explicitly.
   File: {
     delegate: "file",
     fks: {},
