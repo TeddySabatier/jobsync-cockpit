@@ -27,12 +27,16 @@ export default function GmailCard({
 
   const disconnect = () =>
     startTransition(async () => {
-      const result = await disconnectGmail();
-      if (result.success) {
-        toastSuccess("Gmail disconnected");
-        router.refresh();
-      } else {
-        toastError(result.message);
+      try {
+        const result = await disconnectGmail();
+        if (result.success) {
+          toastSuccess("Gmail disconnected");
+          router.refresh();
+        } else {
+          toastError(result.message);
+        }
+      } catch {
+        toastError("Request failed. Check your connection and try again.");
       }
     });
 

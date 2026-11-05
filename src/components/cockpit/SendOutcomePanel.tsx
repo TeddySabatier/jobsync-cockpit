@@ -61,6 +61,8 @@ export default function SendOutcomePanel({
       if (r.success) toastSuccess(success);
       else toastError(r.message);
       setConfirm(null);
+    } catch {
+      toastError("Request failed. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

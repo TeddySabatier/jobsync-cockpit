@@ -171,6 +171,8 @@ export default function ActionBar({
       } else {
         toastError(r.message);
       }
+    } catch {
+      toastError("Request failed. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

@@ -108,6 +108,8 @@ export default function SendDialog({
       // On success the package is sent; on an unknown outcome the page now
       // shows the send-outcome panel; on a conflict the user must reopen.
       onOpenChange(false);
+    } catch {
+      toastError("Could not confirm the send. Reload and check the package state before retrying.");
     } finally {
       inFlight.current = false;
       setBusy(false);

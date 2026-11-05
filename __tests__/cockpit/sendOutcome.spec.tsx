@@ -19,6 +19,7 @@ vi.mock("@/actions/cockpit.actions", () => ({
 const toast = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn() }));
 vi.mock("@/lib/toast", () => toast);
 
+import { approvePackage } from "@/actions/cockpit.actions";
 import ActionBar from "@/components/cockpit/ActionBar";
 import SendDialog, { recipientWarning } from "@/components/cockpit/SendDialog";
 import type { PackageDetail } from "@/components/cockpit/Panels";
@@ -245,5 +246,48 @@ describe("SendDialog is closed by default", () => {
   it("renders nothing when closed", () => {
     render(<SendDialog detail={detail()} open={false} onOpenChange={() => {}} />);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+// QA L2-001: a rejected action promise (network drop, deploy mid-request) must
+// surface a toast and re-enable the buttons instead of an unhandled rejection.
+describe("rejected action requests show an error toast", () => {
+  it("ActionBar: Approve rejects -> toast, button re-enabled", async () => {
+    vi.mocked(approvePackage).mockRejectedValue(new Error("network"));
+    render(<ActionBar detail={detail({ status: "pending" })} />);
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(toast.toastError).toHaveBeenCalledWith(
+      "Request failed. Check your connection and try again.",
+    );
+    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+  });
+
+  it("SendDialog: sendPackage rejects -> toast says to check the package state, button re-enabled", async () => {
+    sendPackage.mockRejectedValue(new Error("network"));
+    render(<ActionBar detail={detail()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(toast.toastError).toHaveBeenCalledWith(
+      "Could not confirm the send. Reload and check the package state before retrying.",
+    );
+    expect(toast.toastSuccess).not.toHaveBeenCalled();
+    expect(sendPackage).toHaveBeenCalledTimes(1);
+  });
+
+  it("SendOutcomePanel: releaseSendLock rejects -> toast, button re-enabled", async () => {
+    releaseSendLock.mockRejectedValue(new Error("network"));
+    render(
+      <ActionBar
+        detail={detail({ sendStartedAt: new Date(Date.now() - 5_000), sendOutcome: "unknown" })}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Release lock" }));
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Release lock" }),
+    );
+    expect(toast.toastError).toHaveBeenCalledWith(
+      "Request failed. Check your connection and try again.",
+    );
+    expect(screen.getByRole("button", { name: "Release lock" })).toBeEnabled();
   });
 });
