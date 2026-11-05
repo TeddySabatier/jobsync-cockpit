@@ -34,6 +34,8 @@ export default function EditRerender({ packageId }: { packageId: string }) {
       } else {
         toastError(r.message);
       }
+    } catch {
+      toastError("Request failed. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
