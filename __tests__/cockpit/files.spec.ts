@@ -51,6 +51,10 @@ describe("cockpitUserDir", () => {
       path.join("/elsewhere", "files", "cockpit", "u1"),
     );
   });
+
+  it.each(["", ".", "..", "a/b", "../x"])("rejects %j as user id", (id) => {
+    expect(() => cockpitUserDir(id)).toThrow("Invalid cockpit user id");
+  });
 });
 
 describe("resolveCockpitFile (AC-42)", () => {

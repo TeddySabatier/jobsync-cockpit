@@ -99,7 +99,7 @@ describe(tag("resolveCockpitFile properties"), () => {
     );
     await fc.assert(
       fc.asyncProperty(userId, filePath, async (uid, fp) => {
-        if (uid === "." || uid === "..") return; // covered by the it.fails below
+        if (uid === "." || uid === "..") return; // covered by the "." / ".." test below
         const r = await resolveCockpitFile(uid, { filePath: fp });
         if (r === null) return;
         const rel = path.relative(fs.realpathSync(path.join(state.uploads, "files", "cockpit")), r);
@@ -109,9 +109,9 @@ describe(tag("resolveCockpitFile properties"), () => {
     );
   });
 
-  // BUG (see .cockpit-tmp/findings/l8-failures.md): "." and ".." pass the
-  // `path.basename(userId) !== userId` guard, so base becomes the parent dir.
-  it.fails('rejects "." and ".." as userId (single-segment guard)', async () => {
+  // Regression for #35: "." and ".." used to pass the
+  // `path.basename(userId) !== userId` guard, so base became the parent dir.
+  it('rejects "." and ".." as userId (single-segment guard)', async () => {
     await fc.assert(
       fc.asyncProperty(fc.constantFrom(".", ".."), async (uid) => {
         const fp = path.join(cockpitUserDir("u1"), "a.pdf");
