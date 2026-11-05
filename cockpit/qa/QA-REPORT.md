@@ -115,10 +115,10 @@ Details per finding: `FINDINGS.jsonl`, `REJECTED.md`. Out-of-scope ideas: `V1-ID
   - send OK, double click and two-tab race give exactly one send
   - all Gmail failure classes: 400/401/403 definitive; 429/500/timeout/network/bad body ambiguous with outcome panel; release lock; mark as sent manually; real 20 s client timeout
   - file route: single `X-Frame-Options: SAMEORIGIN`, sandbox CSP, `nosniff`; unauthenticated gives 307 (D-011)
-  - flag off: pages 404, API 404, nav hidden, MCP tools not registered
+  - flag off: covered by the Vitest flag tests; the E2E `flag-off.spec.ts` (separate server, `COCKPIT_E2E_FLAG_OFF=1`) was not run in the final pass
   - 375 px: no horizontal scroll on queue, detail, edit, settings, and Send dialog
   - keyboard: j/k, dialog focus trap
-  - axe on queue, detail, edit, settings, Send dialog, outcome panel
+  - axe on queue, detail, edit, settings, Send dialog, outcome panel: zero serious/critical, except `aria-input-field-name` on the read-only Tiptap panels (Posting, Cover letter), which is exempted in `08-axe.spec.ts` and still open
 - **The 2 fixme are real product bugs, both P3:** an unbroken 120-character subject scrolls horizontally at 375 px (issue #38); focus is not returned to Send after Escape closes the dialog (issue #39).
 - **AC-30 PDF in the iframe under `sandbox` CSP: not verified.** A probe exists (`06-pdf-iframe.spec.ts`, opt-in with `COCKPIT_E2E_PDF=1`), but full Chromium with the PDF viewer cannot launch in the WSL test host; the headless shell has no PDF viewer, so it proves nothing.
 
@@ -173,7 +173,7 @@ Open: issues #36 (E2E suite, PR opened in parallel), #38, #39.
 
 | Decision | Verdict | Why | What flips or confirms it |
 |---|---|---|---|
-| **Owner deploy** (flag on, own data) | **GO, with conditions** | No P0–P2 found; gates green; flag off is the default and tested (E2E, 404 everywhere). The code has never run against a real Gmail account, but deploy alone sends nothing. | Before deploy: cold backup of the data folder (HANDOFF §1); rebuild the image from current `main` (the existing local image predates #34 and #37); after restart, the log shows `20261104120000_cockpit_v0` applied and `/dashboard/review` opens. |
+| **Owner deploy** (flag on, own data) | **GO, with conditions** | No P0–P2 found; gates green; flag off is the default and covered by Vitest. The code has never run against a real Gmail account, but deploy alone sends nothing. | Before deploy: cold backup of the data folder (HANDOFF §1); rebuild the image from current `main` (the existing local image predates #34 and #37); after restart, the log shows `20261104120000_cockpit_v0` applied and `/dashboard/review` opens. |
 | **Real Gmail connect** | **GO, conditional** | The OAuth flow passed against a fake Google, including all rejection paths and reconnect (D-010). Real Google behaviour is untested. Connecting itself sends no mail. | Flips to confirmed when: own OAuth client with `COCKPIT_GMAIL_ALLOWED_ADDRESS` set to the owner's address; connect works on `/dashboard/review/settings`; **one reconnect** works. If connect fails, stop and read the error message shown on the settings page; do not retry blindly. |
 | **First real send** | **NO-GO until a self-send passes** | The send path is only tested against mocks and a fake Google. Real MIME rendering, real Gmail errors and the sandboxed PDF preview are unverified. A real send to a company cannot be undone. | Flips to GO when all of these pass: (1) connect and reconnect above; (2) AC-30 PDF check in a real browser (if the sandbox blocks the viewer, record a DECISIONS entry first); (3) one package whose `emailTo` is the owner's **own** address: Send, then check Gmail Sent (subject, body, attachment opens), package `sent`, job `applied` with a date. Only then send to a real recipient. |
 
