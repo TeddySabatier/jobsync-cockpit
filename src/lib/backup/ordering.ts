@@ -23,6 +23,8 @@ export type BackupModel =
   | "CoverLetter"
   | "Automation"
   | "Job"
+  | "ApplicationPackage"
+  | "SentEmail"
   | "Note"
   | "Interview"
   | "Contact"
@@ -64,8 +66,22 @@ export const MODEL_SPECS: Record<BackupModel, ModelSpec> = {
   Profile: { delegate: "profile", owner: "userId", fks: {}, scope: byUser },
 
   // File holds no foreign key — Resume.FileId points at it — so it is scoped
-  // through the back-relation, matching deleteFile in profile.actions.ts.
-  File: { delegate: "file", fks: {}, scope: byResume },
+  // through the back-relation, matching deleteFile in profile.actions.ts. The
+  // second branch picks up the CV PDFs that cockpit packages point at
+  // (ApplicationPackage.cvFileId); those files belong to no resume. NOTE: the
+  // package branch only matches while the packages still exist, and DELETE_ORDER
+  // removes packages before File, so a wipe cannot rely on this scope to find
+  // them: import.ts captures their ids first and deletes them explicitly.
+  File: {
+    delegate: "file",
+    fks: {},
+    scope: (userId) => ({
+      OR: [
+        { Resume: { profile: { userId } } },
+        { applicationPackages: { some: { userId } } },
+      ],
+    }),
+  },
 
   Resume: {
     delegate: "resume",
@@ -136,6 +152,21 @@ export const MODEL_SPECS: Record<BackupModel, ModelSpec> = {
     },
     scope: byUser,
   },
+  // Cockpit (D-012). cvFileId is optional: the FK is SetNull, and a package
+  // whose CV file is gone still restores. GmailAccount is deliberately NOT a
+  // model here: refresh tokens never leave the server (AC-39).
+  ApplicationPackage: {
+    delegate: "applicationPackage",
+    owner: "userId",
+    fks: { jobId: "Job", cvFileId: "File" },
+    scope: byUser,
+  },
+  SentEmail: {
+    delegate: "sentEmail",
+    owner: "userId",
+    fks: { packageId: "ApplicationPackage" },
+    scope: byUser,
+  },
   Note: { delegate: "note", owner: "userId", fks: { jobId: "Job" }, scope: byUser },
   Interview: { delegate: "interview", fks: { jobId: "Job" }, scope: (userId) => ({ job: { userId } }) },
   Contact: {
@@ -186,6 +217,8 @@ export const INSERT_ORDER: BackupModel[] = [
   "CoverLetter",
   "Automation",
   "Job",
+  "ApplicationPackage",
+  "SentEmail",
   "Note",
   "Interview",
   "Contact",

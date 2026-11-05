@@ -82,7 +82,6 @@ An overnight QA run covered the code after the handoff: free-model review lanes,
 
 ## 8. V1 hooks noticed (not built)
 
-- Include cockpit tables in backups.
 - sha256 dedupe of attachments.
 - Optimistic concurrency on edits.
 - `userId` column on `File`.

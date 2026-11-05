@@ -21,6 +21,7 @@ import {
   type BackupModel,
 } from "./ordering";
 import { writeSnapshot } from "./snapshot";
+import { cockpitUserDir } from "@/lib/cockpit/files";
 import { log } from "@/lib/telemetry";
 import { BackupDataSchema, type BackupData, type BackupManifest } from "./schema";
 
@@ -249,8 +250,25 @@ export async function importBackup(
   const newFileTypes = new Map<string, string>();
   const rejectedFiles: string[] = [];
 
+  // CV PDFs that cockpit packages point at (D-012) are restored into the
+  // importing user's cockpit folder, as <newId>.pdf: that is the only place
+  // resolveCockpitFile and the file route will serve from. Which files they are
+  // comes from the package rows, never from the carried filePath.
+  const cockpitFileIds = new Set(
+    data.ApplicationPackage.map((p) => p.cvFileId).filter(
+      (v): v is string => typeof v === "string" && v.length > 0,
+    ),
+  );
+  const cockpitDir = cockpitFileIds.size > 0 ? cockpitUserDir(userId) : null;
+  if (cockpitDir) await fs.mkdir(cockpitDir, { recursive: true });
+
   for (const file of data.File) {
     const newId = idMap.get(file.id)!;
+    const isCockpit = cockpitDir !== null && cockpitFileIds.has(file.id);
+    const targetFor = (entryName: string, kind: "pdf" | "docx") =>
+      isCockpit
+        ? path.join(cockpitDir!, `${newId}.pdf`)
+        : importedFilePath(newId, entryName, kind);
     const prefix = `files/${file.id}/`;
     // A prefix scan, not `new RegExp(prefix)`: file.id comes out of the
     // payload, and interpolating it into a pattern hands an untrusted string
@@ -263,19 +281,21 @@ export async function importBackup(
       null;
 
     if (!entry || file.fileMissing) {
-      newFilePaths.set(file.id, importedFilePath(newId, file.filePath, "pdf"));
+      newFilePaths.set(file.id, targetFor(file.filePath, "pdf"));
       continue;
     }
 
     const bytes = await entry.async("nodebuffer");
     const checked = checkImportedFile(bytes);
-    if (!checked) {
+    // A cockpit CV is always a PDF (attach_file enforces it); anything else
+    // under that id is dropped like any other non-resume entry.
+    if (!checked || (isCockpit && checked.kind !== "pdf")) {
       rejectedFiles.push(file.fileName);
-      newFilePaths.set(file.id, importedFilePath(newId, file.filePath, "pdf"));
+      newFilePaths.set(file.id, targetFor(file.filePath, "pdf"));
       continue;
     }
 
-    const target = importedFilePath(newId, entry.name, checked.kind);
+    const target = targetFor(entry.name, checked.kind);
     newFilePaths.set(file.id, target);
     newFileTypes.set(file.id, checked.mimeType);
     await fs.writeFile(target, bytes);
@@ -289,13 +309,16 @@ export async function importBackup(
     });
   }
 
-  // Captured before the wipe so the old bytes can be unlinked after it commits.
-  const oldFilePaths = (
-    await db.file.findMany({
-      where: MODEL_SPECS.File.scope(userId),
-      select: { filePath: true },
-    })
-  ).map((f) => f.filePath);
+  // Captured before the wipe so the old bytes can be unlinked after it commits,
+  // and so the rows can be deleted by id: the cockpit branch of the File scope
+  // stops matching once the wipe has deleted the packages (DELETE_ORDER removes
+  // them before File), which would otherwise leave their File rows behind.
+  const oldFiles = await db.file.findMany({
+    where: MODEL_SPECS.File.scope(userId),
+    select: { id: true, filePath: true },
+  });
+  const oldFilePaths = oldFiles.map((f) => f.filePath);
+  const oldFileIds = oldFiles.map((f) => f.id);
 
   const counts: Record<string, number> = {};
 
@@ -305,6 +328,11 @@ export async function importBackup(
         const tx = transaction as unknown as Tx;
 
         await wipe(tx, userId);
+        // By id, after the packages are gone: see oldFiles above. Rows already
+        // removed by the scoped loop are simply not matched.
+        if (oldFileIds.length > 0) {
+          await tx.file.deleteMany({ where: { id: { in: oldFileIds } } });
+        }
         await insertLookups(tx, data, idMap, userId);
 
         for (const model of INSERT_ORDER) {

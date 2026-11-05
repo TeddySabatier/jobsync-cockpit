@@ -70,8 +70,12 @@ describe("backup ordering", () => {
   });
 
   it("scopes the models whose ownership chain is easy to get wrong", () => {
+    // A resume's file, or a CV PDF that a cockpit package of this user points at.
     expect(MODEL_SPECS.File.scope("u1")).toEqual({
-      Resume: { profile: { userId: "u1" } },
+      OR: [
+        { Resume: { profile: { userId: "u1" } } },
+        { applicationPackages: { some: { userId: "u1" } } },
+      ],
     });
     expect(MODEL_SPECS.Summary.scope("u1")).toEqual({
       ResumeSection: { Resume: { profile: { userId: "u1" } } },
@@ -83,6 +87,31 @@ describe("backup ordering", () => {
     expect(MODEL_SPECS.AutomationRun.scope("u1")).toEqual({
       automation: { userId: "u1" },
     });
+  });
+});
+
+// D-012: cockpit data travels in backups; Gmail tokens never do (AC-39).
+describe("cockpit models", () => {
+  it("owns packages and sent emails by the session user and chains their FKs", () => {
+    expect(MODEL_SPECS.ApplicationPackage.owner).toBe("userId");
+    expect(MODEL_SPECS.ApplicationPackage.fks).toEqual({ jobId: "Job", cvFileId: "File" });
+    expect(MODEL_SPECS.ApplicationPackage.scope("u1")).toEqual({ userId: "u1" });
+    expect(MODEL_SPECS.SentEmail.owner).toBe("userId");
+    expect(MODEL_SPECS.SentEmail.fks).toEqual({ packageId: "ApplicationPackage" });
+    expect(MODEL_SPECS.SentEmail.scope("u1")).toEqual({ userId: "u1" });
+  });
+
+  it("inserts files and jobs before packages, and packages before sent emails", () => {
+    const at = (m: string) => INSERT_ORDER.indexOf(m as never);
+    expect(at("File")).toBeLessThan(at("ApplicationPackage"));
+    expect(at("Job")).toBeLessThan(at("ApplicationPackage"));
+    expect(at("ApplicationPackage")).toBeLessThan(at("SentEmail"));
+  });
+
+  it("never lists a Gmail account model, so refresh tokens cannot be exported", () => {
+    const names = INSERT_ORDER.map((m) => m.toLowerCase());
+    expect(names.some((n) => n.includes("gmail"))).toBe(false);
+    expect(Object.values(MODEL_SPECS).some((s) => s.delegate.toLowerCase().includes("gmail"))).toBe(false);
   });
 });
 

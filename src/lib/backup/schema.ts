@@ -200,6 +200,50 @@ const Job = z.object({
   descriptionCompleteness: optStr,
 });
 
+// Cockpit (D-012). userId is the owner column: stripped on export, written from
+// the session on import. GmailAccount is never part of a backup (AC-39).
+const ApplicationPackage = z.object({
+  id,
+  jobId: id,
+  version: int,
+  status: str,
+  emailTo: optStr,
+  emailSubject: str,
+  emailBody: str,
+  letterMd: optStr,
+  fitGrade: optStr,
+  fitAnalysis: optStr,
+  cvJson: optStr,
+  cvFileId: optId,
+  cvPdfStale: z.boolean(),
+  sourceFolder: optStr,
+  idempotencyKey: optStr,
+  rejectReason: optStr,
+  changeRequest: optStr,
+  changeRequestedAt: optDt,
+  changeRequestHandledAt: optDt,
+  changeRequestResponse: optStr,
+  editedAt: optDt,
+  approvedAt: optDt,
+  rejectedAt: optDt,
+  sendStartedAt: optDt,
+  sendOutcome: optStr,
+  sentAt: optDt,
+  sentVia: optStr,
+  createdAt: dt,
+  updatedAt: dt,
+});
+
+const SentEmail = z.object({
+  id,
+  packageId: id,
+  fromAddress: str,
+  toAddress: str,
+  gmailMessageId: str,
+  threadId: str,
+  sentAt: dt,
+});
+
 const Note = z.object({
   id,
   jobId: id,
@@ -303,6 +347,8 @@ export const BackupDataSchema = z.object({
   CoverLetter: group(CoverLetter),
   Automation: group(Automation),
   Job: group(Job),
+  ApplicationPackage: group(ApplicationPackage),
+  SentEmail: group(SentEmail),
   Note: group(Note),
   Interview: group(Interview),
   Contact: group(Contact),
