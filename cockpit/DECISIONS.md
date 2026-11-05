@@ -130,3 +130,17 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 | (b) | Send preconditions and lock errors | **Accept.** Sending when the package is already **locked**, **not approved**, **stale** (`expectedUpdatedAt` mismatch), or **not the active version** returns **`CONFLICT`** (SPEC §6.4 says `INVALID_STATE` for the lock case). One code tells the UI to reload. **`sendStartedAt` stays set** after a sent / manual-sent package (`sent` is terminal). | §6.4, AC-25, AC-33 |
 
 - **Cost if wrong:** handoff and E2E docs must describe 307 vs 401 for the file route; UI must handle `CONFLICT` on send reload paths consistently.
+
+
+## D-012 Cockpit data travels in backups (overrides the V0 part of D-009)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | `ApplicationPackage`, `SentEmail` and the CV `File` rows they reference are **included** in backup export and import | **Accept (reverses D-009 / D-007 N18 for these tables).** They are added to `MODEL_SPECS` and `INSERT_ORDER` (after `Job`); the `File` scope also matches CV PDFs of the user's packages. | Found in QA: restoring over an account with packages silently deleted them and their sent history (cascade from `Job`), left the CV bytes orphaned on disk, and the pre-import snapshot had no copy to recover from. |
+| (b) | `GmailAccount` stays **excluded** | **Keep (AC-39).** Never a backup model; a restore neither exports nor wipes it. | The refresh token must not leave the server. After restoring onto a new instance the owner reconnects Gmail. |
+| (c) | Cockpit CV files are restored into `cockpitUserDir(<importing user>)` as `<newFileId>.pdf` | **Accept.** Detection comes from the package rows (`cvFileId`), never from the carried `filePath`; only real PDFs are written; others are dropped and the row keeps a path inside the cockpit folder. | `resolveCockpitFile` and the file route only serve from that folder (SPEC §4). |
+| (d) | The wipe deletes the user's old `File` rows **by id** (captured before the transaction) and the old bytes after commit | **Accept.** | By the time the wipe reaches `File`, the `Resume` and package rows are already deleted (`DELETE_ORDER`), so neither branch of the `File` scope matches any more and a scoped delete would leave the rows behind. |
+| (e) | Backup format version stays **1** | **Accept, with a known limit.** The new groups default to empty, so older backups still import. The reverse is not clean: an older build of this fork importing a newer backup drops the unknown `ApplicationPackage` / `SentEmail` groups but still imports the CV `File` rows, which then have no owner and are orphaned (rows and bytes), with no warning. Restore a newer backup on a build that includes D-012. | Additive change; this fork has a single deployed version, so a version bump (old builds rejecting v2 cleanly) was judged not worth the churn. Revisit if backups start crossing builds. |
+
+- **Scope:** `src/lib/backup/{ordering,schema,import}.ts`, `__tests__/backupCockpit.spec.ts` and the three backup specs that mock the model list.
+- **Not changed:** `GmailAccount` handling, the MCP tools, Send. SPEC stays frozen; this entry is the amendment of record.

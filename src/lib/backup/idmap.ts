@@ -16,6 +16,9 @@ const OPTIONAL_FKS = new Set<string>([
   "Job.resumeId",
   "Job.coverLetterId",
   "Job.automationId",
+  // The schema FK is SetNull: a package whose CV row is not in the backup
+  // restores without a CV instead of blocking the whole import (D-012).
+  "ApplicationPackage.cvFileId",
   "Contact.interviewId",
   "Task.activityTypeId",
   "Activity.taskId",

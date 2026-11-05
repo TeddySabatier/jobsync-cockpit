@@ -125,7 +125,7 @@ Flow: approve → **Send** (when Gmail connected, valid `emailTo`, CV file prese
 
 - **PDF in iframe:** file route sets `Content-Security-Policy: sandbox; frame-ancestors 'self'` and scoped `X-Frame-Options: SAMEORIGIN` in Next config. Some browsers may not render sandboxed PDFs in an iframe — use download if preview fails.
 - **Gmail tokens:** refresh tokens encrypted with `ENCRYPTION_KEY` (same key as other stored secrets). Must be set **before** OAuth callback stores a token. Changing the key requires reconnecting Gmail.
-- **Backup (V0):** standard backup export does **not** include `GmailAccount`, `SentEmail`, or `ApplicationPackage` (allow-listed models only).
+- **Backup (D-012):** the standard backup includes review packages, sent-email records and the CV PDFs they point at, so a restore brings them back. It never includes the Gmail connection (`GmailAccount`): its refresh token stays on the server, so after restoring onto a fresh instance you reconnect Gmail. Restoring over an existing account replaces its packages and sent history with the backup contents (the automatic pre-restore snapshot contains them too). Backups made before D-012 simply have no packages.
 - **Upload path:** CV PDFs live under `<UPLOADS_DIR>/files/cockpit/<userId>/` (`UPLOADS_DIR` is `data` in dev, `/data` in production — not a separate env var).
 
 ## Troubleshooting by code

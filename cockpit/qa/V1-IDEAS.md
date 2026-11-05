@@ -15,7 +15,7 @@ None of these is a V0 bug. Source in brackets; "(mine)" = noticed during triage,
 - Optimistic concurrency on edits (`expectedUpdatedAt` on `updatePackageContent`). [F-008 schema.prisma:560, L2-004 EditForm.tsx:23]
 - Cleanup of unreferenced attachments (SPEC §8). [F-003 schemas.ts:62]
 - sha256 dedupe of attachments (SPEC §8).
-- Include cockpit tables in backups (D-009).
+- ~~Include cockpit tables in backups (D-009).~~ Done in D-012.
 
 ## Product ideas
 - `offset` on `list_change_requests` for pagination. [L7-003]
