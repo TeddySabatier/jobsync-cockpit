@@ -9,7 +9,7 @@ All **11 tickets C-01..C-11** are merged into `main` of [TeddySabatier/jobsync-c
 ## Phase 4 results
 
 - **Migration:** `20261104120000_cockpit_v0` applied cleanly to a **copy** of the real DB; existing row counts unchanged; **3 new cockpit tables empty**.
-- **Image:** `jobsync-cockpit:v0` built locally (image id `463c02fc5c70`, ~364 MB, from commit `2297ca3`). C-11 is docs-only; rebuild is optional.
+- **Image:** `jobsync-cockpit:v0` built locally (image id `463c02fc5c70`, ~364 MB, from commit `2297ca3`). **Rebuild from current `main` before deploy:** it predates the QA fixes #34 and #37.
 - **MCP E2E** (port **3738**, DB copy, throwaway secrets): **all PASS**
   - `tools/list`: 6 cockpit tools; **no** send / approve / reject / edit tool
   - `list_jobs`, `attach_file`, submit v1, resubmit → v2 supersedes v1
@@ -44,14 +44,20 @@ All **11 tickets C-01..C-11** are merged into `main` of [TeddySabatier/jobsync-c
 
 ## 4. E2E + visual checks (Claude Code with Playwright)
 
-- [ ] Full review flow: queue → detail → edit → request changes → bot marks done → approve.
-- [ ] **AC-20:** no horizontal scroll at **375 px** on queue / detail / edit / settings.
+- [x] Full review flow: queue → detail → edit → request changes → bot marks done → approve. (e2e `01-review-flow.spec.ts`)
+- [x] **AC-20:** no horizontal scroll at **375 px** on queue / detail / edit / settings. (e2e `07-responsive-keyboard.spec.ts`; known gap: a 120-character unbroken subject scrolls, issue #38)
 - [ ] **AC-30:** CV PDF renders in the iframe with `CSP: sandbox; frame-ancestors 'self'`. Some browser PDF viewers refuse sandboxed PDFs — if so, **record a DECISIONS entry** before dropping `sandbox`.
-- [ ] Authenticated `curl -I` of `/api/cockpit/files/<id>`: exactly **one** `X-Frame-Options: SAMEORIGIN` and the expected CSP.
+- [x] Authenticated `curl -I` of `/api/cockpit/files/<id>`: exactly **one** `X-Frame-Options: SAMEORIGIN` and the expected CSP. (e2e `05-file-route.spec.ts`)
 - [ ] Overflow menu → confirm dialog focus (Radix).
-- [ ] Send dialog: full body, attachment name + size, domain / free-mail warning (heuristic; may false-positive).
-- [ ] Send-outcome panel after a simulated stuck lock.
+- [x] Send dialog: full body, attachment name + size, domain / free-mail warning (heuristic; may false-positive). (e2e `03-send.spec.ts`; focus trap in `07-responsive-keyboard.spec.ts`; focus not returned to Send after Escape, issue #39)
+- [x] Send-outcome panel after a simulated stuck lock. (e2e `04-send-failures.spec.ts`: ambiguous Gmail failures, release lock, mark as sent; the 60 s stale-lock age rule is covered by unit tests only)
 - [ ] Leaving edit mode via a sidebar link does **not** warn about unsaved changes (**known limit**).
+
+Not ticked, by design: **AC-30** PDF render in the iframe (needs a real desktop browser; the automated probe could not launch full Chromium) and the sidebar-link check (known limit). Also open: the overflow-menu confirm dialog focus check.
+
+## 4b. QA run (2026-11-05)
+
+An overnight QA run covered the code after the handoff: free-model review lanes, paid-model triage, property tests, and an end-to-end suite against a fake Google. Result: no P0, P1 or P2 bug; 2 P3 fixed (#34, #37); 2 P3 open (#38, #39). Not verified: real Google, PDF render (AC-30), Firefox/WebKit. See [`cockpit/qa/QA-REPORT.md`](qa/QA-REPORT.md) (GO / NO-GO per deploy, Gmail connect, first send) and [`cockpit/qa/HUMAN-QUEUE.md`](qa/HUMAN-QUEUE.md).
 
 ## 5. First real send (owner only)
 
@@ -71,7 +77,7 @@ All **11 tickets C-01..C-11** are merged into `main` of [TeddySabatier/jobsync-c
 - **`attach_file` quota check is not atomic** (shortcut: single user).
 - **`File` rows have no `userId` column** — ownership is path-based via `cockpitUserDir`.
 - **Edits have no optimistic-concurrency check** (two tabs can overwrite; Send re-checks `updatedAt`).
-- **`__tests__/DataSettings.spec.tsx > shows the backup preview after a preflight, without importing`** fails intermittently (pre-existing).
+- ~~`__tests__/DataSettings.spec.tsx` preview test fails intermittently~~ fixed in #28 (it depended on the timezone).
 - C-09 PR body still says "revokes old one" (**superseded by D-010**).
 
 ## 8. V1 hooks noticed (not built)

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* cockpit V0 (behind `COCKPIT_ENABLED`): review queue for bot-prepared application packages, Gmail send with a send lock and outcome recovery, MCP tools for the bot; see `docs/cockpit.md` and `cockpit/qa/QA-REPORT.md`
+
 ## [1.1.19](https://github.com/Gsync/jobsync/compare/v1.1.18...v1.1.19) (2026-09-06)
 
 
