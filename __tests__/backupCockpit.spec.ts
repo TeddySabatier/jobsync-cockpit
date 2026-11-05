@@ -306,6 +306,50 @@ describe("backup import with cockpit data", () => {
     expect(fs.readFileSync(file.filePath)).toEqual(PDF);
   });
 
+  it("restores a package whose CV row is not in the backup, without a CV, instead of failing", async () => {
+    const src = await seedCockpit("dangling@example.com");
+    const { buffer } = await buildBackupZip(src.userId, "dangling@example.com");
+    const zip = await JSZip.loadAsync(buffer);
+    const data = await dataOf(zip);
+    data.File = [];
+    zip.remove(entryFor(zip, src.fileId));
+    zip.file("data.json", JSON.stringify(data));
+    const broken = await zip.generateAsync({ type: "nodebuffer" });
+
+    const dst = await seedAccount(prisma, "danglingdst@example.com");
+    const result = await importBackup(broken, dst, "danglingdst@example.com", false);
+    expect(result.counts.ApplicationPackage).toBe(1);
+    const pkg = await prisma.applicationPackage.findFirstOrThrow({ where: { userId: dst } });
+    expect(pkg.cvFileId).toBeNull();
+  });
+
+  it("keeps two package versions pointing at one shared CV file as one file", async () => {
+    const src = await seedCockpit("shared@example.com");
+    await prisma.applicationPackage.create({
+      data: {
+        userId: src.userId,
+        jobId: src.jobId,
+        version: 2,
+        status: "pending",
+        emailSubject: "Application v2",
+        emailBody: "Body v2",
+        cvFileId: src.fileId,
+      },
+    });
+    const { buffer } = await buildBackupZip(src.userId, "shared@example.com");
+    const dst = await seedAccount(prisma, "shareddst@example.com");
+    await importBackup(buffer, dst, "shareddst@example.com", false);
+
+    const pkgs = await prisma.applicationPackage.findMany({
+      where: { userId: dst },
+      orderBy: { version: "asc" },
+    });
+    expect(pkgs.map((p) => p.version)).toEqual([1, 2]);
+    expect(pkgs[0].cvFileId).toBeTruthy();
+    expect(pkgs[1].cvFileId).toBe(pkgs[0].cvFileId);
+    expect(fs.readdirSync(cockpitUserDir(dst))).toEqual([`${pkgs[0].cvFileId}.pdf`]);
+  });
+
   it("restores a package whose CV file was missing at export time", async () => {
     const src = await seedCockpit("gone@example.com");
     fs.unlinkSync(src.filePath);
