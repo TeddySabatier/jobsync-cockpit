@@ -1,6 +1,6 @@
 # V1 plan: application follow-ups
 
-Status: **proposal, not frozen (revision 2, after independent review).** Written after V0 shipped (main at `abf22bc`). Needs an owner OK, then a SPEC amendment (new DECISIONS entry) before any ticket starts.
+Status: **proposal, not frozen (revision 3: D1 approved by the owner; follow-ups shown as a thread under the application).** Written after V0 shipped (main at `abf22bc`). Needs an owner OK, then a SPEC amendment (new DECISIONS entry) before any ticket starts.
 
 ## 1. Goal and non-goals
 
@@ -62,7 +62,7 @@ Skipping a step moves its `skippedThrough` marker; for the next step the anchor 
 - **`SentEmail.messageIdHeader`** (nullable): persist the `Message-ID` that `mime.ts` already generates, for `In-Reply-To` / `References`.
 - Additive migration, pure DDL as in V0 (the unique replacement is a rebuild of that index only; checked in the migration test on a temp DB).
 
-**Decision D1 (needs your OK): reuse packages with `kind`, or a separate draft table?** Recommendation: **reuse**, under two conditions from the review:
+**Decision D1 (approved by the owner): reuse packages with `kind`, and present them as a thread under the application.** Two conditions from the review:
 1. versions are sequenced per kind (above);
 2. one helper, `activeApplication(jobId)`, owns the "which package is the application" filter, so the kind rule lives in one place.
 
@@ -94,10 +94,15 @@ Reuse keeps one review UI, one send path (lock, recovery), one edit path and one
 Plus `kind` on the `list_change_requests` output. Posting text is returned wrapped as **untrusted data** (stated in the tool description), like V0's posting handling. No send, approve, outcome or status tool exists on MCP. Same rate limits and error style as V0; the due module and both tools never import `send` or `gmail` (extend the import-graph test).
 
 ### 3.6 UI
-- **Queue:** new **Follow-ups** tab. Rows: company, role, "sent 8 days ago", step 1 or 2, state (due / draft ready / snoozed). Follow-up drafts appear only in this tab, never in To do / Sent / Rejected.
+- **Queue:** new **Follow-ups** tab with **one row per application thread** (not per draft). Rows: company, role, "sent 8 days ago", step 1 or 2, state (due / draft ready / snoozed). Follow-up drafts appear only in this tab, never in To do / Sent / Rejected.
+- **Application thread (the main view):** each job's review page shows the application as a **conversation**, oldest first, one card per entry:
+  1. **Application** (sent date, subject, short body, CV link; read-only once sent);
+  2. **Follow-up 1**, then **Follow-up 2**, each in one of the states *scheduled for <date>* / *draft ready* (opens inline for edit, request changes, approve, Send) / *sent <date>* / *skipped*;
+  3. **Outcome events** (Got a reply, Interview, Rejected, Closed, with their dates), and **Open thread in Gmail**, which opens the same conversation in Gmail because follow-ups are sent into the original Gmail thread.
+  The thread rail appears on the page of **every package of the job**, so existing review URLs keep working, and an entry links to its package. The thread is **derived** from the job's packages (by `kind`, `sentAt`, `createdAt`) plus the single recorded outcome; no separate event table in V1 (outcome history is a non-goal, one outcome at a time).
 - **Sidebar badge** on Review: due count. One cheap count query in the dashboard layout, **only when `COCKPIT_ENABLED`**. It is the **only** due signal in V1 (no push or email); the bot can mention due items in its own run summary.
 - **Row actions:** Snooze (3 / 7 days), Skip step, Stop follow-ups, **Got a reply / Interview / Rejected** (the last two set the job status after a confirm that says what changes), **Undo outcome**, **Open thread in Gmail** (a plain `https://mail.google.com/...#all/<threadId>` URL; a thread id is an opaque id, not a credential. Tokens and ciphertext still never reach client props).
-- **Detail:** a timeline on the job's review page (sent, follow-ups, outcome). A follow-up draft opens in the normal review detail with a "Follow-up 1 · replies to your email of <date>" banner. The sent application keeps showing as the active application.
+- **Detail:** a follow-up draft opens in the normal review detail inside its thread, with a "Follow-up 1 · replies to your email of <date>" banner. The sent application keeps showing as the active application.
 - Phone widths and keyboard behaviour as in V0.
 
 ### 3.7 Security and safety
@@ -127,7 +132,7 @@ Plus `kind` on the `list_change_requests` output. Posting text is returned wrapp
 | F-2 | Domain: `activeApplication` helper, pure due calculation, kind-aware package rules, snooze / skip / stop / outcome / undo actions | The invariant changes live here; heavy unit tests incl. all cadence edge cases |
 | F-3 | MCP: `list_due_follow_ups`, `submit_follow_up`, `kind` on `list_change_requests` | Import-graph test extended |
 | F-4 | Send for follow-ups (the five sites in 3.4) incl. send-time recheck and recovery-panel / manual paths | Security-sensitive: line-by-line review, mocked Gmail |
-| F-5 | UI: Follow-ups tab, badge, row actions, timeline, banner, undo | Mobile + a11y checks |
+| F-5 | UI: **application thread view** (rail on every package page), Follow-ups tab (one row per thread), badge, row actions, banner, undo | Mobile + a11y checks; the thread builder is a pure function, unit-tested |
 | F-6 | Docs, handoff, **bot instructions snippet** (which tool answers which kind), `.env.example` (`COCKPIT_TIMEZONE`, `COCKPIT_FOLLOWUP_WINDOW_DAYS`) | |
 | F-7 | QA: E2E with fake Google (set sent dates in the DB to simulate days), then one real follow-up to yourself | |
 
@@ -148,6 +153,8 @@ Rough size: about 7 tickets, comparable to the second half of V0.
 12. Applications sent before V1 are covered with no data migration, within the window.
 13. The sidebar badge is gated by `COCKPIT_ENABLED` and shows the due count.
 14. Nothing in V1 sends automatically, and the bot cannot approve, send, set outcomes or change status.
+15. A job's review page shows the application thread: the sent application, follow-up 1 and 2 (scheduled / draft ready / sent / skipped) and the outcome, in order, on the page of every package of the job; entries link to their package; the Follow-ups tab has one row per thread.
+16. The thread is derived (no event table): it reflects a skipped step, an undone outcome and a restored backup correctly.
 
 ## 7. Risks and open items
 - **Late drafts:** the bot only runs on its schedule, so a draft can be up to one run late. Fine for a 7-day cadence. The badge is the only due signal.
@@ -156,5 +163,8 @@ Rough size: about 7 tickets, comparable to the second half of V0.
 - **Threading** depends on spike S1; the fallback is weaker threading outside Gmail, and it is the norm for pre-V1 sends.
 - **Invariant sprawl** is the main engineering risk (about 20 sites); it is why F-0 and the `activeApplication` helper come first.
 
-## 8. Changes from revision 1 (independent review, `APPROVE WITH CHANGES`)
+## 8. Changes from revision 2 (owner decision)
+D1 approved: reuse the package pipeline with `kind`. Follow-ups are presented as a **thread under the application** (section 3.6, AC-15/16, F-5): a derived conversation view on every package page of the job, one row per thread in the Follow-ups tab.
+
+## 9. Changes from revision 1 (independent review, `APPROVE WITH CHANGES`)
 Added: send-path changes at all five sites; cadence counted from sent follow-up packages (not `SentEmail`); apply-via-link excluded; `submit_follow_up` supersedes open drafts and `kind` on `list_change_requests`; per-kind version sequence and `activeApplication` helper; anchor = `package.sentAt`; per-step skip and stop; rejected draft = skipped step; 30-day window; timezone setting; send-time recheck; outcome undo; the threadId rule clarified (opaque id may reach the client, tokens never); strict header validation; backup format version 2; badge gating; third-follow-up dropped from scope; S2 pre-answered; extra ACs and the bot-instructions ticket.
