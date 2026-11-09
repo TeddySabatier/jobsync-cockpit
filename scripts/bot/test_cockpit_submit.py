@@ -1,5 +1,10 @@
 """Tests for cockpit_submit.py against a stub MCP server (standard library only).
 
+The stub mimics the real server where it matters: add_job dedupes by link and then
+by company + title, answers in three different wordings, reports rate limits as
+plain text, every upload gets its own file id, a reused idempotency key for another
+job is a CONFLICT, and it can redirect, hang or answer garbage.
+
 Run from this folder:  python -m unittest -v test_cockpit_submit
 """
 import base64
@@ -8,9 +13,12 @@ import io
 import json
 import os
 import re
+import shutil
 import tempfile
 import threading
+import time
 import unittest
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest import mock
@@ -20,20 +28,27 @@ import cockpit_submit as cs
 TOKEN = "jsync_TESTTOKEN_do_not_print_1234567890"
 PDF = b"%PDF-1.4\n% synthetic cv\n%%EOF\n"
 KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{1,100}$")
+JOB = "00000000-0000-4000-8000-%012d"
 
 
 class Stub:
-    """A tiny MCP endpoint that records requests and can be told to fail."""
-
     def __init__(self):
         self.calls = []  # (tool name, arguments)
         self.auth = []
-        self.keys = set()
-        self.jobs = set()
+        self.keys = {}  # idempotency key -> (jobId, packageId)
+        self.job_urls = {}
+        self.job_names = {}
+        self.next_id = 1
+        self.files = 0
         self.http_status = 200
-        self.fail = {}  # tool name -> "CODE: message"
+        self.redirect_to = None
+        self.delay = 0
+        self.raw_body = None
+        self.fail = {}  # tool -> isError text
+        self.plain = {}  # tool -> plain-text answer (rate limit, scope)
+        self.change_requests = []
         self.tools = [
-            "add_job", "attach_file", "submit_application_package",
+            "add_job", "find_job", "attach_file", "submit_application_package",
             "list_jobs", "list_change_requests", "mark_change_request_done",
         ]
         stub = self
@@ -46,19 +61,28 @@ class Stub:
                 length = int(self.headers.get("Content-Length", 0))
                 request = json.loads(self.rfile.read(length))
                 stub.auth.append(self.headers.get("Authorization"))
+                if stub.delay:
+                    time.sleep(stub.delay)
+                if stub.redirect_to:
+                    self.send_response(302)
+                    self.send_header("Location", stub.redirect_to)
+                    self.end_headers()
+                    return
                 if stub.http_status != 200:
                     self.send_response(stub.http_status)
                     self.end_headers()
                     return
-                method = request["method"]
-                if method == "tools/list":
-                    result = {"tools": [{"name": n} for n in stub.tools]}
+                if stub.raw_body is not None:
+                    payload = stub.raw_body.encode()
                 else:
-                    name = request["params"]["name"]
-                    arguments = request["params"]["arguments"]
-                    stub.calls.append((name, arguments))
-                    result = stub.tool(name, arguments)
-                payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": result}).encode()
+                    if request["method"] == "tools/list":
+                        result = {"tools": [{"name": n} for n in stub.tools]}
+                    else:
+                        name = request["params"]["name"]
+                        arguments = request["params"]["arguments"]
+                        stub.calls.append((name, arguments))
+                        result = stub.tool(name, arguments)
+                    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": result}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
@@ -73,30 +97,55 @@ class Stub:
         self.server.shutdown()
         self.server.server_close()
 
+    def new_id(self):
+        n = self.next_id
+        self.next_id += 1
+        return JOB % n
+
+    def names(self, tool):
+        return [c[0] for c in self.calls if c[0] == tool]
+
     def tool(self, name, arguments):
+        if name in self.plain:
+            return {"content": [{"type": "text", "text": self.plain[name]}]}
         if name in self.fail:
             return {"isError": True, "content": [{"type": "text", "text": self.fail[name]}]}
-        if name == "add_job":
-            # The real server words this three ways: created, upsert on an existing job, duplicate.
-            seen = arguments["company"] + "|" + arguments["jobTitle"]
-            first = seen not in self.jobs
-            self.jobs.add(seen)
-            if first:
-                text = "Created Acme; Created Role. Job created (id: 11111111-2222-3333-4444-555555555555). Done."
+        if name == "find_job":
+            found = self.job_urls.get(arguments["jobUrl"])
+            text = ('Found existing job "Role" at "Co" (id: %s, status: draft, description: full).' % found
+                    if found else "No saved job matches that URL — call add_job to create it.")
+        elif name == "add_job":
+            company, title, link = arguments["company"], arguments["jobTitle"], arguments.get("jobUrl")
+            found = self.job_urls.get(link) if link else None
+            by_name = self.job_names.get(company + "|" + title)
+            if not found and by_name and not arguments.get("allowDuplicate"):
+                found = by_name
+            if found and arguments.get("upsert"):
+                text = "Job %s updated. Fields changed: description." % found
+            elif found:
+                text = 'Duplicate detected — existing job "%s" at "%s" (id: %s). Call update_job.' % (title, company, found)
             else:
-                text = "Job 11111111-2222-3333-4444-555555555555 updated. Fields changed: jobUrl, description."
+                found = self.new_id()
+                self.job_names.setdefault(company + "|" + title, found)
+                if link:
+                    self.job_urls[link] = found
+                text = "Created %s; Created %s. Job created (id: %s). Done." % (company, title, found)
         elif name == "attach_file":
-            text = json.dumps({"fileId": "file-1", "fileName": "x.pdf", "sizeBytes": 10})
+            self.files += 1
+            text = json.dumps({"fileId": "file-%d" % self.files, "fileName": arguments["fileName"], "sizeBytes": 10})
         elif name == "submit_application_package":
-            key = arguments["idempotencyKey"]
+            key, job = arguments["idempotencyKey"], arguments["jobId"]
+            if key in self.keys and self.keys[key][0] != job:
+                return {"isError": True, "content": [{"type": "text", "text": "CONFLICT: That key belongs to another job."}]}
             again = key in self.keys
-            self.keys.add(key)
-            text = json.dumps({"packageId": "pkg-1", "version": 1, "status": "pending",
+            if not again:
+                self.keys[key] = (job, "pkg-%d" % (len(self.keys) + 1))
+            text = json.dumps({"packageId": self.keys[key][1], "version": 1, "status": "pending",
                                "supersededIds": [], "idempotent": again})
         elif name == "list_jobs":
             text = json.dumps({"total": 0, "jobs": []})
         elif name == "list_change_requests":
-            text = json.dumps([{"packageId": "pkg-9", "changeRequest": "shorten the letter"}])
+            text = json.dumps(self.change_requests)
         elif name == "mark_change_request_done":
             text = json.dumps({"packageId": arguments["packageId"], "status": "pending"})
         else:
@@ -116,34 +165,40 @@ def run(argv, env=None):
 
 
 class FolderMixin:
-    def make_folder(self, **overrides):
-        folder = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: __import__("shutil").rmtree(folder, ignore_errors=True))
+    def make_folder(self, name="2026-11-09_acme_backend-engineer", **overrides):
+        folder = Path(tempfile.mkdtemp()) / name
+        folder.mkdir()
+        self.addCleanup(lambda: shutil.rmtree(folder.parent, ignore_errors=True))
         files = {
             "letter.md": "Dear team,\n\nI would like to apply.\n",
             "posting.md": "Posting text, long enough to be a description.",
             "cv.json": json.dumps({"name": "Jane Doe"}),
         }
         files.update(overrides)
-        for name, content in files.items():
+        for fname, content in files.items():
             if content is not None:
-                (folder / name).write_text(content, encoding="utf-8")
+                (folder / fname).write_text(content, encoding="utf-8")
         (folder / "Jane_Doe_CV_Acme.pdf").write_bytes(PDF)
         return folder
 
 
 class HelperTests(unittest.TestCase):
-    def test_idempotency_key_is_valid_and_stable(self):
-        key = cs.idempotency_key("Société Générale & Fils", "Développeur Back-end (H/F)", "2026-11-09")
+    def test_key_identifies_a_posting_not_a_day(self):
+        key = cs.idempotency_key("2026-11-09_societe-generale_dev", "Société Générale", "Développeur (H/F)", "https://x.example/1")
         self.assertRegex(key, KEY_RE)
-        self.assertEqual(key, cs.idempotency_key("Société Générale & Fils", "Développeur Back-end (H/F)", "2026-11-09"))
-        self.assertTrue(key.startswith("scout-2026-11-09-"))
+        self.assertEqual(key, cs.idempotency_key("2026-11-09_societe-generale_dev", "Société Générale", "Développeur (H/F)", "https://x.example/1"))
 
-    def test_revision_and_day_change_the_key(self):
-        base = cs.idempotency_key("Acme", "Dev", "2026-11-09")
-        self.assertNotEqual(base, cs.idempotency_key("Acme", "Dev", "2026-11-09", "pkg-1"))
-        self.assertNotEqual(base, cs.idempotency_key("Acme", "Dev", "2026-11-10"))
-        self.assertRegex(cs.idempotency_key("A" * 300, "B" * 300, "2026-11-09", "pkg-1"), KEY_RE)
+    def test_same_company_and_role_with_another_link_is_another_key(self):
+        a = cs.idempotency_key("2026-11-09_acme_dev", "Acme", "Dev", "https://x.example/geneva")
+        b = cs.idempotency_key("2026-11-09_acme_dev", "Acme", "Dev", "https://x.example/paris")
+        self.assertNotEqual(a, b)
+
+    def test_keys_stay_valid_and_short(self):
+        key = cs.idempotency_key("f" * 300, "A" * 300, "B" * 300, "https://x.example/" + "y" * 300, "pkg-" + "z" * 80, "d" * 64)
+        self.assertRegex(key, KEY_RE)
+        self.assertRegex(cs.idempotency_key("f", "世界", "世界", ""), KEY_RE)
+        self.assertEqual(cs.idempotency_key("f", "", "", "", "pkg-1"), cs.idempotency_key("g", "x", "y", "z", "pkg-1"))
+        self.assertNotEqual(cs.idempotency_key("f", "", "", "", "pkg-1"), cs.idempotency_key("f", "", "", "", "pkg-2"))
 
     def test_slug_never_empty(self):
         self.assertEqual(cs.slug("!!!", 10), "x")
@@ -151,25 +206,99 @@ class HelperTests(unittest.TestCase):
     def test_build_body_apply_via_link(self):
         body = cs.build_body("Dear team", "", "https://example.com/job")
         self.assertEqual(body.splitlines()[0], "Apply via: https://example.com/job")
-        self.assertTrue(body.endswith("Dear team"))
-
-    def test_build_body_with_recipient_is_untouched(self):
         self.assertEqual(cs.build_body("Dear team\n", "hr@example.com", "https://example.com/job"), "Dear team")
-
-    def test_build_body_does_not_duplicate_the_link(self):
         text = "Apply via: https://example.com/job\n\nDear team"
         self.assertEqual(cs.build_body(text, "", "https://example.com/job"), text)
 
     def test_parse_job_id_in_every_wording_the_server_uses(self):
-        job = "11111111-2222-3333-4444-555555555555"
+        job = JOB % 7
         for text in (
             "Created Acme; Created Role. Job created (id: %s). Done." % job,
             'Duplicate detected — existing job "QA" at "Acme" (id: %s). To enrich it, call update_job' % job,
-            "Job %s updated. Fields changed: companyId, jobTitleId, jobUrl, description." % job,
+            "Job %s updated. Fields changed: companyId, jobUrl, description." % job,
+            'Found existing job "QA" at "Acme" (id: %s, status: draft).' % job,
         ):
             self.assertEqual(cs.parse_job_id(text), job, text)
         with self.assertRaises(cs.CockpitError):
             cs.parse_job_id("no id here")
+
+    def test_plain_text_failures_get_their_own_codes(self):
+        with self.assertRaises(cs.CockpitError) as raised:
+            cs.parse_job_id("Rate limit exceeded. Try again in 12s.")
+        self.assertEqual(raised.exception.code, "RATE_LIMITED")
+        with self.assertRaises(cs.CockpitError) as raised:
+            cs.parse_job_id("Insufficient scope. Required: jobs:write")
+        self.assertEqual(raised.exception.code, "UNAUTHORIZED_SCOPE")
+
+    def test_validate_package_refuses_what_the_server_would_refuse(self):
+        ok = dict(subject="Application", recipient="hr@example.com", body="Hello", letter="Hello", fit="A")
+        cs.validate_package(**ok)
+        for bad in (
+            dict(subject="two\nlines"), dict(subject=""), dict(subject="x" * 301),
+            dict(recipient="not-an-address"), dict(recipient="a@example.com,b@example.com"),
+            dict(body="   "), dict(body="x" * 20001), dict(fit="C"),
+        ):
+            with self.assertRaises(cs.CockpitError, msg=str(bad)) as raised:
+                cs.validate_package(**dict(ok, **bad))
+            self.assertEqual(raised.exception.code, "VALIDATION")
+
+    def test_safe_pdf_name(self):
+        self.assertEqual(cs.safe_pdf_name("CV.pdf"), "CV.pdf")
+        long_name = cs.safe_pdf_name("a" * 300 + ".pdf")
+        self.assertLessEqual(len(long_name), 120)
+        self.assertTrue(long_name.endswith(".pdf"))
+
+    def test_endpoint_rules(self):
+        cs.check_endpoint("http://localhost:3737/api/mcp")
+        cs.check_endpoint("http://127.0.0.1:3737/api/mcp")
+        cs.check_endpoint("https://cockpit.example.com/api/mcp")
+        with self.assertRaises(cs.CockpitError) as raised:
+            cs.check_endpoint("http://cockpit.example.com/api/mcp")
+        self.assertEqual(raised.exception.code, "INSECURE_URL")
+        with mock.patch.dict(os.environ, {"COCKPIT_ALLOW_HTTP": "1"}):
+            cs.check_endpoint("http://100.64.0.1:3737/api/mcp")
+        with self.assertRaises(cs.CockpitError):
+            cs.check_endpoint("ftp://x")
+
+
+class ProxyTests(unittest.TestCase):
+    def proxies(self, url):
+        env = {"HTTP_PROXY": "http://proxy.example:8080", "http_proxy": "http://proxy.example:8080",
+               "HTTPS_PROXY": "http://proxy.example:8080", "https_proxy": "http://proxy.example:8080"}
+        with mock.patch.dict(os.environ, env):
+            opener = cs._opener(url)
+        return [h.proxies for h in opener.handlers if isinstance(h, urllib.request.ProxyHandler)]
+
+    def test_a_system_proxy_never_sees_a_token_meant_for_localhost(self):
+        # An empty ProxyHandler replaces urllib's default one and registers nothing,
+        # so "no active proxy handler at all" is the correct outcome for loopback.
+        for url in ("http://localhost:3737/api/mcp", "http://127.0.0.1:3737/api/mcp"):
+            self.assertEqual(self.proxies(url), [], url)
+
+    def test_other_hosts_keep_the_normal_proxy_settings(self):
+        (found,) = self.proxies("https://cockpit.example.com/api/mcp")
+        self.assertIn("https", found)
+
+
+class TokenTests(unittest.TestCase):
+    def load(self, raw):
+        path = Path(tempfile.mkdtemp()) / "t.txt"
+        self.addCleanup(lambda: shutil.rmtree(path.parent, ignore_errors=True))
+        path.write_bytes(raw)
+        with mock.patch.dict(os.environ, {"COCKPIT_TOKEN": "", "COCKPIT_TOKEN_FILE": str(path)}):
+            return cs.load_token()
+
+    def test_plain_bom_and_utf16_files(self):
+        self.assertEqual(self.load((TOKEN + "\r\n").encode()), TOKEN)
+        self.assertEqual(self.load(b"\xef\xbb\xbf" + TOKEN.encode()), TOKEN)
+        self.assertEqual(self.load(("﻿" + TOKEN + "\r\n").encode("utf-16")), TOKEN)
+
+    def test_garbage_and_empty_are_refused(self):
+        with self.assertRaises(cs.CockpitError):
+            self.load(b"")
+        with self.assertRaises(cs.CockpitError) as raised:
+            self.load(b"jsync_abc def\nsecond line")
+        self.assertEqual(raised.exception.code, "NO_TOKEN")
 
 
 class CommandTests(FolderMixin, unittest.TestCase):
@@ -177,154 +306,313 @@ class CommandTests(FolderMixin, unittest.TestCase):
         self.stub = Stub()
         self.addCleanup(self.stub.close)
 
-    def submit_args(self, folder, *extra):
-        return [
-            "--endpoint", self.stub.url, "submit", "--folder", str(folder),
-            "--company", "Acme", "--role", "Backend Engineer",
-            "--subject", "Application - Backend Engineer - Jane Doe",
-            "--fit", "A", "--track", "Fintech", "--url", "https://example.com/job",
-            "--location", "Geneva", "--reasons", "stack overlap; location",
-            "--date", "2026-11-09", *extra,
-        ]
+    def args(self, folder, *extra, company="Acme", role="Backend Engineer", link="https://example.com/job/1"):
+        base = ["--endpoint", self.stub.url, "submit", "--folder", str(folder),
+                "--company", company, "--role", role,
+                "--subject", "Application - Backend Engineer - Jane Doe",
+                "--fit", "A", "--track", "Fintech", "--location", "Geneva",
+                "--reasons", "stack overlap; location"]
+        if link:
+            base += ["--url", link]
+        return base + list(extra)
 
-    def test_submit_happy_path_apply_via_link(self):
+    # ---- the happy paths
+
+    def test_submit_creates_the_job_uploads_and_submits(self):
         folder = self.make_folder()
-        code, result, _ = run(self.submit_args(folder))
+        code, result, _ = run(self.args(folder))
         self.assertEqual(code, 0, result)
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["packageId"], "pkg-1")
         self.assertTrue(result["applyViaLink"])
-        self.assertEqual([c[0] for c in self.stub.calls], ["add_job", "attach_file", "submit_application_package"])
+        self.assertEqual([c[0] for c in self.stub.calls], ["find_job", "add_job", "attach_file", "submit_application_package"])
 
-        job = self.stub.calls[0][1]
-        self.assertEqual((job["company"], job["jobTitle"], job["upsert"]), ("Acme", "Backend Engineer", True))
-        self.assertEqual(job["jobUrl"], "https://example.com/job")
+        job = self.stub.calls[1][1]
+        self.assertEqual((job["company"], job["jobTitle"], job["jobUrl"]), ("Acme", "Backend Engineer", "https://example.com/job/1"))
+        self.assertTrue(job["allowDuplicate"])  # a new link is a new posting
+        self.assertNotIn("upsert", job)
 
-        attach = self.stub.calls[1][1]
+        attach = self.stub.calls[2][1]
         self.assertEqual(attach["fileName"], "Jane_Doe_CV_Acme.pdf")
         self.assertEqual(base64.b64decode(attach["contentBase64"]), PDF)
 
-        package = self.stub.calls[2][1]
+        package = self.stub.calls[3][1]
         self.assertEqual(package["emailTo"], "")
-        self.assertEqual(package["emailBody"].splitlines()[0], "Apply via: https://example.com/job")
-        self.assertEqual(package["fitGrade"], "A")
-        self.assertEqual(package["fitAnalysis"], {
-            "verdict": "A", "track": "Fintech", "location": "Geneva",
-            "reasons": ["stack overlap", "location"],
-        })
-        self.assertEqual(package["cvJson"], {"name": "Jane Doe"})
+        self.assertEqual(package["emailBody"].splitlines()[0], "Apply via: https://example.com/job/1")
+        self.assertEqual(package["fitAnalysis"], {"verdict": "A", "track": "Fintech", "location": "Geneva",
+                                                  "reasons": ["stack overlap", "location"]})
         self.assertEqual(package["cvFileId"], "file-1")
         self.assertEqual(package["sourceFolder"], folder.name)
         self.assertRegex(package["idempotencyKey"], KEY_RE)
         self.assertEqual(set(self.stub.auth), {"Bearer " + TOKEN})
 
-    def test_submit_with_recipient_has_no_apply_via_line(self):
-        folder = self.make_folder()
-        code, result, _ = run(self.submit_args(folder, "--to", "hr@example.com"))
+    def test_a_link_already_saved_reuses_that_job(self):
+        self.stub.job_urls["https://example.com/job/1"] = JOB % 99
+        code, result, _ = run(self.args(self.make_folder()))
+        self.assertEqual(code, 0)
+        self.assertEqual(result["jobId"], JOB % 99)
+        self.assertNotIn("add_job", [c[0] for c in self.stub.calls])
+
+    def test_two_postings_with_the_same_company_and_title_stay_two_applications(self):
+        first = run(self.args(self.make_folder(), link="https://example.com/job/geneva"))[1]
+        second = run(self.args(self.make_folder(), link="https://example.com/job/paris"))[1]
+        self.assertTrue(first["ok"] and second["ok"])
+        self.assertNotEqual(first["jobId"], second["jobId"])
+        self.assertNotEqual(first["packageId"], second["packageId"])
+        self.assertFalse(second["idempotent"])
+        self.assertEqual(len(self.stub.names("add_job")), 2)
+
+    def test_without_a_link_the_job_is_upserted_by_company_and_title(self):
+        code, result, _ = run(self.args(self.make_folder(), link=""))
+        self.assertEqual(code, 0)
+        self.assertNotIn("find_job", [c[0] for c in self.stub.calls])
+        add_job = self.stub.calls[0][1]
+        self.assertTrue(add_job["upsert"])
+        self.assertNotIn("allowDuplicate", add_job)
+
+    def test_with_a_recipient_there_is_no_apply_via_line(self):
+        code, result, _ = run(self.args(self.make_folder(), "--to", "hr@example.com"))
         self.assertEqual(code, 0)
         self.assertFalse(result["applyViaLink"])
-        package = self.stub.calls[2][1]
+        package = self.stub.calls[-1][1]
         self.assertEqual(package["emailTo"], "hr@example.com")
         self.assertNotIn("Apply via", package["emailBody"])
 
-    def test_replay_returns_the_same_package_without_uploading_again(self):
+    def test_meta_file_carries_the_values_and_options_override_it(self):
         folder = self.make_folder()
-        first = run(self.submit_args(folder))[1]
-        calls_after_first = len(self.stub.calls)
-        second = run(self.submit_args(folder))[1]
-        self.assertFalse(first["idempotent"])
-        self.assertTrue(second["idempotent"])
-        self.assertEqual(first["packageId"], second["packageId"])
-        self.assertEqual(len(self.stub.calls), calls_after_first)  # no second upload
-        self.assertTrue((folder / ".cockpit-submitted.json").is_file())
+        meta = folder / "meta.json"
+        meta.write_text(json.dumps({
+            "company": 'Evil" Co $(rm -rf /) `x`', "role": "Dev", "subject": "Application - Dev - Jane Doe",
+            "fit": "B", "url": "https://example.com/job/9", "to": "hr@example.com", "track": "AI",
+        }), encoding="utf-8")
+        code, _, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(folder), "--meta", str(meta), "--fit", "A"])
+        self.assertEqual(code, 0)
+        job = self.stub.names("add_job") and [c for c in self.stub.calls if c[0] == "add_job"][0][1]
+        self.assertEqual(job["company"], 'Evil" Co $(rm -rf /) `x`')  # travels as data, never through a shell
+        package = self.stub.calls[-1][1]
+        self.assertEqual((package["fitGrade"], package["emailTo"]), ("A", "hr@example.com"))
 
-    def test_a_deleted_or_corrupt_marker_just_submits_again(self):
+    def test_missing_required_values_are_named(self):
+        code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(self.make_folder())])
+        self.assertEqual((code, result["error"]), (1, "VALIDATION"))
+        self.assertIn("company", result["message"])
+
+    # ---- re-runs
+
+    def test_an_identical_rerun_returns_the_same_package_without_new_requests(self):
         folder = self.make_folder()
-        run(self.submit_args(folder))
+        first = run(self.args(folder))[1]
+        calls_after_first = len(self.stub.calls)
+        second = run(self.args(folder))[1]
+        self.assertFalse(first["idempotent"])
+        self.assertTrue(second["idempotent"] and second["cached"])
+        self.assertEqual(first["packageId"], second["packageId"])
+        self.assertEqual(len(self.stub.calls), calls_after_first)
+        self.assertEqual(self.stub.files, 1)
+
+    def test_corrected_content_is_never_silently_ignored(self):
+        folder = self.make_folder()
+        run(self.args(folder))
+        (folder / "letter.md").write_text("A corrected letter.\n", encoding="utf-8")
+        code, result, _ = run(self.args(folder))
+        self.assertEqual((code, result["error"]), (1, "CONTENT_CHANGED"))
+        self.assertIn("--resubmit", result["message"])
+        self.assertEqual(len(self.stub.names("submit_application_package")), 1)
+
+    def test_resubmit_sends_the_corrected_content_under_a_new_key_once(self):
+        folder = self.make_folder()
+        run(self.args(folder))
+        (folder / "letter.md").write_text("A corrected letter.\n", encoding="utf-8")
+        code, result, _ = run(self.args(folder, "--resubmit"))
+        self.assertEqual(code, 0, result)
+        keys = [c[1]["idempotencyKey"] for c in self.stub.calls if c[0] == "submit_application_package"]
+        self.assertEqual(len(set(keys)), 2)
+        again = run(self.args(folder, "--resubmit"))[1]
+        self.assertTrue(again["cached"])  # the same correction twice is a no-op
+
+    def test_a_corrupt_marker_just_submits_again(self):
+        folder = self.make_folder()
+        run(self.args(folder))
         (folder / ".cockpit-submitted.json").write_text("not json", encoding="utf-8")
-        again = run(self.submit_args(folder))[1]
-        self.assertTrue(again["ok"])
-        self.assertEqual(len([c for c in self.stub.calls if c[0] == "attach_file"]), 2)
-        self.assertTrue(again["idempotent"])  # the server still recognises the key
+        again = run(self.args(folder))[1]
+        self.assertTrue(again["ok"] and again["idempotent"])  # the server recognises the key
+        self.assertNotIn("cached", again)
 
     def test_a_failed_submit_leaves_no_marker(self):
         self.stub.fail["submit_application_package"] = "ALREADY_SENT: already sent"
         folder = self.make_folder()
-        run(self.submit_args(folder))
+        run(self.args(folder))
         self.assertFalse((folder / ".cockpit-submitted.json").exists())
 
-    def test_resubmit_for_a_change_request_uses_a_new_key(self):
-        folder = self.make_folder()
-        run(self.submit_args(folder))
-        run(self.submit_args(folder, "--revision", "pkg-1"))
-        keys = [c[1]["idempotencyKey"] for c in self.stub.calls if c[0] == "submit_application_package"]
-        self.assertEqual(len(set(keys)), 2)
+    # ---- answering a change request
 
-    def test_missing_pdf_fails_before_any_request(self):
+    def change_request(self, **overrides):
+        item = {
+            "packageId": "pkg-9", "jobId": JOB % 5, "company": "Acme", "jobTitle": "Backend Engineer",
+            "version": 1, "changeRequest": "shorten the letter", "emailTo": "hr@example.com",
+            "emailSubject": "Owner edited subject", "emailBody": "Owner edited body",
+            "fitAnalysis": json.dumps({"verdict": "B", "track": "AI", "location": "Lausanne"}),
+            "sourceFolder": "2026-11-09_acme_backend-engineer",
+        }
+        item.update(overrides)
+        self.stub.change_requests = [item]
+
+    def test_revision_reuses_the_job_and_keeps_what_the_owner_set(self):
+        self.change_request()
+        folder = self.make_folder()
+        code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(folder), "--revision", "pkg-9"])
+        self.assertEqual(code, 0, result)
+        self.assertEqual([c[0] for c in self.stub.calls], ["list_change_requests", "attach_file", "submit_application_package"])
+        package = self.stub.calls[-1][1]
+        self.assertEqual(package["jobId"], JOB % 5)  # no add_job, no duplicate job
+        self.assertEqual(package["emailTo"], "hr@example.com")
+        self.assertEqual(package["emailSubject"], "Owner edited subject")
+        self.assertEqual(package["fitGrade"], "B")
+        self.assertEqual(package["fitAnalysis"]["track"], "AI")
+        self.assertEqual(package["idempotencyKey"], "scout-rev-pkg-9")
+
+    def test_revision_options_override_the_package_values(self):
+        self.change_request()
+        run(["--endpoint", self.stub.url, "submit", "--folder", str(self.make_folder()), "--revision", "pkg-9",
+             "--subject", "A new subject", "--fit", "A", "--to", ""])
+        package = self.stub.calls[-1][1]
+        self.assertEqual((package["emailSubject"], package["fitGrade"], package["emailTo"]), ("A new subject", "A", ""))
+
+    def test_revision_keeps_the_apply_via_line_of_the_previous_body(self):
+        self.change_request(emailTo="", emailBody="Apply via: https://example.com/job/1\n\nOld body")
+        run(["--endpoint", self.stub.url, "submit", "--folder", str(self.make_folder()), "--revision", "pkg-9"])
+        self.assertEqual(self.stub.calls[-1][1]["emailBody"].splitlines()[0], "Apply via: https://example.com/job/1")
+
+    def test_revision_of_an_unknown_or_handled_request_is_a_clear_error(self):
+        code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(self.make_folder()), "--revision", "pkg-404"])
+        self.assertEqual((code, result["error"]), (1, "NOT_FOUND"))
+        self.assertEqual(self.stub.files, 0)
+
+    def test_retrying_a_revision_is_a_no_op(self):
+        self.change_request()
+        folder = self.make_folder()
+        args = ["--endpoint", self.stub.url, "submit", "--folder", str(folder), "--revision", "pkg-9"]
+        run(args)
+        again = run(args)[1]
+        self.assertTrue(again["cached"])
+        self.assertEqual(self.stub.files, 1)
+
+    # ---- nothing is uploaded when the package would be refused
+
+    def test_bad_fields_are_refused_before_any_upload(self):
+        folder = self.make_folder()
+        for extra in (["--to", "nobody"], ["--subject", "two\nlines"]):
+            code, result, _ = run(self.args(folder, *extra))
+            self.assertEqual((code, result["error"]), (1, "VALIDATION"), extra)
+        self.assertEqual(self.stub.calls, [])
+        self.assertEqual(self.stub.files, 0)
+
+    def test_missing_files_fail_before_any_request(self):
+        for fname in ("letter.md", "cv.json"):
+            folder = self.make_folder(**{fname: None})
+            code, result, _ = run(self.args(folder))
+            self.assertEqual((code, result["error"]), (1, "FILE_NOT_FOUND"), fname)
         folder = self.make_folder()
         (folder / "Jane_Doe_CV_Acme.pdf").unlink()
-        code, result, _ = run(self.submit_args(folder))
-        self.assertEqual((code, result["ok"], result["error"]), (1, False, "FILE_NOT_FOUND"))
+        self.assertEqual(run(self.args(folder))[1]["error"], "FILE_NOT_FOUND")
         self.assertEqual(self.stub.calls, [])
+
+    def test_cv_json_must_be_an_object(self):
+        for content in ("not json", "[1, 2]"):
+            code, result, _ = run(self.args(self.make_folder(**{"cv.json": content})))
+            self.assertEqual((code, result["error"]), (1, "VALIDATION"), content)
 
     def test_files_with_a_byte_order_mark_are_read(self):
         folder = self.make_folder()
         (folder / "cv.json").write_bytes(b"\xef\xbb\xbf" + json.dumps({"name": "Jane Doe"}).encode())
-        code, result, _ = run(self.submit_args(folder))
-        self.assertEqual(code, 0, result)
-
-    def test_output_is_ascii_even_with_accents_and_symbols(self):
-        folder = self.make_folder()
-        args = self.submit_args(folder)
-        args[args.index("Acme")] = "Société Générale"
-        _, _, raw = run(args)
-        raw.encode("ascii")  # would raise on a raw accented character
-        self.assertEqual(json.loads(raw.strip().splitlines()[-1])["ok"], True)
-
-    def test_missing_letter_fails(self):
-        folder = self.make_folder(**{"letter.md": None})
-        code, result, _ = run(self.submit_args(folder))
-        self.assertEqual((code, result["error"]), (1, "FILE_NOT_FOUND"))
-
-    def test_cv_json_must_be_an_object(self):
-        for content in ("not json", "[1, 2]"):
-            folder = self.make_folder(**{"cv.json": content})
-            code, result, _ = run(self.submit_args(folder))
-            self.assertEqual((code, result["error"]), (1, "VALIDATION"), content)
+        self.assertEqual(run(self.args(folder))[0], 0)
 
     def test_too_large_pdf_is_refused_locally(self):
-        folder = self.make_folder()
         with mock.patch.object(cs, "MAX_BASE64_CHARS", 10):
-            code, result, _ = run(self.submit_args(folder))
+            code, result, _ = run(self.args(self.make_folder()))
         self.assertEqual((code, result["error"]), (1, "TOO_LARGE"))
         self.assertEqual(self.stub.calls, [])
 
-    def test_server_error_code_is_passed_through(self):
-        self.stub.fail["submit_application_package"] = "ALREADY_SENT: An application was already sent for this job."
+    def test_the_cv_is_chosen_carefully_when_there_are_several_pdfs(self):
         folder = self.make_folder()
-        code, result, _ = run(self.submit_args(folder))
+        (folder / "posting-saved.pdf").write_bytes(b"%PDF-1.4 other")
+        self.assertEqual(run(self.args(folder))[0], 0)  # exactly one name contains "cv"
+        self.assertEqual(self.stub.calls[-2][1]["fileName"], "Jane_Doe_CV_Acme.pdf")
+        other = self.make_folder()
+        (other / "second.pdf").write_bytes(b"%PDF-1.4 other")
+        (other / "Jane_Doe_CV_Acme.pdf").rename(other / "first.pdf")
+        code, result, _ = run(self.args(other, "--url", "https://example.com/job/other"))
+        self.assertEqual((code, result["error"]), (1, "AMBIGUOUS_PDF"))
+
+    # ---- errors always come back as one JSON line
+
+    def test_server_error_codes_pass_through(self):
+        self.stub.fail["submit_application_package"] = "ALREADY_SENT: An application was already sent for this job."
+        code, result, _ = run(self.args(self.make_folder()))
         self.assertEqual((code, result["ok"], result["error"]), (1, False, "ALREADY_SENT"))
         self.assertIn("already sent", result["message"])
 
-    def test_unauthorized(self):
-        self.stub.http_status = 401
-        code, result, _ = run(self.submit_args(self.make_folder()))
-        self.assertEqual((code, result["error"]), (1, "UNAUTHORIZED"))
+    def test_sdk_validation_text_becomes_validation(self):
+        self.stub.fail["add_job"] = "MCP error -32602: Input validation error: Invalid arguments for tool add_job: Invalid input at jobUrl"
+        code, result, _ = run(self.args(self.make_folder()))
+        self.assertEqual((code, result["error"]), (1, "VALIDATION"))
+        self.assertIn("jobUrl", result["message"])
 
-    def test_unreachable(self):
-        code, result, _ = run(["--endpoint", "http://127.0.0.1:9/api/mcp", "check"])
-        self.assertEqual((code, result["error"]), (1, "UNREACHABLE"))
+    def test_plain_text_rate_limit_and_scope_from_add_job(self):
+        self.stub.plain["add_job"] = "Rate limit exceeded. Try again in 30s."
+        self.assertEqual(run(self.args(self.make_folder()))[1]["error"], "RATE_LIMITED")
+        self.stub.plain["add_job"] = "Insufficient scope. Required: jobs:write"
+        self.assertEqual(run(self.args(self.make_folder(), link="https://example.com/job/2"))[1]["error"], "UNAUTHORIZED_SCOPE")
+
+    def test_unauthorized_unreachable_and_timeout(self):
+        self.stub.http_status = 401
+        self.assertEqual(run(self.args(self.make_folder()))[1]["error"], "UNAUTHORIZED")
+        self.assertEqual(run(["--endpoint", "http://127.0.0.1:9/api/mcp", "check"])[1]["error"], "UNREACHABLE")
+        self.stub.http_status = 200
+        self.stub.delay = 2
+        with mock.patch.object(cs, "TIMEOUT_SECONDS", 1):
+            self.assertEqual(run(["--endpoint", self.stub.url, "check"])[1]["error"], "TIMEOUT")
+
+    def test_a_redirect_is_not_followed_and_the_token_goes_nowhere(self):
+        elsewhere = Stub()
+        self.addCleanup(elsewhere.close)
+        self.stub.redirect_to = elsewhere.url
+        code, result, raw = run(["--endpoint", self.stub.url, "check"])
+        self.assertEqual((code, result["error"]), (1, "REDIRECTED"))
+        self.assertEqual(elsewhere.auth, [])
+        self.assertNotIn(TOKEN, raw)
+
+    def test_garbage_answers_still_produce_one_json_line(self):
+        self.stub.raw_body = "<html>login</html>"
+        self.assertEqual(run(["--endpoint", self.stub.url, "check"])[1]["error"], "BAD_RESPONSE")
+        self.stub.raw_body = None
+        self.stub.tool = lambda name, arguments: {"content": [{"type": "text", "text": "oops"}]}
+        code, result, _ = run(self.args(self.make_folder()))
+        self.assertEqual((code, result["ok"]), (1, False))  # a non-JSON upload answer: INTERNAL or BAD_RESPONSE
+        self.assertIn(result["error"], ("INTERNAL", "BAD_RESPONSE"))
+
+    def test_a_wrong_command_line_is_json_with_exit_code_2(self):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"COCKPIT_TOKEN": TOKEN}), contextlib.redirect_stdout(out):
+            with self.assertRaises(SystemExit) as raised:
+                cs.main(["submit"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertEqual(json.loads(out.getvalue())["error"], "USAGE")
+
+    def test_plain_http_to_another_host_is_refused_before_any_request(self):
+        code, result, _ = run(["--endpoint", "http://cockpit.example.com/api/mcp", "check"])
+        self.assertEqual((code, result["error"]), (1, "INSECURE_URL"))
+
+    # ---- token and output hygiene
 
     def test_no_token(self):
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"COCKPIT_TOKEN": "", "COCKPIT_TOKEN_FILE": "/nonexistent/token.txt"}), \
                 contextlib.redirect_stdout(out):
             code = cs.main(["--endpoint", self.stub.url, "check"])
-        result = json.loads(out.getvalue())
-        self.assertEqual((code, result["error"]), (1, "NO_TOKEN"))
+        self.assertEqual((code, json.loads(out.getvalue())["error"]), (1, "NO_TOKEN"))
 
-    def test_token_file_is_used_and_never_printed(self):
+    def test_token_file_is_used_and_the_token_is_never_printed(self):
         token_file = Path(tempfile.mkdtemp()) / "cockpit_token.txt"
+        self.addCleanup(lambda: shutil.rmtree(token_file.parent, ignore_errors=True))
         token_file.write_text(TOKEN + "\n", encoding="utf-8")
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"COCKPIT_TOKEN": "", "COCKPIT_TOKEN_FILE": str(token_file)}), \
@@ -334,25 +622,31 @@ class CommandTests(FolderMixin, unittest.TestCase):
         self.assertEqual(set(self.stub.auth), {"Bearer " + TOKEN})
         self.assertNotIn(TOKEN, out.getvalue())
 
-    def test_token_never_appears_in_error_output(self):
-        self.stub.http_status = 401
-        _, _, raw = run(self.submit_args(self.make_folder()))
+    def test_the_token_is_redacted_even_from_unexpected_errors(self):
+        with mock.patch.object(cs, "cmd_check", side_effect=RuntimeError("boom " + TOKEN)):
+            _, result, raw = run(["--endpoint", self.stub.url, "check"])
+        self.assertEqual(result["error"], "INTERNAL")
         self.assertNotIn(TOKEN, raw)
 
-    def test_check_ok(self):
+    def test_output_is_ascii_even_with_accents_and_symbols(self):
+        folder = self.make_folder()
+        _, result, raw = run(self.args(folder, company="Société Générale", role="Développeur — Back-end ✓"))
+        raw.encode("ascii")  # would raise on a raw accented character
+        self.assertTrue(result["ok"])
+
+    # ---- the other commands
+
+    def test_check_ok_and_missing_tools(self):
         code, result, _ = run(["--endpoint", self.stub.url, "check"])
         self.assertEqual(code, 0)
         self.assertIn("submit_application_package", result["tools"])
-
-    def test_check_reports_missing_tools(self):
         self.stub.tools = ["add_job"]
-        code, result, _ = run(["--endpoint", self.stub.url, "check"])
-        self.assertEqual((code, result["error"]), (1, "MISSING_TOOLS"))
+        self.assertEqual(run(["--endpoint", self.stub.url, "check"])[1]["error"], "MISSING_TOOLS")
 
     def test_changes_and_done(self):
+        self.change_request()
         code, result, _ = run(["--endpoint", self.stub.url, "changes"])
-        self.assertEqual(code, 0)
-        self.assertEqual(result["changeRequests"][0]["packageId"], "pkg-9")
+        self.assertEqual((code, result["changeRequests"][0]["packageId"]), (0, "pkg-9"))
         code, result, _ = run(["--endpoint", self.stub.url, "done", "--package", "pkg-9", "--response", "Shortened."])
         self.assertEqual((code, result["status"]), (0, "pending"))
         self.assertEqual(self.stub.calls[-1], ("mark_change_request_done", {"packageId": "pkg-9", "response": "Shortened."}))
