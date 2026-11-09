@@ -273,6 +273,14 @@ class CommandTests(FolderMixin, unittest.TestCase):
         code, result, _ = run(self.submit_args(folder))
         self.assertEqual(code, 0, result)
 
+    def test_output_is_ascii_even_with_accents_and_symbols(self):
+        folder = self.make_folder()
+        args = self.submit_args(folder)
+        args[args.index("Acme")] = "Société Générale"
+        _, _, raw = run(args)
+        raw.encode("ascii")  # would raise on a raw accented character
+        self.assertEqual(json.loads(raw.strip().splitlines()[-1])["ok"], True)
+
     def test_missing_letter_fails(self):
         folder = self.make_folder(**{"letter.md": None})
         code, result, _ = run(self.submit_args(folder))

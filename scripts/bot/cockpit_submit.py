@@ -391,10 +391,12 @@ def main(argv=None):
     try:
         token = load_token()
         result = handlers[args.command](args, args.endpoint, token)
-        print(json.dumps(dict(ok=True, **result), ensure_ascii=False))
+        # ASCII-only JSON (\u escapes): a Windows console or pipe often uses a legacy
+        # code page, and printing an accented or non-Latin character would crash.
+        print(json.dumps(dict(ok=True, **result)))
         return 0
     except CockpitError as error:
-        print(json.dumps({"ok": False, "error": error.code, "message": error.message}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "error": error.code, "message": error.message}))
         return 1
 
 
