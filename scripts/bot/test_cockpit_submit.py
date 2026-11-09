@@ -269,7 +269,7 @@ class HelperTests(unittest.TestCase):
         for bad in (
             dict(subject="two\nlines"), dict(subject=""), dict(subject="x" * 301),
             dict(recipient="not-an-address"), dict(recipient="a@example.com,b@example.com"),
-            dict(recipient="prénom@example.fr"), dict(recipient="a..b@example.com"), dict(recipient="a@b.c"),
+            dict(recipient="prénom@example.com"), dict(recipient="a..b@example.com"), dict(recipient="a@b.c"),
             dict(body="   "), dict(body="x" * 20001), dict(fit="C"),
             dict(cv_json={"x": "y" * 200_001}), dict(fit_analysis={"x": "y" * 20_001}),
         ):
@@ -608,7 +608,7 @@ class CommandTests(FolderMixin, unittest.TestCase):
 
     def test_bad_fields_are_refused_before_any_upload(self):
         folder = self.make_folder()
-        for extra in (["--to", "nobody"], ["--to", "prénom@example.fr"], ["--subject", "two\nlines"]):
+        for extra in (["--to", "nobody"], ["--to", "prénom@example.com"], ["--subject", "two\nlines"]):
             code, result, _ = run(self.args(folder, *extra))
             self.assertEqual((code, result["error"]), (1, "VALIDATION"), extra)
         big = self.make_folder(**{"cv.json": json.dumps({"x": "y" * 200_001})})
