@@ -9,6 +9,9 @@ Commands. Each prints ONE ASCII JSON line on stdout; exit code 0 = ok, 1 = error
   check                       Test the URL and the token.
   submit --folder DIR [--meta FILE] ...
                               Create or find the job, upload the CV, submit the package.
+                              Refuses (ALREADY_SUBMITTED / ALREADY_SENT / JOB_REJECTED) when the
+                              job already has a package: a second submit would replace the
+                              version the owner is reviewing.
   submit --folder DIR --revision PACKAGE_ID
                               Answer a change request: new version of that package.
   changes [--limit N]         List the packages the owner asked changes for.
@@ -41,22 +44,30 @@ from pathlib import Path
 DEFAULT_URL = "http://localhost:3737/api/mcp"
 TIMEOUT_SECONDS = 90
 MAX_BASE64_CHARS = 7_000_000  # the server's limit for attach_file
+MAX_PDF_BYTES = MAX_BASE64_CHARS // 4 * 3
 MAX_SUBJECT = 300
-MAX_TEXT = 20000  # emailBody and letterMd
+MAX_TEXT = 20_000  # emailBody and letterMd
+MAX_CV_JSON = 200_000
+MAX_FIT_ANALYSIS = 20_000
 MAX_FILE_NAME = 120
 LOOPBACK = ("localhost", "127.0.0.1", "::1")
 MARKER_NAME = ".cockpit-submitted.json"
-UUID_RE = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
-EMAIL_RE = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
+UUID = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+UUID_RE = re.compile(UUID)
+# The server's own pattern (Zod 4 .email(), as published in the tool schema), plus no CR/LF/comma.
+EMAIL_RE = re.compile(
+    r"^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+\-\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$"
+)
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.~+/=-]+$")
 META_KEYS = ("company", "role", "subject", "fit", "track", "url", "to", "location", "source", "reasons")
 
 
 class CockpitError(Exception):
-    def __init__(self, code, message):
+    def __init__(self, code, message, extra=None):
         super().__init__(message)
         self.code = code
         self.message = message
+        self.extra = extra or {}
 
 
 # ---------------------------------------------------------------- transport
@@ -205,16 +216,21 @@ def slug(text, limit):
     return cleaned[:limit].strip("-") or "x"
 
 
-def idempotency_key(folder_name, company, role, link, revision_package="", manual_digest=""):
-    """Identifies ONE posting, not one day: the application folder name plus a hash
-    of company, role and link (so two postings with the same company and title but
-    different links never share a key). A change request answer is keyed on the
-    package it answers, so a retried answer is a no-op."""
+def u16len(text):
+    """Length the server sees: it counts UTF-16 code units, not characters."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def idempotency_key(company, role, link, revision_package="", manual_digest=""):
+    """Identifies ONE posting (company, role and link), not a day and not a folder:
+    two postings with the same company and title but different links get different
+    keys, and the same posting found again gets the same key. A change request
+    answer is keyed on the package it answers, so a retried answer is a no-op."""
     if revision_package:
         key = "scout-rev-" + slug(revision_package, 40)
     else:
         digest = hashlib.sha1(("%s|%s|%s" % (company, role, link)).encode("utf-8")).hexdigest()[:8]
-        key = "scout-%s-%s" % (slug(folder_name, 60), digest)
+        key = "scout-%s-%s-%s" % (slug(company, 24), slug(role, 32), digest)
     if manual_digest:
         key += "-m" + manual_digest[:8]
     return key
@@ -222,9 +238,13 @@ def idempotency_key(folder_name, company, role, link, revision_package="", manua
 
 def parse_job_id(text):
     """add_job answers in prose and the wording differs: 'Job created (id: <id>)',
-    'Duplicate detected ... (id: <id>)', and 'Job <id> updated ...' (an upsert).
-    find_job says 'Found existing job ... (id: <id>, ...)'. The id is the first UUID."""
+    'Duplicate detected ... (id: <id>)', 'Job <id> updated ...'. find_job says
+    'Found existing job ... (id: <id>, ...)'. Prefer those exact shapes."""
     plain_failure(text)
+    for pattern in (r"\(id: (%s)" % UUID, r"\bJob (%s) updated" % UUID):
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
     match = UUID_RE.search(text)
     if not match:
         raise CockpitError("BAD_RESPONSE", "No job id in the answer: " + text[:120])
@@ -262,7 +282,7 @@ def find_pdf(folder, override):
 
 
 def safe_pdf_name(name):
-    if len(name) <= MAX_FILE_NAME:
+    if u16len(name) <= MAX_FILE_NAME:
         return name
     return name[: MAX_FILE_NAME - 4].rstrip(". ") + ".pdf"
 
@@ -281,19 +301,27 @@ def split_reasons(text):
     return [p.strip() for p in re.split(r"[;\n]+", text or "") if p.strip()]
 
 
-def validate_package(subject, recipient, body, letter, fit):
+def validate_package(subject, recipient, body, letter, fit, cv_json=None, fit_analysis=None):
     """Everything the server would refuse, checked BEFORE any upload so a bad
-    field never leaves an orphan PDF behind (the file quota counts every upload)."""
+    field never leaves an orphan PDF behind (the file quota counts every upload).
+    Limits and the address pattern are the server's own."""
     if fit not in ("A", "B"):
         raise CockpitError("VALIDATION", "The fit must be A or B.")
-    if not subject or len(subject) > MAX_SUBJECT or "\r" in subject or "\n" in subject:
+    if not subject or u16len(subject) > MAX_SUBJECT or "\r" in subject or "\n" in subject:
         raise CockpitError("VALIDATION", "The subject must be one line of 1 to %d characters." % MAX_SUBJECT)
-    if recipient and (len(recipient) > 254 or not EMAIL_RE.match(recipient)):
+    if recipient and (
+        len(recipient) > 254 or not EMAIL_RE.match(recipient) or any(c in recipient for c in "\r\n,")
+    ):
         raise CockpitError("VALIDATION", "The recipient is not a valid single email address.")
     if not body.strip():
         raise CockpitError("VALIDATION", "The email body is empty.")
-    if len(body) > MAX_TEXT or len(letter) > MAX_TEXT:
+    if u16len(body) > MAX_TEXT or u16len(letter) > MAX_TEXT:
         raise CockpitError("VALIDATION", "The letter or email body is longer than %d characters." % MAX_TEXT)
+    compact = dict(separators=(",", ":"), ensure_ascii=False)
+    if cv_json is not None and u16len(json.dumps(cv_json, **compact)) > MAX_CV_JSON:
+        raise CockpitError("VALIDATION", "cv.json is larger than %d characters." % MAX_CV_JSON)
+    if fit_analysis is not None and u16len(json.dumps(fit_analysis, **compact)) > MAX_FIT_ANALYSIS:
+        raise CockpitError("VALIDATION", "The fit analysis is larger than %d characters." % MAX_FIT_ANALYSIS)
 
 
 def content_digest(parts, pdf_bytes):
@@ -382,13 +410,19 @@ def cmd_check(args, url, token):
 def _resolve_job(url, token, values, posting):
     """One job per POSTING. With a link: reuse the job saved under that link, else
     force-create a new one (company and title alone must not merge two postings).
-    Without a link there is nothing better than company and title, so upsert."""
-    link = values["url"]
+    Without a link there is nothing better than company and title: a plain add_job,
+    and a 'Duplicate detected' answer means reuse that job WITHOUT modifying it.
+    Returns (job id, whether the job already existed)."""
+    link = values["url"] or ""
     if link:
         found = call(url, token, "find_job", {"jobUrl": link})
         plain_failure(found)
-        if "Found existing job" in found:
-            return parse_job_id(found)
+        text = found.strip()
+        if text.startswith("Found existing job"):
+            return parse_job_id(found), True
+        if not text.startswith("No saved job matches"):
+            # An error or anything unexpected must never fall through to creating a duplicate.
+            raise CockpitError("TOOL_ERROR", "Unexpected answer from find_job: " + text[:150])
     job = {
         "company": values["company"],
         "jobTitle": values["role"],
@@ -398,11 +432,33 @@ def _resolve_job(url, token, values, posting):
     if link:
         job["jobUrl"] = link
         job["allowDuplicate"] = True
-    else:
-        job["upsert"] = True
     if values["location"]:
         job["location"] = values["location"]
-    return parse_job_id(call(url, token, "add_job", job))
+    answer = call(url, token, "add_job", job)
+    plain_failure(answer)
+    return parse_job_id(answer), "Job created" not in answer
+
+
+def _guard_existing_job(url, token, job_id):
+    """A second submit for a job that already has a package would supersede the
+    version the owner is reviewing, editing or has approved. Stop instead."""
+    job = as_dict(call(url, token, "get_job", {"jobId": job_id}))
+    live = [p for p in job.get("packages", []) if isinstance(p, dict) and p.get("status") != "superseded"]
+    if not live:
+        return
+    package = live[0]  # newest first
+    status = package.get("status")
+    code = {"sent": "ALREADY_SENT", "rejected": "JOB_REJECTED"}.get(status, "ALREADY_SUBMITTED")
+    hint = " Answer it with --revision %s." % package.get("id") if status == "changes_requested" else ""
+    raise CockpitError(
+        code,
+        "This job already has a package (version %s, %s).%s Not creating another." % (package.get("version"), status, hint),
+        {"packageId": package.get("id"), "status": status},
+    )
+
+
+def _job_link(url, token, job_id):
+    return as_dict(call(url, token, "get_job", {"jobId": job_id})).get("jobUrl") or ""
 
 
 def cmd_submit(args, url, token):
@@ -416,86 +472,100 @@ def cmd_submit(args, url, token):
     if not folder.is_dir():
         raise CockpitError("FILE_NOT_FOUND", "Folder not found: %s" % args.folder)
     letter = read_text(args.letter_file or folder / "letter.md", "letter")
+    body_override = read_text(args.body_file, "body") if args.body_file else ""
     try:
         cv_json = json.loads(read_text(args.cv_json or folder / "cv.json", "cv.json"))
     except ValueError:
         raise CockpitError("VALIDATION", "cv.json is not valid JSON.")
     if not isinstance(cv_json, dict):
         raise CockpitError("VALIDATION", "cv.json must be a JSON object.")
-
-    revision = args.revision or ""
-    item = {}
-    if revision:
-        # Answering a change request: the job, recipient, subject and fit come from the
-        # package being answered, so nothing the owner set can be lost by omission.
-        text = call(url, token, "list_change_requests", {"limit": 100})
-        for candidate in json.loads(text):
-            if candidate.get("packageId") == revision:
-                item = candidate
-        if not item:
-            raise CockpitError("NOT_FOUND", "No open change request for package %s (already handled?)." % revision)
-        analysis = as_dict(item.get("fitAnalysis"))
-        subject = values["subject"] or item.get("emailSubject") or ""
-        to = values["to"] if values["to"] is not None else (item.get("emailTo") or "")
-        fit = values["fit"] or analysis.get("verdict") or ""
-        track = values["track"] or analysis.get("track") or ""
-        location = values["location"] or analysis.get("location") or ""
-        reasons = split_reasons(values["reasons"]) or analysis.get("reasons") or []
-        previous_first_line = (item.get("emailBody") or "").strip().splitlines()[:1]
-        carry_link = previous_first_line[0] if previous_first_line and previous_first_line[0].startswith("Apply via:") else ""
-        base = read_text(args.body_file, "body") if args.body_file else letter
-        body = base.strip()
-        if not to and carry_link and carry_link not in body.splitlines()[:1]:
-            body = "%s\n\n%s" % (carry_link, body)
-        company = role = link = ""
-    else:
-        missing = [k for k in ("company", "role", "subject", "fit") if not values[k]]
-        if missing:
-            raise CockpitError("VALIDATION", "Missing: %s (use --meta FILE or the options)." % ", ".join(missing))
-        company, role, link = values["company"], values["role"], values["url"] or ""
-        subject, fit, track = values["subject"], values["fit"], values["track"] or ""
-        location, to = values["location"] or "", values["to"] or ""
-        reasons = split_reasons(values["reasons"])
-        base = read_text(args.body_file, "body") if args.body_file else letter
-        body = build_body(base, to, link)
-
-    validate_package(subject, to, body, letter, fit)
     pdf = find_pdf(folder, args.pdf)
+    if pdf.stat().st_size > MAX_PDF_BYTES:  # before reading it: the server refuses it anyway
+        raise CockpitError("TOO_LARGE", "The PDF is too large (%d bytes)." % pdf.stat().st_size)
     data = pdf.read_bytes()
     encoded = base64.b64encode(data).decode("ascii")
     if len(encoded) > MAX_BASE64_CHARS:
         raise CockpitError("TOO_LARGE", "The PDF is too large (%d bytes)." % len(data))
 
-    digest = content_digest([letter, body, subject, to, json.dumps(cv_json, sort_keys=True)], data)
-    key = idempotency_key(folder.name, company, role, link, revision)
+    revision = args.revision or ""
+    if not revision:
+        missing = [k for k in ("company", "role", "subject", "fit") if not values[k]]
+        if missing:
+            raise CockpitError("VALIDATION", "Missing: %s (use --meta FILE or the options)." % ", ".join(missing))
+    key = idempotency_key(values["company"] or "", values["role"] or "", values["url"] or "", revision)
+
+    # Identical re-run: nothing to do, and no server call at all. Changed content:
+    # never silently ignored. The digest covers every value that ends up in the package.
+    digest = content_digest(
+        [letter, body_override, json.dumps(cv_json, sort_keys=True),
+         json.dumps({k: values[k] for k in META_KEYS}, sort_keys=True)],
+        data,
+    )
     marker = read_marker(folder, key)
     if marker and marker.get("digest") != digest:
         if not args.resubmit:
             raise CockpitError(
                 "CONTENT_CHANGED",
-                "This posting was already submitted with different content. Pass --resubmit to "
-                "send the corrected content as a new version (it replaces the version still waiting).",
+                "This posting was already submitted with different content. Pass --resubmit to send "
+                "the corrected content as a new version (it replaces the version still waiting).",
             )
-        key = idempotency_key(folder.name, company, role, link, revision, manual_digest=digest)
+        key = idempotency_key(values["company"] or "", values["role"] or "", values["url"] or "", revision, digest)
         marker = read_marker(folder, key)
     if marker and marker.get("digest") == digest:
         return dict(marker["result"], idempotent=True, cached=True)
 
-    job_id = item["jobId"] if revision else _resolve_job(url, token, values, read_text(args.description_file or folder / "posting.md", "posting text"))
+    analysis = {}
+    if revision:
+        # Answering a change request: the job, recipient, subject and fit come from the
+        # package being answered, so nothing the owner set can be lost by omission.
+        item = {}
+        for candidate in json.loads(call(url, token, "list_change_requests", {"limit": 100})):
+            if candidate.get("packageId") == revision:
+                item = candidate
+        if not item:
+            raise CockpitError("NOT_FOUND", "No open change request for package %s (already answered?)." % revision)
+        job_id = item["jobId"]
+        analysis = as_dict(item.get("fitAnalysis"))
+        subject = values["subject"] or item.get("emailSubject") or ""
+        to = values["to"] if values["to"] is not None else (item.get("emailTo") or "")
+        fit = values["fit"] or analysis.get("verdict") or ""
+        previous = (item.get("emailBody") or "").strip().splitlines()[:1]
+        carry = previous[0] if previous and previous[0].startswith("Apply via:") else ""
+        if not to and not carry:
+            link = _job_link(url, token, job_id)
+            carry = "Apply via: %s" % link if link else ""
+        body = (body_override or letter).strip()
+        if not to and carry and carry not in body.splitlines()[:1]:
+            body = "%s\n\n%s" % (carry, body)
+        fit_analysis = dict(analysis)  # keep any extra keys the owner or an earlier run stored
+        existed = True
+    else:
+        subject, fit = values["subject"], values["fit"]
+        to = values["to"] or ""
+        body = build_body(body_override or letter, to, values["url"] or "")
+        fit_analysis = {}
+        existed = False
+
+    fit_analysis["verdict"] = fit
+    for field, value in (("track", values["track"]), ("location", values["location"])):
+        if value:
+            fit_analysis[field] = value
+    reasons = split_reasons(values["reasons"])
+    if reasons:
+        fit_analysis["reasons"] = reasons
+
+    validate_package(subject, to, body, letter, fit, cv_json, fit_analysis)
+
+    if not revision:
+        posting = read_text(args.description_file or folder / "posting.md", "posting text")
+        job_id, existed = _resolve_job(url, token, values, posting)
+        if existed and not args.resubmit:
+            _guard_existing_job(url, token, job_id)
 
     attached = json.loads(
         call(url, token, "attach_file",
              {"fileName": safe_pdf_name(pdf.name), "mimeType": "application/pdf", "contentBase64": encoded})
     )
-
-    fit_analysis = {"verdict": fit}
-    if track:
-        fit_analysis["track"] = track
-    if location:
-        fit_analysis["location"] = location
-    if reasons:
-        fit_analysis["reasons"] = reasons
-
     package = json.loads(
         call(url, token, "submit_application_package", {
             "jobId": job_id,
@@ -507,7 +577,7 @@ def cmd_submit(args, url, token):
             "fitAnalysis": fit_analysis,
             "cvJson": cv_json,
             "cvFileId": attached["fileId"],
-            "sourceFolder": folder.name[:300],
+            "sourceFolder": (folder.resolve().name or "application")[:300],
             "idempotencyKey": key,
         })
     )
@@ -556,7 +626,8 @@ def build_parser():
     for name in META_KEYS:
         submit.add_argument("--" + name, default=None)
     submit.add_argument("--revision", default="", help="the packageId of the change request you are answering")
-    submit.add_argument("--resubmit", action="store_true", help="send corrected content for a posting already submitted today")
+    submit.add_argument("--resubmit", action="store_true",
+                        help="send corrected content for a posting already submitted (replaces the version still waiting)")
     submit.add_argument("--letter-file", dest="letter_file", default="")
     submit.add_argument("--body-file", dest="body_file", default="", help="plain-text email body if different from the letter")
     submit.add_argument("--cv-json", dest="cv_json", default="")
@@ -585,7 +656,9 @@ def main(argv=None):
         print(json.dumps(dict(ok=True, **result)))
         return 0
     except CockpitError as error:
-        print(json.dumps({"ok": False, "error": error.code, "message": _redact(error.message, token)}))
+        payload = {"ok": False, "error": error.code, "message": _redact(error.message, token)}
+        payload.update(error.extra)
+        print(json.dumps(payload))
         return 1
     except Exception as error:  # last resort: the bot must always get a JSON line
         message = _redact("%s: %s" % (type(error).__name__, error), token)[:300]
