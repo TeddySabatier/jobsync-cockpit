@@ -10,8 +10,9 @@ import { cockpitUserDir } from "./files";
 // attach_file storage (cockpit/SPEC.md §3). The stored path is generated here
 // (`<cockpitUserDir>/<uuid>.pdf`), never taken from input.
 
-export const COCKPIT_QUOTA_MAX_FILES = 200;
-export const COCKPIT_QUOTA_MAX_BYTES = 500 * 1024 * 1024;
+// No count or size quota (D-013). Bloat is limited by removing uploads that
+// never became part of a package (see cleanupOrphanUploads).
+export const COCKPIT_ORPHAN_DAYS_DEFAULT = 7;
 
 // Shown to the user; never used as a path.
 export function sanitizePdfName(fileName: string): string {
@@ -23,22 +24,58 @@ export function sanitizePdfName(fileName: string): string {
   return `${base || "attachment"}.pdf`;
 }
 
-// One readdir + stat per call, at most COCKPIT_QUOTA_MAX_FILES entries.
-// shortcut: two concurrent uploads can both pass the check; fine for one user.
-async function assertQuota(dir: string, incomingBytes: number): Promise<void> {
+function orphanMaxAgeMs(): number {
+  const raw = Number(process.env.COCKPIT_ORPHAN_DAYS);
+  const days = Number.isFinite(raw) && raw >= 1 ? raw : COCKPIT_ORPHAN_DAYS_DEFAULT;
+  return days * 24 * 60 * 60 * 1000;
+}
+
+// Deletes the user's uploaded files that no ApplicationPackage (or Resume)
+// references and that are older than COCKPIT_ORPHAN_DAYS (default 7, minimum 1):
+// the leftovers of failed or abandoned submits, plus stray files with no row.
+// Packages, including superseded and sent ones, keep their CV.
+// Returns how many files were removed.
+export async function cleanupOrphanUploads(
+  userId: string,
+  now: number = Date.now(),
+): Promise<number> {
+  const dir = cockpitUserDir(userId);
   let names: string[];
   try {
     names = await fs.readdir(dir);
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return 0;
     throw e;
   }
-  if (names.length >= COCKPIT_QUOTA_MAX_FILES) throw new CockpitError("TOO_LARGE");
-  let total = incomingBytes;
+  const cutoff = now - orphanMaxAgeMs();
+  const old: string[] = [];
   for (const name of names) {
-    total += (await fs.stat(path.join(dir, name))).size;
+    const full = path.join(dir, name);
+    try {
+      const st = await fs.stat(full);
+      if (st.isFile() && st.mtimeMs < cutoff) old.push(full);
+    } catch {
+      // vanished meanwhile
+    }
   }
-  if (total > COCKPIT_QUOTA_MAX_BYTES) throw new CockpitError("TOO_LARGE");
+  if (old.length === 0) return 0;
+
+  // Rows that something still points to are never touched.
+  const inUse = await prisma.file.findMany({
+    where: {
+      filePath: { in: old },
+      OR: [{ applicationPackages: { some: {} } }, { Resume: { isNot: null } }],
+    },
+    select: { filePath: true },
+  });
+  const keep = new Set(inUse.map((r) => r.filePath));
+  const doomed = old.filter((p) => !keep.has(p));
+  if (doomed.length === 0) return 0;
+
+  // Rows first: a row that outlives its bytes is harmless, the reverse is not.
+  await prisma.file.deleteMany({ where: { filePath: { in: doomed } } });
+  for (const full of doomed) await fs.rm(full, { force: true });
+  return doomed.length;
 }
 
 export async function attachFile(
@@ -54,7 +91,8 @@ export async function attachFile(
   }
 
   const dir = cockpitUserDir(userId);
-  await assertQuota(dir, content.length);
+  // Housekeeping must never block an upload.
+  await cleanupOrphanUploads(userId).catch(() => 0);
 
   const fileName = sanitizePdfName(input.fileName);
   const filePath = path.join(dir, `${crypto.randomUUID()}.pdf`);

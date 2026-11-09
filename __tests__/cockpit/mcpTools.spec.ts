@@ -201,7 +201,7 @@ describe("attach_file + submit_application_package", () => {
     await c.close();
   });
 
-  it("enforces the per-user quota of 200 files and 500 MB with TOO_LARGE (AC-38)", async () => {
+  it("has no file-count or size quota any more (D-013, replaces the AC-38 quota)", async () => {
     const userC = await seedUser("quota@example.com");
     const dir = cockpitUserDir(userC);
     fs.mkdirSync(dir, { recursive: true });
@@ -212,26 +212,62 @@ describe("attach_file + submit_application_package", () => {
       contentBase64: pdfBase64(),
     };
 
-    // 500 MB (sparse) already used: one more byte is too much.
+    // No quota (D-013): 500 MB (sparse) and 250 files already stored, still accepted.
     const big = path.join(dir, "big.pdf");
     fs.writeFileSync(big, "");
     fs.truncateSync(big, 500 * 1024 * 1024);
-    expect(await c.call("attach_file", args)).toEqual({
-      isError: true,
-      text: errorText("TOO_LARGE"),
-    });
-
-    // 200 files already stored.
-    fs.rmSync(big);
-    for (let i = 0; i < 200; i++) fs.writeFileSync(path.join(dir, `${i}.pdf`), "%PDF");
-    expect(await c.call("attach_file", args)).toEqual({
-      isError: true,
-      text: errorText("TOO_LARGE"),
-    });
-
-    // Back under the quota: accepted.
-    fs.rmSync(path.join(dir, "0.pdf"));
+    for (let i = 0; i < 250; i++) fs.writeFileSync(path.join(dir, `${i}.pdf`), "%PDF");
     expect((await c.call("attach_file", args)).isError).toBe(false);
+    await c.close();
+  });
+
+  it("removes old unreferenced uploads on the next attach_file and keeps everything in use (D-013)", async () => {
+    const userD = await seedUser("cleanup@example.com");
+    const dir = cockpitUserDir(userD);
+    const c = await asUser(userD);
+    const upload = async (name: string) => {
+      const res = await c.call("attach_file", {
+        fileName: name,
+        mimeType: "application/pdf",
+        contentBase64: pdfBase64(name),
+      });
+      const id = JSON.parse(res.text).fileId as string;
+      const row = await prisma.file.findUniqueOrThrow({ where: { id } });
+      return { id, filePath: row.filePath };
+    };
+    const age = (p: string, days: number) => {
+      const t = new Date(Date.now() - days * 86_400_000);
+      fs.utimesSync(p, t, t);
+    };
+
+    const orphanOld = await upload("orphan-old");
+    const orphanNew = await upload("orphan-new");
+    const used = await upload("used");
+    const jobId = await newJob(userD);
+    expect(
+      (await c.call("submit_application_package", submitArgs(jobId, { cvFileId: used.id })))
+        .isError,
+    ).toBe(false);
+    const stray = path.join(dir, "stray.pdf"); // a file with no row at all
+    fs.writeFileSync(stray, "%PDF");
+    age(orphanOld.filePath, 10);
+    age(used.filePath, 10);
+    age(stray, 10);
+    age(orphanNew.filePath, 2);
+
+    expect((await c.call("attach_file", {
+      fileName: "next.pdf",
+      mimeType: "application/pdf",
+      contentBase64: pdfBase64("next"),
+    })).isError).toBe(false);
+
+    expect(fs.existsSync(orphanOld.filePath)).toBe(false);
+    expect(await prisma.file.findUnique({ where: { id: orphanOld.id } })).toBeNull();
+    expect(fs.existsSync(stray)).toBe(false);
+    // Recent orphan (a submit may still follow) and a file a package uses stay.
+    expect(fs.existsSync(orphanNew.filePath)).toBe(true);
+    expect(fs.existsSync(used.filePath)).toBe(true);
+    expect(await prisma.file.findUnique({ where: { id: used.id } })).not.toBeNull();
     await c.close();
   });
 

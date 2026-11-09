@@ -56,14 +56,14 @@ Every failure is one JSON line `{"ok": false, "error": "<CODE>", "message": "...
 | `CONFLICT`, `INVALID_STATE` | The package is locked or in a state that cannot change, or an idempotency key clashed | Do not retry blindly; the owner decides in the cockpit |
 | `USAGE`, `HTTP_<n>` | Wrong command line (exit code 2), or an unexpected HTTP status | Fix the command; tell the owner |
 | `RATE_LIMITED` | Too many requests | Wait and retry later |
-| `TOO_LARGE` | PDF over the size limit, or the upload quota is full | See limits below |
+| `TOO_LARGE` | PDF over the size limit | Shrink the PDF |
 | `VALIDATION` | A field was rejected (the message says what, or "invalid input") | Fix and re-run |
 | `FILE_NOT_FOUND`, `AMBIGUOUS_PDF` | A file is missing, or there are several PDFs | Render the CV, write the letter, or pass `--pdf` |
 | `TOOL_ERROR`, `BAD_RESPONSE`, `INTERNAL` | Unexpected | Log it and tell the owner |
 
 ## Limits to know
 
-- **Upload quota:** the cockpit accepts at most **200 uploaded CV files per user in total** (and 500 MB), counting every file ever uploaded, including those of sent applications. At a handful of applications a day that is reached within weeks, and then every submit fails with `TOO_LARGE`. This is a known V0 limit; cleaning up old files or raising it is a follow-up.
+- **Uploads:** there is no quota. Files the bot uploaded but never attached to a package (failed submits) are deleted after 7 days (`COCKPIT_ORPHAN_DAYS`). Every package keeps its CV, so disk use grows by about one CV per application and version.
 - **Token expiry:** see setup step 2.
 - **One job per link:** two postings with the same company and title but different links are two applications. Without any link, an existing job with the same company and title (recent) is reused as it is, never modified, and then the "already has a package" rule applies.
 
