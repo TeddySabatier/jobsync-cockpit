@@ -167,7 +167,10 @@ class Stub:
                     if p["status"] in ("pending", "approved", "changes_requested"):
                         p["status"] = "superseded"
                         superseded.append(p["id"])
-                packages.append({"id": package_id, "version": len(packages) + 1, "status": "pending"})
+                packages.append({"id": package_id, "version": len(packages) + 1, "status": "pending",
+                                 "idempotencyKey": key, "emailSubject": arguments["emailSubject"],
+                                 "emailBody": arguments["emailBody"], "letterMd": arguments.get("letterMd"),
+                                 "fitGrade": arguments["fitGrade"]})
                 # An answered change request is closed: it no longer shows up in the list.
                 self.change_requests = [c for c in self.change_requests if c.get("jobId") != job]
             text = json.dumps({"packageId": self.keys[key][1], "version": 1, "status": "pending",
@@ -431,8 +434,9 @@ class CommandTests(FolderMixin, unittest.TestCase):
     def test_finding_the_same_posting_again_never_replaces_the_package_under_review(self):
         first = run(self.args(self.make_folder(name="2026-11-09_acme_backend")))[1]
         self.assertTrue(first["ok"])
-        # next day: a new dated folder (so no marker), the same posting
-        code, result, _ = run(self.args(self.make_folder(name="2026-11-10_acme_backend")))
+        # next day: a new dated folder (so no marker), the same posting, a regenerated letter
+        regenerated = self.make_folder(name="2026-11-10_acme_backend", **{"letter.md": "A freshly written letter.\n"})
+        code, result, _ = run(self.args(regenerated))
         self.assertEqual((code, result["error"]), (1, "ALREADY_SUBMITTED"))
         self.assertEqual(result["packageId"], first["packageId"])
         self.assertEqual(self.stub.files, 1)  # nothing uploaded the second time
@@ -480,7 +484,7 @@ class CommandTests(FolderMixin, unittest.TestCase):
         self.assertNotIn("upsert", add_job)  # never overwrites another posting's fields
         self.assertNotIn("allowDuplicate", add_job)
         self.assertEqual(self.stub.names("find_job"), [])
-        second = run(self.args(self.make_folder(name="2026-11-10_acme_a"), link=""))[1]
+        second = run(self.args(self.make_folder(name="2026-11-10_acme_a", **{"letter.md": "Another letter.\n"}), link=""))[1]
         self.assertEqual(second["error"], "ALREADY_SUBMITTED")
 
     # ---- re-runs
@@ -524,15 +528,40 @@ class CommandTests(FolderMixin, unittest.TestCase):
         again = run(self.args(folder, "--resubmit"))[1]
         self.assertTrue(again["cached"])  # the same correction twice is a no-op
 
-    def test_a_lost_or_corrupt_marker_cannot_cause_a_second_package(self):
+    def test_a_lost_or_corrupt_marker_recognises_its_own_package_and_adds_no_second_one(self):
         folder = self.make_folder()
         first = run(self.args(folder))[1]
-        (folder / ".cockpit-submitted.json").write_text("not json", encoding="utf-8")
+        (folder / ".cockpit-submitted.json").write_text("not json", encoding="utf-8")  # e.g. a crash before the marker
         again = run(self.args(folder))[1]
-        # No cache to lean on, so the guard asks the cockpit and reports the package that exists.
-        self.assertEqual(again["error"], "ALREADY_SUBMITTED")
+        self.assertTrue(again["ok"] and again["idempotent"] and again["recovered"])
+        self.assertEqual(again["packageId"], first["packageId"])
+        self.assertEqual(self.stub.files, 1)  # no second upload
+        self.assertEqual(len(self.stub.names("submit_application_package")), 1)
+        self.assertTrue((folder / ".cockpit-submitted.json").is_file())  # the marker is rebuilt
+
+    def test_the_same_posting_with_identical_content_is_only_a_harmless_replay(self):
+        first = run(self.args(self.make_folder(name="2026-11-09_acme_backend")))[1]
+        again = run(self.args(self.make_folder(name="2026-11-10_acme_backend")))[1]
+        self.assertTrue(again["ok"] and again["recovered"])
         self.assertEqual(again["packageId"], first["packageId"])
         self.assertEqual(self.stub.files, 1)
+
+    def test_a_package_with_the_same_key_but_different_content_is_never_called_a_success(self):
+        folder = self.make_folder()
+        run(self.args(folder))
+        (folder / ".cockpit-submitted.json").unlink()  # marker lost AND the letter was regenerated
+        (folder / "letter.md").write_text("Regenerated.\n", encoding="utf-8")
+        self.assertEqual(run(self.args(folder))[1]["error"], "ALREADY_SUBMITTED")
+
+    def test_resubmit_from_a_fresh_folder_really_creates_a_new_version(self):
+        first = run(self.args(self.make_folder(name="2026-11-09_acme_backend")))[1]
+        corrected = self.make_folder(name="2026-11-10_acme_backend", **{"letter.md": "A corrected letter.\n"})
+        code, result, _ = run(self.args(corrected, "--resubmit"))
+        self.assertEqual(code, 0, result)
+        self.assertFalse(result["idempotent"])  # the server did NOT just replay the old package
+        self.assertNotEqual(result["packageId"], first["packageId"])
+        self.assertEqual(result["supersededIds"], [first["packageId"]])
+        self.assertEqual(self.stub.files, 2)
 
     def test_a_failed_submit_leaves_no_marker(self):
         self.stub.fail["submit_application_package"] = "ALREADY_SENT: already sent"

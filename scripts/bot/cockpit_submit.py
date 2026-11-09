@@ -358,7 +358,7 @@ def write_marker(folder, key, digest, result):
     try:
         (Path(folder) / MARKER_NAME).write_text(json.dumps({"entries": entries}), encoding="utf-8")
     except OSError:
-        pass  # a read-only folder only costs a repeated upload on a re-run
+        pass  # a read-only folder costs nothing: a re-run is recognised through the package's own key
 
 
 def load_meta(path):
@@ -439,15 +439,29 @@ def _resolve_job(url, token, values, posting):
     return parse_job_id(answer), "Job created" not in answer
 
 
-def _guard_existing_job(url, token, job_id):
+def _guard_existing_job(url, token, job_id, key, expected):
     """A second submit for a job that already has a package would supersede the
-    version the owner is reviewing, editing or has approved. Stop instead."""
+    version the owner is reviewing, editing or has approved. Stop instead, unless
+    that package is THIS run's own: same key AND the same content that this run
+    would send (a crash between the submit and writing the marker). Anything else,
+    including the same posting found again with a regenerated letter, is refused.
+    Returns the result of such a replay, or None when the job has no live package."""
     job = as_dict(call(url, token, "get_job", {"jobId": job_id}))
     live = [p for p in job.get("packages", []) if isinstance(p, dict) and p.get("status") != "superseded"]
     if not live:
         return
     package = live[0]  # newest first
     status = package.get("status")
+    if package.get("idempotencyKey") == key and all(package.get(k) == v for k, v in expected.items()):
+        return {
+            "jobId": job_id,
+            "packageId": package.get("id"),
+            "version": package.get("version"),
+            "status": status,
+            "idempotent": True,
+            "supersededIds": [],
+            "recovered": True,
+        }
     code = {"sent": "ALREADY_SENT", "rejected": "JOB_REJECTED"}.get(status, "ALREADY_SUBMITTED")
     hint = " Answer it with --revision %s." % package.get("id") if status == "changes_requested" else ""
     raise CockpitError(
@@ -502,15 +516,18 @@ def cmd_submit(args, url, token):
         data,
     )
     marker = read_marker(folder, key)
-    if marker and marker.get("digest") != digest:
-        if not args.resubmit:
-            raise CockpitError(
-                "CONTENT_CHANGED",
-                "This posting was already submitted with different content. Pass --resubmit to send "
-                "the corrected content as a new version (it replaces the version still waiting).",
-            )
+    if args.resubmit:
+        # An explicit correction always gets its own key (the posting key plus the content
+        # digest). Reusing the bare key, for example from a fresh folder, would make the server
+        # replay the OLD package while this script printed ok.
         key = idempotency_key(values["company"] or "", values["role"] or "", values["url"] or "", revision, digest)
         marker = read_marker(folder, key)
+    elif marker and marker.get("digest") != digest:
+        raise CockpitError(
+            "CONTENT_CHANGED",
+            "This posting was already submitted with different content. Pass --resubmit to send "
+            "the corrected content as a new version (it replaces the version still waiting).",
+        )
     if marker and marker.get("digest") == digest:
         return dict(marker["result"], idempotent=True, cached=True)
 
@@ -560,7 +577,13 @@ def cmd_submit(args, url, token):
         posting = read_text(args.description_file or folder / "posting.md", "posting text")
         job_id, existed = _resolve_job(url, token, values, posting)
         if existed and not args.resubmit:
-            _guard_existing_job(url, token, job_id)
+            replay = _guard_existing_job(
+                url, token, job_id, key,
+                {"emailSubject": subject, "emailBody": body, "letterMd": letter, "fitGrade": fit},
+            )
+            if replay:
+                write_marker(folder, key, digest, replay)
+                return replay
 
     attached = json.loads(
         call(url, token, "attach_file",
