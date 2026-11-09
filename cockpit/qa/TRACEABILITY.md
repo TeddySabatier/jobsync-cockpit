@@ -43,7 +43,7 @@ Status: **covered** (an automated test asserts the AC), **weak** (partly asserte
 | AC-35 | unit `mcpImportGraph.spec.ts` | covered | |
 | AC-36 | unit `gmailClient.spec.ts`, `sendNoSecretLogs.spec.ts`; e2e `04-send-failures` (Google body never in the UI) | covered | |
 | AC-37 | unit `nextConfigHeaders.spec.ts`, `fileRoute.spec.ts`; e2e `05-file-route` (single `X-Frame-Options: SAMEORIGIN`, CSP, nosniff) | covered | Iframe render is AC-30 |
-| AC-38 | unit `mcpTools.spec.ts` (TOO_LARGE, 7M shape error) | covered | |
+| AC-38 | unit `mcpTools.spec.ts` (7M shape error; the 200 files / 500 MB quota was removed by D-013, orphan cleanup tested there) | covered | amended by D-013 |
 | AC-39 | unit `backupExclusion.spec.ts`, `backupCockpit.spec.ts` (real SQLite: no token byte in any archive entry) | covered | |
 | AC-40 | unit `nullUser.review.spec.ts`, `nullUser.send.spec.ts`, `nullUser.gmail.spec.ts`, `detail.spec.tsx`, `queue.spec.tsx` | covered | Split over several files; not checked that every exported action is listed |
 | AC-41 | unit `letterRender.spec.tsx`; property `markdown.spec.ts` | covered | |

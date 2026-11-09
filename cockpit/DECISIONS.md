@@ -144,3 +144,15 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/backup/{ordering,schema,import}.ts`, `__tests__/backupCockpit.spec.ts` and the three backup specs that mock the model list.
 - **Not changed:** `GmailAccount` handling, the MCP tools, Send. SPEC stays frozen; this entry is the amendment of record.
+
+## D-013 No attachment quota; unreferenced uploads are cleaned up (overrides D-004 S4 and AC-38 for the quota)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The per-user quota of 200 files / 500 MB on `attach_file` is **removed** | **Accept (owner decision, issue #49).** The per-file size cap and the base64 payload cap (7,000,000) stay. | A daily bot counting every file ever uploaded would hit 200 within weeks and then fail every submit with `TOO_LARGE`. |
+| (b) | Each `attach_file` first deletes the user's files in `cockpitUserDir` that are **older than `COCKPIT_ORPHAN_DAYS` (default 7, minimum 1)** and referenced by **no `ApplicationPackage` and no `Resume`**, together with their `File` rows (stray files without a row too) | **Accept.** Best effort: a failure of the cleanup never blocks the upload. | Bounds the bloat from failed or abandoned submits without a limit. A recent orphan is kept because a submit normally follows within seconds. |
+| (c) | Files of packages (pending, superseded, sent, rejected) are **kept** | **Accept.** | They are history and the backup (D-012) carries them; deleting them would break the application thread. |
+| (d) | Disk use is otherwise unbounded | **Known limit.** About one CV per application and version; the rate limit on `attach_file` still applies. | A leaked bot token can fill the disk; revoke the token. |
+
+- **Scope:** `src/lib/cockpit/attachments.ts`, `__tests__/cockpit/mcpTools.spec.ts`, `docs/cockpit.md`, `docs/cockpit-bot.md`, `cockpit/qa/TRACEABILITY.md`.
+- **Not changed:** the MCP tool list, backup/restore (it never counted quota), Send. SPEC stays frozen; this entry is the amendment of record.
