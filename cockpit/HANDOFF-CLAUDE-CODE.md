@@ -66,7 +66,7 @@ An overnight QA run covered the code after the handoff: free-model review lanes,
 
 ## 6. Bot switch
 
-- [ ] Update the owner's bot pipeline doc and scheduled task to call **`attach_file`** + **`submit_application_package`** instead of Gmail drafts, and to poll **`list_change_requests`** / call **`mark_change_request_done`**.
+- [ ] Update the owner's bot pipeline doc and scheduled task to call **`attach_file`** + **`submit_application_package`** instead of Gmail drafts, and to poll **`list_change_requests`** / call **`mark_change_request_done`**. Use the ready-made script `scripts/bot/cockpit_submit.py` (the PDF must travel as base64, which the bot cannot type itself); setup and the exact pipeline text are in `docs/cockpit-bot.md`.
 - [ ] Do this **only after** steps 1–5 pass.
 
 ## 7. Risks and open items
