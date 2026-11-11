@@ -126,7 +126,7 @@ def load_token():
         else:
             text = raw.decode("utf-8-sig", errors="replace")
         # UTF-16 text that already began with a BOM keeps one after decoding. Written as an escape.
-        token = text.strip().lstrip("﻿")
+        token = text.strip().lstrip("\ufeff")
         if not token:
             raise CockpitError("NO_TOKEN", "No token: set COCKPIT_TOKEN or put it in %s" % path)
     if not TOKEN_RE.match(token):
