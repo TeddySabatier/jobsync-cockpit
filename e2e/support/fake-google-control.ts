@@ -38,6 +38,12 @@ export type FakeLogEntry = {
   subject?: string | null;
   attachmentName?: string | null;
   attachmentBytes?: number | null;
+  // Every attachment of a send, in order (attachmentName/Bytes = the first).
+  attachments?: Array<{ name: string; bytes: number }>;
+  // Names of the form fields the app posted to the token endpoint.
+  fields?: string[];
+  // Set when the fake refused the request (missing PKCE verifier, wrong secret...).
+  rejected?: string;
 };
 
 export function setFakeMode(mode: FakeMode): void {

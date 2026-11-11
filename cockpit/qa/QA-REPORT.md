@@ -101,7 +101,7 @@ Details per finding: `FINDINGS.jsonl`, `REJECTED.md`. Out-of-scope ideas: `V1-ID
 | L6 Next.js boundaries | 14 indexed, all rejected (for example a claimed missing `"use client"` that is present on line 1). |
 | L7 SPEC conformance | 53 indexed, all rejected or known. Mostly read the wrong file for the AC. Its useful output is the AC traceability (`TRACEABILITY.md`). |
 | L8 property tests | 7 fast-check files (MIME, rate limit, path confinement, PDF name sanitising, schemas, markdown, package state machine). One real finding (dot-segment userId), fixed in #37. State-machine property: no failure. Assumptions listed in the test files. |
-| L9 end-to-end | 47 passed, 2 `test.fixme` for real P3 product bugs (below), see section 5. |
+| L9 end-to-end | 47 passed (at that run; later specs were added since), 2 `test.fixme` for real P3 product bugs (below), see section 5. |
 | L10 red team | No usable output (schema failures only). |
 | L5 test quality | **Not run.** |
 
@@ -115,7 +115,7 @@ Details per finding: `FINDINGS.jsonl`, `REJECTED.md`. Out-of-scope ideas: `V1-ID
   - send OK, double click and two-tab race give exactly one send
   - all Gmail failure classes: 400/401/403 definitive; 429/500/timeout/network/bad body ambiguous with outcome panel; release lock; mark as sent manually; real 20 s client timeout
   - file route: single `X-Frame-Options: SAMEORIGIN`, sandbox CSP, `nosniff`; unauthenticated gives 307 (D-011)
-  - flag off: covered by the Vitest flag tests; the E2E `flag-off.spec.ts` (separate server, `COCKPIT_E2E_FLAG_OFF=1`) was not run in the final pass
+  - flag off: covered by the Vitest flag tests; the E2E `flag-off.spec.ts` (separate server, `COCKPIT_E2E_FLAG_OFF=1`) was not run in the final pass of that night (it is run separately: `COCKPIT_E2E_FLAG_OFF=1`)
   - 375 px: no horizontal scroll on queue, detail, edit, settings, and Send dialog
   - keyboard: j/k, dialog focus trap
   - axe on queue, detail, edit, settings, Send dialog, outcome panel: zero serious/critical, except `aria-input-field-name` on the read-only Tiptap panels (Posting, Cover letter), which is exempted in `08-axe.spec.ts` and still open

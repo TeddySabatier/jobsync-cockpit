@@ -18,7 +18,7 @@ Status: **covered** (an automated test asserts the AC), **weak** (partly asserte
 | AC-10 | unit `mcpTokenScopes.spec.ts` | covered | |
 | AC-11 | unit `mcpTools.spec.ts` | covered | |
 | AC-12 | unit `mcpTools.spec.ts`, `packages.integration.spec.ts` | covered | e2e `01-review-flow` runs the bot "mark done" step |
-| AC-13 | unit `mcpRoute.spec.ts`, `mcpTools.spec.ts` (no send/approve/reject tool); e2e `flag-off` (cockpit tools absent, upstream ones present) | covered | Equality to the full upstream list is not asserted tool by tool |
+| AC-13 | unit `mcpRoute.spec.ts`, `mcpTools.spec.ts` (no send/approve/reject tool); e2e `flag-off` (cockpit tools absent, upstream ones present) | covered | Equality to the full upstream list is not asserted tool by tool. With the flag off the review pages show the not-found UI but answer HTTP **200** (soft 404 from `loading.tsx`), not 404 |
 | AC-14 | unit `packages.integration.spec.ts` (transition matrix), `nullUser.review.spec.ts` | covered | |
 | AC-15 | unit `packages.integration.spec.ts` (`updatePackageContent`), `cvLeaves.spec.ts` | covered | |
 | AC-16 | unit `fileRoute.spec.ts`; e2e `05-file-route` (headers, 404s, unauthenticated 307) | covered | D-011: in the running app unauthenticated is **307 → /signin**, not the spec's 401; the unit test asserts 401 on the bare handler |
@@ -44,7 +44,7 @@ Status: **covered** (an automated test asserts the AC), **weak** (partly asserte
 | AC-36 | unit `gmailClient.spec.ts`, `sendNoSecretLogs.spec.ts`; e2e `04-send-failures` (Google body never in the UI) | covered | |
 | AC-37 | unit `nextConfigHeaders.spec.ts`, `fileRoute.spec.ts`; e2e `05-file-route` (single `X-Frame-Options: SAMEORIGIN`, CSP, nosniff) | covered | Iframe render is AC-30 |
 | AC-38 | unit `mcpTools.spec.ts` (7M shape error; the 200 files / 500 MB quota was removed by D-013, orphan cleanup tested there) | covered | amended by D-013 |
-| AC-39 | unit `backupExclusion.spec.ts`, `backupCockpit.spec.ts` (real SQLite: no token byte in any archive entry) | covered | |
+| AC-39 | unit `backupExclusion.spec.ts`, `__tests__/backupCockpit.spec.ts` (real SQLite: no token byte in any archive entry) | covered | |
 | AC-40 | unit `nullUser.review.spec.ts`, `nullUser.send.spec.ts`, `nullUser.gmail.spec.ts`, `detail.spec.tsx`, `queue.spec.tsx` | covered | Split over several files; not checked that every exported action is listed |
 | AC-41 | unit `letterRender.spec.tsx`; property `markdown.spec.ts` | covered | |
 | AC-42 | unit `files.spec.ts`; property `pathConfinement.spec.ts` | covered | Dot-segment userId gap found by the property test, fixed in #37 |
@@ -76,5 +76,10 @@ Weak: AC-01, AC-17, AC-29, AC-45. The two process ACs (31, 32) have no test by n
 | D-008 idempotency key reused across jobs → CONFLICT | unit `packages.integration.spec.ts` |
 | D-010 same-email reconnect does not revoke the shared grant | unit `gmailOauth.spec.ts`; e2e `02-gmail-connect` |
 | D-011 unauthenticated file route → 307 | e2e `05-file-route` |
+| D-012 packages, sent emails and CV files travel in backups; `GmailAccount` does not | unit `__tests__/backupCockpit.spec.ts`, `backupExclusion.spec.ts` |
+| D-013 no attachment quota; old unreferenced uploads cleaned up (`COCKPIT_ORPHAN_DAYS`) | unit `mcpTools.spec.ts` |
+| D-014 Claude prompt button | unit `claudePrompt.spec.tsx` |
+| D-015 cover letter as a PDF (route, render, attachment, preview) | unit `letterRoute.spec.ts`, `letterPdf.spec.tsx`, `letterRender.spec.tsx`, `send.integration.spec.ts`; e2e `09-letter-pdf`, `03-send` (both PDFs reach the fake Google) |
+| Fake Google refuses what real Google would (no PKCE verifier, wrong secret, wrong redirect, missing Bearer) | unit `fakeGoogle.spec.ts`; e2e `02-gmail-connect` ("token exchange sends PKCE...") |
 
 Accessibility (not an AC): e2e `08-axe` runs axe on queue, detail, edit, settings, Send dialog and outcome panel. Open: focus does not return to Send after Escape (issue #39, `test.fixme`).
