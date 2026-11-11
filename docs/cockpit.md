@@ -14,7 +14,7 @@ COCKPIT_ENABLED=true
 
 When the flag is **not** exactly `"true"`:
 
-- The **Review** nav entry is hidden; `/dashboard/review/**` returns 404 (after auth).
+- The **Review** nav entry is hidden; `/dashboard/review/**` shows the not-found page (after auth). The HTTP status of those pages is **200**, not 404: `review/loading.tsx` flushes the shell before `notFound()` runs (a soft 404, see `e2e/cockpit/flag-off.spec.ts`).
 - `/api/cockpit/**` returns 404.
 - Cockpit MCP tools are not registered.
 - Cockpit server actions return `COCKPIT_DISABLED` (only after a signed-in session).
@@ -78,7 +78,7 @@ Messages come from a fixed map (never raw Google/Prisma text). Common MCP codes:
 6. While **`sendStartedAt`** is set on any package for the job, submit returns **`CONFLICT`** — resolve send in the UI first.
 7. The input is **strict**: an unknown or misspelled key (e.g. `emailTooo`) is an error, never silently dropped. A whitespace-only `emailSubject` or `emailBody` is refused (D-018).
 
-`attach_file` has **no file-count or size quota** (D-013). Each PDF is still limited to the per-file size cap. To avoid bloat, every `attach_file` call first deletes the user's uploads that **no package uses** and that are older than **7 days** (set `COCKPIT_ORPHAN_DAYS`, minimum 1; a smaller value or a non-number is ignored, a warning is logged and 7 is used). Files of packages (pending, superseded, sent) are never deleted.
+`attach_file` has **no file-count or size quota** (D-013). Each PDF is still limited to the per-file size cap. To avoid bloat, every `attach_file` call first deletes the user's uploads that **no package uses** and that are older than **7 days** (set `COCKPIT_ORPHAN_DAYS` in the app environment, the same place as `COCKPIT_ENABLED`; a value below 1 or a non-number is ignored, a warning is logged and 7 is used). Files of packages (pending, superseded, sent) are never deleted.
 
 ## Cover letter as a PDF
 

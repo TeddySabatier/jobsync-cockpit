@@ -28,43 +28,23 @@ import { cockpitUserDir } from "@/lib/cockpit/files";
 import { SubmitApplicationPackageInputShape } from "@/lib/cockpit/schemas";
 import { COCKPIT_TOOL_DESCRIPTIONS } from "@/lib/mcp/tools/cockpitDescriptions";
 import { ALL_SCOPES, connectCockpit, pdfBase64 } from "./helpers/mcpClient";
+import { createJobFor, seedUserWithRefs, type SeededUser } from "./helpers/seedUser";
 
 const prisma = db.prisma;
 
 let userA: string;
 let userB: string;
 let draftId: string;
-const refs: Record<string, { titleId: string; companyId: string }> = {};
+const refs: Record<string, SeededUser> = {};
 
 async function seedUser(email: string) {
-  const user = await prisma.user.create({
-    data: { name: "Jane Doe", email, password: "x" },
-  });
-  const title = await prisma.jobTitle.create({
-    data: { label: "Engineer", value: `eng-${user.id}`, createdBy: user.id },
-  });
-  const company = await prisma.company.create({
-    data: { label: "Example Corp", value: `corp-${user.id}`, createdBy: user.id },
-  });
-  refs[user.id] = { titleId: title.id, companyId: company.id };
-  return user.id;
+  const u = await seedUserWithRefs(prisma, email);
+  refs[u.id] = u;
+  return u.id;
 }
 
-const newJob = async (userId: string, over: Record<string, unknown> = {}) =>
-  (
-    await prisma.job.create({
-      data: {
-        userId,
-        description: "A synthetic job",
-        jobType: "FT",
-        createdAt: new Date(),
-        statusId: draftId,
-        jobTitleId: refs[userId].titleId,
-        companyId: refs[userId].companyId,
-        ...over,
-      },
-    })
-  ).id;
+const newJob = (userId: string, over: Record<string, unknown> = {}) =>
+  createJobFor(prisma, refs[userId], draftId, over);
 
 const submitArgs = (jobId: string, over: Record<string, unknown> = {}) => ({
   jobId,

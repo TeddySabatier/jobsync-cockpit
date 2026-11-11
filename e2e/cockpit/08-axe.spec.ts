@@ -10,7 +10,8 @@ import { approve, expect, openDetail, openSendDialog, test } from "../support/co
 // The upstream app shell (header, sidebar) is excluded: not cockpit code.
 const OUT = ".cockpit-tmp/findings/l9-axe.json";
 
-// Known cockpit finding, reported in the PR; remove the entry when fixed.
+// Known cockpit finding, reported in the review of #62 (no separate issue yet:
+// open one before removing this waiver); remove the entry when it is fixed.
 const KNOWN = new Set([
   // Read-only Tiptap panels (Posting, Cover letter) are role=textbox with no name.
   "aria-input-field-name",

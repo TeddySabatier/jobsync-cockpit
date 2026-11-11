@@ -3,6 +3,7 @@ import path from "path";
 import type { PrismaClient } from "@prisma/client";
 import { encrypt } from "@/lib/encryption";
 import type { GmailClient } from "@/lib/cockpit/gmail/client";
+import { createJobFor, seedUserWithRefs } from "./seedUser";
 
 // Seed + mock helpers for the send tests. Synthetic data only. Needs
 // ENCRYPTION_KEY set (for the stored refresh token) before seedSend().
@@ -29,15 +30,7 @@ export function mockGmail() {
 
 export async function seedSend(prisma: PrismaClient, uploadsDir: string) {
   const mkUser = async (email: string, withGmail: boolean) => {
-    const user = await prisma.user.create({
-      data: { name: "Jane Doe", email, password: "x" },
-    });
-    const title = await prisma.jobTitle.create({
-      data: { label: "Engineer", value: `eng-${user.id}`, createdBy: user.id },
-    });
-    const company = await prisma.company.create({
-      data: { label: "Example Corp", value: `corp-${user.id}`, createdBy: user.id },
-    });
+    const user = await seedUserWithRefs(prisma, email);
     if (withGmail) {
       const { encrypted, iv } = encrypt(REFRESH_TOKEN);
       await prisma.gmailAccount.create({
@@ -50,7 +43,7 @@ export async function seedSend(prisma: PrismaClient, uploadsDir: string) {
         },
       });
     }
-    return { id: user.id, titleId: title.id, companyId: company.id };
+    return user;
   };
 
   const userA = await mkUser("jane@example.com", true);
@@ -62,20 +55,7 @@ export async function seedSend(prisma: PrismaClient, uploadsDir: string) {
     data: { label: "Applied", value: "applied" },
   });
 
-  const newJob = async (u = userA) =>
-    (
-      await prisma.job.create({
-        data: {
-          userId: u.id,
-          description: "A synthetic job",
-          jobType: "FT",
-          createdAt: new Date(),
-          statusId: draft.id,
-          jobTitleId: u.titleId,
-          companyId: u.companyId,
-        },
-      })
-    ).id;
+  const newJob = (u = userA) => createJobFor(prisma, u, draft.id);
 
   // A real PDF file under the user's cockpit dir, and its File row.
   const mkFile = async (u = userA) => {

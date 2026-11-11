@@ -45,47 +45,23 @@ import { cockpitUserDir } from "@/lib/cockpit/files";
 import { JOB_STATUSES } from "@/lib/constants";
 import { log } from "@/lib/telemetry";
 import type { SubmitApplicationPackageInput } from "@/lib/cockpit/schemas";
+import { createJobFor, seedUserWithRefs, type SeededUser } from "./helpers/seedUser";
 
 const prisma = db.prisma;
 
 let userA: string;
 let userB: string;
-const refs: Record<string, { titleId: string; companyId: string }> = {};
+const refs: Record<string, SeededUser> = {};
 let draftId: string;
 let appliedId: string;
 
 async function seedUser(email: string) {
-  const user = await prisma.user.create({
-    data: { name: "Jane Doe", email, password: "x" },
-  });
-  const title = await prisma.jobTitle.create({
-    data: { label: "Engineer", value: `eng-${user.id}`, createdBy: user.id },
-  });
-  const company = await prisma.company.create({
-    data: {
-      label: "Example Corp",
-      value: `corp-${user.id}`,
-      createdBy: user.id,
-    },
-  });
-  refs[user.id] = { titleId: title.id, companyId: company.id };
-  return user.id;
+  const u = await seedUserWithRefs(prisma, email);
+  refs[u.id] = u;
+  return u.id;
 }
 
-const newJob = async (userId: string) =>
-  (
-    await prisma.job.create({
-      data: {
-        userId,
-        description: "A synthetic job",
-        jobType: "FT",
-        createdAt: new Date(),
-        statusId: draftId,
-        jobTitleId: refs[userId].titleId,
-        companyId: refs[userId].companyId,
-      },
-    })
-  ).id;
+const newJob = (userId: string) => createJobFor(prisma, refs[userId], draftId);
 
 const input = (
   jobId: string,
