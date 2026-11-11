@@ -13,8 +13,8 @@ export const COCKPIT_ERROR_MESSAGES = {
   ALREADY_SENT: "An application for this job was already sent",
   JOB_REJECTED: "This job was rejected and no longer accepts packages",
   INVALID_STATE: "The package is not in a state that allows this action",
-  CONFLICT: "The package changed or a send is in progress; replay the request",
-  TOO_LARGE: "The content or the storage quota is too large",
+  CONFLICT: "The package or job changed, or a send is in progress; reload the current state and try again",
+  TOO_LARGE: "The content is too large",
   RATE_LIMITED: "Too many requests; try again later",
   // Action-side codes
   UNAUTHENTICATED: "Not authenticated",

@@ -43,6 +43,12 @@ describe("cockpit errors", () => {
     expect(COCKPIT_ERROR_MESSAGES.COCKPIT_DISABLED).toBe("Cockpit is disabled");
   });
 
+  it("TOO_LARGE does not mention a quota (D-013); CONFLICT suits the bot and the owner", () => {
+    expect(COCKPIT_ERROR_MESSAGES.TOO_LARGE).not.toMatch(/quota/i);
+    expect(COCKPIT_ERROR_MESSAGES.CONFLICT).not.toMatch(/replay/i);
+    expect(COCKPIT_ERROR_MESSAGES.CONFLICT).toMatch(/reload/i);
+  });
+
   it("CockpitError carries the code, the fixed message, status and definitive", () => {
     const e = new CockpitError("GMAIL_SEND", {
       status: 503,

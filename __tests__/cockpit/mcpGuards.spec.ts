@@ -90,7 +90,13 @@ describe.each(CALLS)("%s", (tool, scope, args) => {
     limiter.mockReturnValue(deny);
     const c = await connectCockpit({ userId: "u1", tokenName: "bot", scopes: ALL_SCOPES });
     expect(await c.call(tool, args)).toEqual({ isError: true, text: text("RATE_LIMITED") });
-    expect(limiter).toHaveBeenCalledWith("u1", COCKPIT_RATE_LIMITS.cockpit);
+    // attach_file consults its own bucket first (peek), the others cockpit.
+    expect(limiter).toHaveBeenCalledWith(
+      "u1",
+      tool === "attach_file"
+        ? { ...COCKPIT_RATE_LIMITS.attach, peek: true }
+        : COCKPIT_RATE_LIMITS.cockpit,
+    );
     await c.close();
   });
 
@@ -105,34 +111,77 @@ describe.each(CALLS)("%s", (tool, scope, args) => {
 
 describe("attach_file buckets", () => {
   const args = CALLS[0][2];
+  const A = COCKPIT_RATE_LIMITS.attach;
+  const C = COCKPIT_RATE_LIMITS.cockpit;
 
-  it("consumes cockpit then cockpit-attach", async () => {
-    // Denied on the second check: RATE_LIMITED, both buckets consulted in order.
-    limiter.mockReturnValueOnce(allow).mockReturnValueOnce(deny);
+  it("peeks cockpit-attach, then spends cockpit, then cockpit-attach", async () => {
+    const c = await connectCockpit({ userId: "u1", tokenName: "bot", scopes: ALL_SCOPES });
+    await c.call("attach_file", args);
+    expect(limiter.mock.calls).toEqual([
+      ["u1", { ...A, peek: true }],
+      ["u1", C],
+      ["u1", A],
+    ]);
+    await c.close();
+  });
+
+  it("a call refused by cockpit-attach spends no slot at all", async () => {
+    limiter.mockImplementation((_u, o) => (o?.bucket === A.bucket ? deny : allow));
     const c = await connectCockpit({ userId: "u1", tokenName: "bot", scopes: ALL_SCOPES });
     expect(await c.call("attach_file", args)).toEqual({
       isError: true,
       text: text("RATE_LIMITED"),
     });
-    expect(limiter.mock.calls).toEqual([
-      ["u1", COCKPIT_RATE_LIMITS.cockpit],
-      ["u1", COCKPIT_RATE_LIMITS.attach],
-    ]);
+    expect(limiter.mock.calls.filter(([, o]) => !o?.peek)).toEqual([]);
     await c.close();
   });
 
-  it("does not consume cockpit-attach when the cockpit bucket denies", async () => {
-    limiter.mockReturnValueOnce(deny);
+  it("does not spend cockpit-attach when the cockpit bucket denies", async () => {
+    limiter.mockImplementation((_u, o) => (o?.bucket === C.bucket ? deny : allow));
     const c = await connectCockpit({ userId: "u1", tokenName: "bot", scopes: ALL_SCOPES });
     await c.call("attach_file", args);
-    expect(limiter).toHaveBeenCalledTimes(1);
+    expect(limiter.mock.calls.filter(([, o]) => !o?.peek && o?.bucket === A.bucket)).toEqual([]);
     await c.close();
   });
 
   it("other tools never touch the cockpit-attach bucket", async () => {
     const c = await connectCockpit({ userId: "u1", tokenName: "bot", scopes: ALL_SCOPES });
     await c.call("list_jobs", {});
-    expect(limiter.mock.calls).toEqual([["u1", COCKPIT_RATE_LIMITS.cockpit]]);
+    expect(limiter.mock.calls).toEqual([["u1", C]]);
+    await c.close();
+  });
+});
+
+describe("argument errors (finding: SDK validates the shape first)", () => {
+  it("a token without the scope and bad arguments gets the SDK's shape error, not a cockpit code, and no rate-limit slot", async () => {
+    const c = await connectCockpit({ userId: "u1", tokenName: "bot", scopes: [] });
+    const res = await c.call("list_jobs", { limit: 0 });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/^MCP error -32602: Input validation error/);
+    expect(res.text).not.toMatch(/UNAUTHORIZED_SCOPE|VALIDATION:/);
+    await c.close();
+    expect(limiter).not.toHaveBeenCalled();
+  });
+
+  it("a scoped token with a bad enum gets the same SDK error, not VALIDATION", async () => {
+    const c = await connectCockpit({ userId: "u1", tokenName: "bot", scopes: ALL_SCOPES });
+    const res = await c.call("submit_application_package", {
+      jobId: "j",
+      emailSubject: "s",
+      emailBody: "b",
+      fitGrade: "C",
+    });
+    expect(res.text).toMatch(/^MCP error -32602: Input validation error/);
+    expect(res.text).not.toMatch(/^VALIDATION:/);
+    await c.close();
+  });
+
+  it("a token without the scope and valid arguments still gets UNAUTHORIZED_SCOPE", async () => {
+    const c = await connectCockpit({ userId: "u1", tokenName: "bot", scopes: [] });
+    expect(await c.call("list_jobs", { limit: 5 })).toEqual({
+      isError: true,
+      text: text("UNAUTHORIZED_SCOPE"),
+    });
     await c.close();
   });
 });

@@ -111,6 +111,24 @@ describe("registered tools", () => {
   });
 });
 
+describe("tool descriptions", () => {
+  it("state the contract the bot needs", async () => {
+    const { client, close } = await asUser(userA);
+    const d = Object.fromEntries(
+      (await client.listTools()).tools.map((t) => [t.name, t.description ?? ""]),
+    );
+    await close();
+    expect(d.list_change_requests).toMatch(/never both/);
+    expect(d.list_change_requests).not.toMatch(/only if you did not resubmit/);
+    expect(d.submit_application_package).toMatch(/"A" or "B"/);
+    expect(d.submit_application_package).toMatch(/A-Z a-z 0-9/);
+    expect(d.submit_application_package).toMatch(/omit or "" to apply via a link/);
+    expect(d.submit_application_package).toMatch(/20000/);
+    expect(d.attach_file).toMatch(/MCP layer/);
+    expect(d.list_jobs).toMatch(/hasPackage \(true: has an active package/);
+  });
+});
+
 describe("attach_file + submit_application_package", () => {
   it("stores the PDF under the user's cockpit dir and links it to a package (AC-08)", async () => {
     const c = await asUser(userA);
@@ -407,6 +425,52 @@ describe("list_jobs / get_job (AC-11)", () => {
     });
     expect(got.packages.map((p: { version: number }) => p.version)).toEqual([2, 1]);
     expect(got.packages[1].status).toBe("superseded");
+    await c.close();
+  });
+
+  it("get_job returns an explicit field list: full content only on the newest version, no internals", async () => {
+    const c = await asUser(userA);
+    const jobId = await newJob(userA);
+    const body = (n: number) => ({ emailBody: `Body ${n}`, letterMd: `Letter ${n}`, cvJson: { n }, fitAnalysis: { n } });
+    await c.call("submit_application_package", submitArgs(jobId, body(1)));
+    await c.call("submit_application_package", submitArgs(jobId, body(2)));
+    const got = JSON.parse((await c.call("get_job", { jobId })).text);
+    const [newest, older] = got.packages;
+    expect(newest).toMatchObject({ emailBody: "Body 2", letterMd: "Letter 2", cvJson: expect.any(String), fitAnalysis: expect.any(String) });
+    for (const k of ["emailBody", "letterMd", "cvJson", "fitAnalysis"]) {
+      expect(older).not.toHaveProperty(k);
+    }
+    for (const p of got.packages) {
+      for (const k of ["idempotencyKey", "sendOutcome", "sendStartedAt", "sentVia", "cvPdfStale", "cvFileId", "userId", "jobId"]) {
+        expect(p).not.toHaveProperty(k);
+      }
+      expect(p).toMatchObject({ id: expect.any(String), status: expect.any(String), emailSubject: "Application - Engineer", cvFile: null });
+    }
+    await c.close();
+  });
+
+  it("list_jobs hasPackage ignores jobs whose packages are all superseded", async () => {
+    const u = await seedUser("superseded-only@example.com");
+    const live = await newJob(u);
+    const dead = await newJob(u);
+    const c = await asUser(u);
+    await c.call("submit_application_package", submitArgs(live));
+    await prisma.applicationPackage.create({
+      data: { userId: u, jobId: dead, version: 1, status: "superseded", emailSubject: "s", emailBody: "b" },
+    });
+    const ids = async (hasPackage: boolean) =>
+      JSON.parse((await c.call("list_jobs", { hasPackage })).text).jobs.map((j: { id: string }) => j.id);
+    expect(await ids(true)).toEqual([live]);
+    expect(await ids(false)).toEqual([dead]);
+    await c.close();
+  });
+
+  it("an empty emailTo still means apply-via-link (stored as null)", async () => {
+    const c = await asUser(userA);
+    const jobId = await newJob(userA);
+    const r = JSON.parse((await c.call("submit_application_package", submitArgs(jobId, { emailTo: "" }))).text);
+    const row = await prisma.applicationPackage.findUniqueOrThrow({ where: { id: r.packageId } });
+    expect(row.emailTo).toBeNull();
     await c.close();
   });
 

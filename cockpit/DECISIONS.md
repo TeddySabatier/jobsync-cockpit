@@ -186,3 +186,16 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/cockpit/{letterPdf.tsx,letterName.ts,send.ts,gmail/mime.ts}`, `src/app/api/cockpit/letter/[packageId]/route.ts`, `next.config.mjs` (frame header), `Panels.tsx`, `SendDialog.tsx`, `cockpit.actions.ts` (`letterAttachment`), tests (`letterPdf`, `letterRoute`, `send.integration`, e2e `09-letter-pdf`), docs.
 - **Not changed:** schema, backup, MCP tools, the bot script. SPEC stays frozen; this entry is the amendment of record.
+
+## D-016 MCP server review fixes (issue #56; amends N6 and SPEC §3)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The handler no longer re-parses with `XSchema`; only the SDK checks the shape (N6 amended) | **Accept (simple route).** Argument shape errors always come back in the SDK format (`MCP error -32602`), even for a token without the scope. `VALIDATION` is only for post-shape failures (a non-PDF). `emptyToNull` is applied in the submit handler. The `XSchema` exports stay for the UI services and tests. | The re-parse could not fail, and the "<CODE>: message" claim in the descriptions was false for the commonest bad-argument case. A scope-less token learning the field schema was judged harmless (it is the owner's own bot). |
+| (b) | `TOO_LARGE` reads "The content is too large"; `CONFLICT` reads "The package or job changed, or a send is in progress; reload the current state and try again" | **Accept.** | No quota exists since D-013; the same text is shown to the bot and to the owner. The bot rule "replay the whole submit" (D7) stays in the tool description. |
+| (c) | A call refused by the `cockpit-attach` bucket spends no `cockpit` slot | **Accept.** `checkMcpRateLimit` gets an optional `peek` flag; `attach_file` peeks the attach bucket first, then spends `cockpit`, then `cockpit-attach`. Supersedes the "accepted" note in SPEC §3. | A bot looping on a refused attach was draining its whole budget. |
+| (d) | `get_job` returns an explicit field list; `emailBody`, `letterMd`, `fitAnalysis`, `cvJson` only on the newest version; no `idempotencyKey`, `sendOutcome`, `sendStartedAt`, `sentVia`, `cvPdfStale` | **Accept.** SPEC §3 "every field except cvFileId" is amended. | Smaller responses, no internals. |
+| (e) | `list_jobs` `hasPackage` means an **active** (non-superseded) package | **Accept.** | Matches `activePackage` and the description. |
+
+- **Scope:** `src/lib/mcp/tools/cockpit.ts`, `cockpitDescriptions.ts`, `src/lib/mcp/rate-limit.ts`, `src/lib/cockpit/{errors,schemas}.ts`, `__tests__/cockpit/*`, `docs/cockpit.md`.
+- **Not changed:** legacy tools, in-memory rate-limit persistence, token scope choice. SPEC stays frozen; this entry is the amendment of record.

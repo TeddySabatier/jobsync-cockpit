@@ -34,7 +34,7 @@ const jsonObject = (maxChars: number) =>
 
 const shortText = z.string().trim().min(1).max(2_000);
 
-const emptyToNull = <T extends { emailTo?: string }>(
+export const emptyToNull = <T extends { emailTo?: string }>(
   v: T,
 ): Omit<T, "emailTo"> & { emailTo?: string | null } => ({
   ...v,
