@@ -169,3 +169,20 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/cockpit/claudePrompt.ts`, `src/components/cockpit/ClaudePromptButton.tsx`, `JobDetails.tsx`, the job page, `__tests__/cockpit/claudePrompt.spec.tsx`, `scripts/bot/cockpit_submit.py` (default URL), docs.
 - **Not changed:** the MCP tools, Send, backup. SPEC stays frozen; this entry is the amendment of record.
+
+## D-015 The cover letter is sent as a PDF, made by the cockpit from the letter text
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | At Send, when the package has letter text (`letterMd`), the email carries a **second PDF attachment** made from that text, after the CV | **Accept (owner request).** No letter text: no second attachment (CV only, as before). | A cover letter is expected as a document next to the CV. |
+| (b) | The PDF is **rendered by the cockpit** (`@react-pdf/renderer`, already a dependency) at Send and at preview time; it is never stored and has no `File` row | **Accept.** Chosen over a bot-rendered PDF. | It always matches what the owner edited in Review: no stale-PDF problem, no migration, no change to the bot, MCP tools, backup or `attach_file`. |
+| (c) | Review shows the **exact PDF** in an iframe (`GET /api/cockpit/letter/:packageId`, same guards and headers as the CV route, framed by our own pages only) | **Accept.** | "What I see is what is sent": the preview and the attachment use the same function. |
+| (d) | Letterhead (name, title, contact line) comes from the package's `cvJson` (`name`, `title`, `contact`); without it the PDF has no letterhead | **Accept.** | The CV is the source of the owner's details; no extra profile lookup. |
+| (e) | Layout: A4, Helvetica 11 pt, paragraphs, bullet lists (nested, numbered), code blocks as plain text, bold and italic; markdown links and images stay inert text. Very long words (a deep link) may break anywhere, the PDF engine adding a hyphen at the break | **Accept, known limit.** The look differs from the Word CV. | Nothing may be cut off silently at the margin or a page end. |
+| (e2) | Characters the standard PDF fonts cannot draw: typographic spaces and hyphens become plain ones, arrows and comparison signs become `->`, `>=` and the like, Latin letters with a missing mark keep their base letter (`ł` becomes `l`, `ř` becomes `r`), **letters of other alphabets (Greek, Cyrillic, CJK) show as `?`**, emoji and other symbols are dropped | **Accept, known limit.** Embedding a Unicode font is the follow-up if non-Latin letters matter. | A visible `?` in the preview tells the owner; nothing disappears silently. |
+| (e3) | The PDF is rendered **before** the send lock is taken (step 1) and reused after it; it is re-rendered only if the row changed in between, which the `updatedAt` condition rules out | **Accept (review finding).** A render failure is `INTERNAL` with no lock taken and no Gmail call. | A long letter takes seconds to render; inside the lock it would eat the 60 s stale-lock margin and could invite a duplicate send. |
+| (f) | The attachment name pairs with the CV name (`Jane_Doe_CV_Acme.pdf` becomes `Jane_Doe_Cover_Letter_Acme.pdf`); the Send dialog lists it | **Accept.** | Recognisable for the recipient. |
+| (g) | The email **body** is unchanged: it stays whatever the package says. A body that repeats the whole letter can now be shortened in Review | **Accept.** | Keeps this change small; the bot's default body is a separate choice. |
+
+- **Scope:** `src/lib/cockpit/{letterPdf.tsx,letterName.ts,send.ts,gmail/mime.ts}`, `src/app/api/cockpit/letter/[packageId]/route.ts`, `next.config.mjs` (frame header), `Panels.tsx`, `SendDialog.tsx`, `cockpit.actions.ts` (`letterAttachment`), tests (`letterPdf`, `letterRoute`, `send.integration`, e2e `09-letter-pdf`), docs.
+- **Not changed:** schema, backup, MCP tools, the bot script. SPEC stays frozen; this entry is the amendment of record.

@@ -6,6 +6,7 @@ import { APP_CONSTANTS } from "@/lib/constants";
 import { PDF_MAGIC } from "@/lib/ai/import/extract-text";
 import { CockpitError } from "./errors";
 import { cockpitUserDir } from "./files";
+import { letterPdfName } from "./letterName";
 
 // attach_file storage (cockpit/SPEC.md §3). The stored path is generated here
 // (`<cockpitUserDir>/<uuid>.pdf`), never taken from input.
@@ -22,6 +23,12 @@ export function sanitizePdfName(fileName: string): string {
     .replace(/^\.+/, "")
     .slice(0, 100);
   return `${base || "attachment"}.pdf`;
+}
+
+// Display name of the cover-letter PDF. Dialog, preview download and Send all
+// use this one function, so the owner sees the name the recipient gets.
+export function letterAttachmentName(cvFileName: string | null | undefined): string {
+  return sanitizePdfName(letterPdfName(sanitizePdfName(cvFileName ?? "")));
 }
 
 function orphanMaxAgeMs(): number {

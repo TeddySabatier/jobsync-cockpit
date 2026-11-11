@@ -10,7 +10,7 @@ import {
   toActionResult,
   type CockpitResult,
 } from "@/lib/cockpit/errors";
-import { sanitizePdfName } from "@/lib/cockpit/attachments";
+import { letterAttachmentName, sanitizePdfName } from "@/lib/cockpit/attachments";
 import { resolveCockpitFile } from "@/lib/cockpit/files";
 import {
   QUEUE_TAB_STATUSES,
@@ -155,6 +155,10 @@ export async function getPackageDetail(id: string) {
       activePackageId: activeId,
       isActive: activeId === pkg.id,
       attachment,
+      // The cover letter is attached as a PDF made from the letter text (D-015).
+      letterAttachment: pkg.letterMd?.trim()
+        ? { fileName: letterAttachmentName(cvFile?.fileName) }
+        : null,
       gmail: gmail ? { email: gmail.email, scopes: gmail.scopes } : null,
     };
   });

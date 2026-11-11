@@ -97,6 +97,7 @@ const fixture = (
   activePackageId: "p2",
   isActive: true,
   attachment: { fileName: "0000-uuid.pdf", size: 12288 },
+  letterAttachment: { fileName: "Cover_Letter.pdf" },
   gmail: { email: "you@example.com", scopes: "gmail.send" },
   ...extra,
 });

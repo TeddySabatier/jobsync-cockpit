@@ -4,7 +4,8 @@ import { Prisma, type ApplicationPackage } from "@prisma/client";
 import prisma from "@/lib/db";
 import { decrypt } from "@/lib/encryption";
 import { log } from "@/lib/telemetry";
-import { sanitizePdfName } from "./attachments";
+import { letterAttachmentName, sanitizePdfName } from "./attachments";
+import { renderLetterPdf } from "./letterPdf";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
 import type { GmailClient } from "./gmail/client";
@@ -62,6 +63,26 @@ async function checkContent(
     filePath,
     fileName: sanitizePdfName(pkg.cvFile?.fileName ?? ""),
   };
+}
+
+type LetterAttachment = { fileName: string; content: Buffer };
+
+// The cover letter PDF, from the letter text as it is now (D-015). No letter
+// text: no second attachment. A render failure is a definitive INTERNAL.
+async function buildLetterAttachment(
+  pkg: { letterMd: string | null; cvJson: string | null },
+  cvFileName: string,
+): Promise<LetterAttachment | null> {
+  if (!pkg.letterMd?.trim()) return null;
+  try {
+    return {
+      fileName: letterAttachmentName(cvFileName),
+      content: await renderLetterPdf({ letterMd: pkg.letterMd, cvJson: pkg.cvJson }),
+    };
+  } catch {
+    log.error("cockpit: cover letter PDF could not be rendered");
+    throw new CockpitError("INTERNAL");
+  }
 }
 
 const withFile = (userId: string, id: string) =>
@@ -133,6 +154,10 @@ export async function sendApplicationPackage(
   });
   if (active?.id !== pkg.id) throw new CockpitError("CONFLICT");
   await checkContent(userId, pkg);
+  // Rendered here, before the lock: a long letter takes seconds, and the lock
+  // window (STALE_LOCK_MS) is sized for the Gmail calls. The lock is tied to
+  // updatedAt and edits are refused while it is held, so the text cannot change.
+  const letterReady = await buildLetterAttachment(pkg, pkg.cvFile?.fileName ?? "");
 
   const account = await prisma.gmailAccount.findUnique({
     where: { userId },
@@ -172,6 +197,13 @@ export async function sendApplicationPackage(
       fileName: content.fileName,
       content: await fs.readFile(content.filePath),
     };
+    // The cover letter PDF made before the lock; made again only if the row
+    // changed in between (it cannot, by the updatedAt condition: defensive).
+    const letter =
+      fresh.letterMd === pkg.letterMd && fresh.cvJson === pkg.cvJson
+        ? letterReady
+        : await buildLetterAttachment(fresh, fresh.cvFile?.fileName ?? "");
+    const extraAttachments = letter ? [letter] : [];
     raw = encodeRaw(
       buildMimeMessage({
         from: account.email,
@@ -179,6 +211,7 @@ export async function sendApplicationPackage(
         subject: content.subject,
         bodyText: content.body,
         attachment,
+        extraAttachments,
       }),
     );
     let refreshToken: string;

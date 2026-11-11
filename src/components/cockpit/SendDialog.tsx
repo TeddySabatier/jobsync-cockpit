@@ -148,6 +148,14 @@ export default function SendDialog({
               ? `${detail.attachment.fileName} (${formatBytes(detail.attachment.size)})`
               : "None"}
           </dd>
+          {detail.letterAttachment && (
+            <>
+              <dt className="text-muted-foreground">Cover letter</dt>
+              <dd className="break-all" data-testid="send-letter-attachment">
+                {detail.letterAttachment.fileName} (made from the letter text)
+              </dd>
+            </>
+          )}
         </dl>
         <pre
           data-testid="send-body"

@@ -23,6 +23,16 @@ vi.mock("@/lib/constants", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/cockpit/letterPdf", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/lib/cockpit/letterPdf")>();
+  return { ...mod, renderLetterPdf: vi.fn(mod.renderLetterPdf) };
+});
+
+import * as letterPdfModule from "@/lib/cockpit/letterPdf";
+const renderSpy = vi.mocked(letterPdfModule.renderLetterPdf);
+const realRender = (await vi.importActual<typeof import("@/lib/cockpit/letterPdf")>(
+  "@/lib/cockpit/letterPdf",
+)).renderLetterPdf;
 import { CockpitError } from "@/lib/cockpit/errors";
 import {
   markSendUnknownAsSent,
@@ -91,6 +101,93 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+describe("sendApplicationPackage: cover letter PDF (D-015)", () => {
+  // Pulls every attachment (file name + decoded bytes) out of the raw message.
+  const partsOf = (raw: string) => {
+    const mime = Buffer.from(raw, "base64url").toString("utf8");
+    const parts: { name: string; bytes: Buffer }[] = [];
+    for (const section of mime.split("Content-Disposition: attachment; filename=\"").slice(1)) {
+      const name = section.slice(0, section.indexOf("\""));
+      const bodyStart = section.indexOf("\r\n\r\n") + 4;
+      const bodyEnd = section.indexOf("\r\n--", bodyStart);
+      const b64 = section.slice(bodyStart, bodyEnd).replace(/\r\n/g, "");
+      parts.push({ name, bytes: Buffer.from(b64, "base64") });
+    }
+    return parts;
+  };
+  const textOf = async (pdf: Buffer) => {
+    const { extractText, getDocumentProxy } = await import("unpdf");
+    const { text } = await extractText(await getDocumentProxy(new Uint8Array(pdf)), {
+      mergePages: true,
+    });
+    return text;
+  };
+
+  it("attaches a PDF made from the current letter text next to the CV", async () => {
+    const pkg = await s.mkApproved({
+      letterMd: "Dear team,\n\nLETTER-MARKER-TEXT",
+      cvJson: JSON.stringify({ name: "Jane Doe", title: "Engineer", contact: ["jane@example.com"] }),
+    });
+    await send(pkg.id, pkg.updatedAt);
+    const parts = partsOf(gmail.sendRaw.mock.calls[0][1]);
+    expect(parts.map((x) => x.name)).toEqual(["Jane_Doe_CV.pdf", "Jane_Doe_Cover_Letter.pdf"]);
+    expect(parts[0].bytes.equals(pdfBytes)).toBe(true);
+    expect(parts[1].bytes.subarray(0, 5).toString()).toBe("%PDF-");
+    const text = await textOf(parts[1].bytes);
+    expect(text).toContain("LETTER-MARKER-TEXT");
+    expect(text).toContain("Jane Doe");
+  });
+
+  it("uses the letter as edited: the PDF is made at Send, not stored", async () => {
+    const pkg = await s.mkApproved({ letterMd: "FIRST-VERSION" });
+    await prisma.applicationPackage.update({
+      where: { id: pkg.id },
+      data: { letterMd: "EDITED-VERSION" },
+    });
+    await send(pkg.id, (await row(pkg.id)).updatedAt);
+    const text = await textOf(partsOf(gmail.sendRaw.mock.calls[0][1])[1].bytes);
+    expect(text).toContain("EDITED-VERSION");
+    expect(text).not.toContain("FIRST-VERSION");
+  });
+
+  it("sends only the CV when there is no letter text", async () => {
+    for (const letterMd of [null, "   \n "]) {
+      gmail = mockGmail();
+      const pkg = await s.mkApproved({ letterMd });
+      await send(pkg.id, pkg.updatedAt);
+      expect(partsOf(gmail.sendRaw.mock.calls[0][1]).map((x) => x.name)).toEqual(["Jane_Doe_CV.pdf"]);
+    }
+  });
+});
+
+describe("sendApplicationPackage: letter PDF and the lock (review findings)", () => {
+  it("renders the letter before the lock is taken, never inside the lock window", async () => {
+    const pkg = await s.mkApproved({ letterMd: "Dear team" });
+    const seen: (Date | null)[] = [];
+    renderSpy.mockImplementationOnce(async (input) => {
+      seen.push((await row(pkg.id)).sendStartedAt);
+      return realRender(input);
+    });
+    await send(pkg.id, pkg.updatedAt);
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([null]);
+  });
+
+  it("a render failure returns INTERNAL, takes no lock and never calls Gmail", async () => {
+    const pkg = await s.mkApproved({ letterMd: "Dear team" });
+    renderSpy.mockRejectedValueOnce(new Error("boom"));
+    const e = await rejection(send(pkg.id, pkg.updatedAt));
+    expect(e).toMatchObject({ code: "INTERNAL" });
+    expect(gmail.sendRaw).not.toHaveBeenCalled();
+    expect(gmail.getAccessToken).not.toHaveBeenCalled();
+    const after = await row(pkg.id);
+    expect(after).toMatchObject({ status: "approved", sendStartedAt: null });
+    // Nothing is stuck: the same package sends fine afterwards.
+    await send(pkg.id, pkg.updatedAt);
+    expect(gmail.sendRaw).toHaveBeenCalledOnce();
+  });
 });
 
 describe("sendApplicationPackage: success (AC-25)", () => {
