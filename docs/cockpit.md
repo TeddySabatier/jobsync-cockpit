@@ -77,7 +77,7 @@ Messages come from a fixed map (never raw Google/Prisma text). Common MCP codes:
 5. A job with **any** past **`sent`** package cannot accept new submits (`ALREADY_SENT`). A **rejected** active package blocks submit (`JOB_REJECTED`).
 6. While **`sendStartedAt`** is set on any package for the job, submit returns **`CONFLICT`** — resolve send in the UI first.
 
-`attach_file` has **no file-count or size quota** (D-013). Each PDF is still limited to the per-file size cap. To avoid bloat, every `attach_file` call first deletes the user's uploads that **no package uses** and that are older than **7 days** (set `COCKPIT_ORPHAN_DAYS`, minimum 1). Files of packages (pending, superseded, sent) are never deleted.
+`attach_file` has **no file-count or size quota** (D-013). Each PDF is still limited to the per-file size cap. To avoid bloat, every `attach_file` call first deletes the user's uploads that **no package uses** and that are older than **7 days** (set `COCKPIT_ORPHAN_DAYS`, minimum 1; a smaller value or a non-number is ignored, a warning is logged and 7 is used). Files of packages (pending, superseded, sent) are never deleted.
 
 ## Cover letter as a PDF
 

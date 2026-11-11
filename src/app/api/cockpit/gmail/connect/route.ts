@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
-import { isCockpitEnabled } from "@/lib/cockpit/config";
-import { COCKPIT_ERROR_MESSAGES } from "@/lib/cockpit/errors";
+import { requireCockpitUser } from "@/lib/cockpit/route";
 import {
   COOKIE_MAX_AGE_SECONDS,
   COOKIE_NAME,
@@ -20,20 +18,9 @@ const redirect = (location: string) =>
   new NextResponse(null, { status: 302, headers: { Location: location } });
 
 export async function GET() {
-  if (!isCockpitEnabled()) return new NextResponse(null, { status: 404 });
-
-  const session = await auth();
-  const userId = session?.user?.id;
-  if (!userId) {
-    return NextResponse.json(
-      {
-        success: false,
-        code: "UNAUTHENTICATED",
-        message: COCKPIT_ERROR_MESSAGES.UNAUTHENTICATED,
-      },
-      { status: 401 },
-    );
-  }
+  const user = await requireCockpitUser();
+  if (user.response) return user.response;
+  const { userId } = user;
 
   const cfg = getGoogleConfig();
   if (!cfg) {
