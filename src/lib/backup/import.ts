@@ -125,26 +125,38 @@ async function assertNoActiveRun(userId: string): Promise<void> {
   }
 }
 
-// A cockpit send holds its lock (status approved, sendStartedAt set) across the
-// Gmail call. Wiping the package then would let the email go out while the
-// SentEmail/status write finds no row. A lock left over from a send whose
-// outcome is unknown blocks too: the owner resolves it in the cockpit first
-// (it may have been sent). Checked before the snapshot and again inside the
-// transaction, so a send that locks in between is not wiped either.
+// A package locked for sending must not be wiped: see D-017 (c).
 async function assertNoSendInFlight(
   client: Pick<typeof db, "applicationPackage">,
   userId: string,
 ): Promise<void> {
   const locked = await client.applicationPackage.findFirst({
     where: { userId, status: "approved", sendStartedAt: { not: null } },
-    select: { id: true },
+    select: {
+      id: true,
+      job: { select: { JobTitle: { select: { label: true } }, Company: { select: { label: true } } } },
+    },
   });
   if (locked) {
+    const role = locked.job?.JobTitle?.label;
+    const company = locked.job?.Company?.label;
+    const which =
+      role && company ? `"${role} at ${company}" (package ${locked.id})` : `package ${locked.id}`;
     throw new BackupError(
-      "An application email is being sent, or a send has an unknown outcome. Wait for it to finish or resolve it in the cockpit, then import again.",
+      `An application email is being sent, or its send outcome is unknown, for ${which}. Wait for it to finish, or resolve it on that job's review page in the cockpit, then retry the import or rollback.`,
     );
   }
 }
+
+// ENOSPC from a file write, SQLITE_FULL from the database.
+function isDiskFull(error: unknown): boolean {
+  if ((error as NodeJS.ErrnoException | null)?.code === "ENOSPC") return true;
+  const message = error instanceof Error ? error.message : "";
+  return /ENOSPC|SQLITE_FULL|database or disk is full/i.test(message);
+}
+
+const DISK_FULL_MESSAGE =
+  "The server's disk is full. Import failed and nothing was changed; free some space, then try again.";
 
 // Resolved against the target's global JobStatus table, creating any the target
 // lacks from the carried label/value. Runs before the transaction: it is the
@@ -345,12 +357,21 @@ export async function importBackup(
       const target = targetFor(checked.kind);
       newFilePaths.set(file.id, target);
       newFileTypes.set(file.id, checked.mimeType);
-      await fs.writeFile(target, bytes);
+      // Recorded before the write: a write that fails part-way leaves a
+      // truncated file that the discard must remove. "wx" refuses to replace a
+      // file already there; that file is not ours, so it is never discarded.
       writtenPaths.push(target);
+      try {
+        await fs.writeFile(target, bytes, { flag: "wx" });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") writtenPaths.pop();
+        throw error;
+      }
     }
   } catch (error) {
     await discardWritten();
     log.error("[Backup] Import failed while writing files", { error: String(error) });
+    if (isDiskFull(error)) throw new BackupError(DISK_FULL_MESSAGE);
     throw new BackupError("Import failed and nothing was changed.");
   }
 
@@ -446,6 +467,7 @@ export async function importBackup(
       throw new BackupError("The database is busy. Please try the import again.");
     }
     log.error("[Backup] Import transaction failed", { error: String(error) });
+    if (isDiskFull(error)) throw new BackupError(DISK_FULL_MESSAGE);
     throw new BackupError("Import failed and nothing was changed.");
   }
 

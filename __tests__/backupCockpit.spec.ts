@@ -813,3 +813,95 @@ describe("backup import hardening (issue #60, tester)", () => {
     expect(result.targetCounts).toMatchObject({ ApplicationPackage: 0, SentEmail: 0, File: 0 });
   }, 30_000);
 });
+
+// Issue #60, review follow-ups on PR #69.
+describe("backup import review follow-ups (issue #60)", () => {
+  const resumesDir = () => path.join(uploadsDir, "files", "resumes");
+
+  async function seedTwoResumes(email: string) {
+    const userId = await seedAccount(prisma, email);
+    const profile = await prisma.profile.create({ data: { userId } });
+    for (const name of ["one.pdf", "two.pdf"]) {
+      const p = path.join(resumesDir(), `${randomUUID()}-${name}`);
+      fs.writeFileSync(p, PDF);
+      const f = await prisma.file.create({
+        data: { fileName: name, filePath: p, fileType: "application/pdf" },
+      });
+      await prisma.resume.create({ data: { profileId: profile.id, title: name, FileId: f.id } });
+    }
+    const { buffer } = await buildBackupZip(userId, email);
+    return { userId, buffer };
+  }
+
+  // S1 + N3: a write that fails part-way (disk full) leaves a truncated file;
+  // it is removed, and the user is told the disk is full.
+  it("removes a part-written file when the disk fills up, and says so", async () => {
+    const { userId, buffer } = await seedTwoResumes("partial@example.com");
+    const before = fs.readdirSync(resumesDir()).sort();
+
+    const realWrite = fsp.writeFile;
+    const spy = vi.spyOn(fsp, "writeFile").mockImplementation((async (...args: unknown[]) => {
+      const target = String(args[0]);
+      if (target.startsWith(resumesDir() + path.sep)) {
+        fs.writeFileSync(target, Buffer.from("%PDF-"));
+        throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+      }
+      return (realWrite as (...a: unknown[]) => Promise<void>)(...args);
+    }) as typeof fsp.writeFile);
+    try {
+      await expect(
+        importBackup(buffer, userId, "partial@example.com", true),
+      ).rejects.toThrow(/disk is full.*nothing was changed/i);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(fs.readdirSync(resumesDir()).sort()).toEqual(before);
+  }, 30_000);
+
+  // S1 (wx): a file already at the target path is not overwritten, and the
+  // failed import does not delete it either: it is not the import's file.
+  it("never overwrites or deletes a file already at a target path", async () => {
+    const { userId, buffer } = await seedTwoResumes("collide@example.com");
+    const foreign = Buffer.from("%PDF-1.4 someone else\n");
+    let planted: string | null = null;
+
+    const realWrite = fsp.writeFile;
+    const spy = vi.spyOn(fsp, "writeFile").mockImplementation((async (...args: unknown[]) => {
+      const target = String(args[0]);
+      if (planted === null && target.startsWith(resumesDir() + path.sep)) {
+        planted = target;
+        fs.writeFileSync(target, foreign);
+      }
+      return (realWrite as (...a: unknown[]) => Promise<void>)(...args);
+    }) as typeof fsp.writeFile);
+    try {
+      await expect(
+        importBackup(buffer, userId, "collide@example.com", true),
+      ).rejects.toThrow(/nothing was changed/i);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(planted).not.toBeNull();
+    expect(fs.readFileSync(planted!)).toEqual(foreign);
+    fs.unlinkSync(planted!);
+  }, 30_000);
+
+  // N2: the refusal names the locked application and covers rollback too.
+  it("names the locked application in the refusal", async () => {
+    const a = await seedCockpit("named@example.com");
+    const { buffer } = await buildBackupZip(a.userId, "named@example.com");
+    await prisma.applicationPackage.update({
+      where: { id: a.pkgId },
+      data: { status: "approved", sentAt: null, sendStartedAt: new Date() },
+    });
+    const error = await importBackup(buffer, a.userId, "named@example.com", true).catch(
+      (e: Error) => e,
+    );
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toContain(`"Engineer at Acme" (package ${a.pkgId})`);
+    expect(message).toMatch(/import or rollback/);
+  }, 30_000);
+});

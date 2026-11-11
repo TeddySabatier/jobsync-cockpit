@@ -56,6 +56,37 @@ describe("DataSettings", () => {
     expect(preflightCall).toBeTruthy();
   });
 
+  // Issue #60 review (N4): the "Backup contains" grid uses readable labels too.
+  it("labels the backup contents grid in words, not model names", async () => {
+    mockFetch({
+      ...preflight,
+      manifest: {
+        ...preflight.manifest,
+        counts: { Job: 12, ApplicationPackage: 3, SentEmail: 2, File: 1, _JobToTag: 4 },
+      },
+    });
+    render(<DataSettings />);
+    await userEvent.upload(screen.getByLabelText(/backup file/i), pickFile());
+    await waitFor(() => expect(screen.getByText("12")).toBeInTheDocument());
+
+    expect(screen.getByText("jobs")).toBeInTheDocument();
+    expect(screen.getByText("application packages")).toBeInTheDocument();
+    expect(screen.getByText("sent email records")).toBeInTheDocument();
+    expect(screen.getByText("uploaded files (resumes and CV PDFs)")).toBeInTheDocument();
+    expect(screen.getByText("job to tag")).toBeInTheDocument();
+    expect(screen.queryByText("ApplicationPackage")).toBeNull();
+    expect(screen.queryByText("SentEmail")).toBeNull();
+  });
+
+  it("reads naturally for a single uploaded file in the confirmation", async () => {
+    mockFetch({ ...preflight, targetCounts: { ...preflight.targetCounts, File: 1 } });
+    render(<DataSettings />);
+    await userEvent.upload(screen.getByLabelText(/backup file/i), pickFile());
+    await waitFor(() => screen.getByRole("button", { name: /replace my data/i }));
+    await userEvent.click(screen.getByRole("button", { name: /replace my data/i }));
+    expect(await screen.findByText("1 uploaded file (resume or CV PDF)")).toBeInTheDocument();
+  });
+
   it("surfaces a source-email mismatch prominently", async () => {
     mockFetch({ ...preflight, emailMatches: false });
     render(<DataSettings />);

@@ -40,8 +40,9 @@ interface SnapshotInfo {
   sizeBytes: number;
 }
 
-// Model names as the user reads them in the confirmation list. Unknown models
-// fall back to the raw name rather than a guessed plural.
+// Model names as the user reads them, in the confirmation list and the count
+// grids. Unknown models fall back to the name split into words, with no
+// guessed plural.
 const MODEL_LABELS: Record<string, [singular: string, plural: string]> = {
   Profile: ["profile", "profiles"],
   Resume: ["resume", "resumes"],
@@ -54,13 +55,22 @@ const MODEL_LABELS: Record<string, [singular: string, plural: string]> = {
   Automation: ["automation", "automations"],
   ApplicationPackage: ["application package", "application packages"],
   SentEmail: ["sent email record", "sent email records"],
-  File: ["uploaded file (resumes and CV PDFs)", "uploaded files (resumes and CV PDFs)"],
+  File: ["uploaded file (resume or CV PDF)", "uploaded files (resumes and CV PDFs)"],
 };
+
+function humanize(model: string): string {
+  return model.replace(/^_+/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+}
 
 function modelLabel(model: string, n: number): string {
   const labels = MODEL_LABELS[model];
-  if (!labels) return `${n} ${model}`;
+  if (!labels) return `${n} ${humanize(model)}`;
   return `${n} ${n === 1 ? labels[0] : labels[1]}`;
+}
+
+// Column label in a count grid: the plural, whatever the count.
+function gridLabel(model: string): string {
+  return MODEL_LABELS[model]?.[1] ?? humanize(model);
 }
 
 function CountGrid({ counts }: { counts: Record<string, number> }) {
@@ -70,7 +80,7 @@ function CountGrid({ counts }: { counts: Record<string, number> }) {
     <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
       {rows.map(([model, n]) => (
         <div key={model} className="flex justify-between gap-2">
-          <span className="text-muted-foreground">{model}</span>
+          <span className="text-muted-foreground">{gridLabel(model)}</span>
           <span className="font-medium tabular-nums">{n}</span>
         </div>
       ))}

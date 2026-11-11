@@ -1,4 +1,5 @@
 import { Paperclip } from "lucide-react";
+import { safeDownloadName } from "@/lib/downloadName";
 
 export function DownloadFileButton(
   filePath: any,
@@ -21,7 +22,8 @@ export function DownloadFileButton(
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = filePath.split("/").pop(); // Get the file name
+      // The display name: a restored backup names files <id>.<ext> on disk.
+      link.download = safeDownloadName(fileName, filePath.split(/[\\/]/).pop());
       link.target = "_blank";
       link.click();
       window.URL.revokeObjectURL(url); // Clean up
