@@ -143,7 +143,7 @@ export default function DetailView({
           </div>
 
           {(adjacent.previousId || adjacent.nextId) && (
-            <p className="text-xs text-muted-foreground">
+            <p className="hidden text-xs text-muted-foreground md:block">
               j / k: next / previous in To do
             </p>
           )}

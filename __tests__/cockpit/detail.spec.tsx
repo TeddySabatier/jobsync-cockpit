@@ -672,7 +672,10 @@ describe("j / k navigation (AC-19)", () => {
     getPackageDetail.mockResolvedValue(ok(detailFixture()));
     getAdjacentPackageIds.mockResolvedValue(ok({ previousId: null, nextId: "b" }));
     const { unmount } = await renderPage();
-    expect(screen.getByText("j / k: next / previous in To do")).toBeInTheDocument();
+    const hint = screen.getByText("j / k: next / previous in To do");
+    expect(hint).toBeInTheDocument();
+    // No keyboard on a phone: hidden below md (jsdom has no media queries).
+    expect(hint).toHaveClass("hidden", "md:block");
     unmount();
     getAdjacentPackageIds.mockResolvedValue(ok({ previousId: null, nextId: null }));
     await renderPage();

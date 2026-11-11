@@ -3,11 +3,12 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect } from "react";
 
-// The editor renders an unnamed role=textbox; a read-only view is a document
-// with a name (assistive tech, axe aria-input-field-name).
+// The editor renders an unnamed role=textbox. Pass `label` to render a named
+// document instead (axe aria-input-field-name). Without it the output is the
+// stock editor markup, so other screens keep their accessibility tree.
 export const TipTapContentViewer = ({
   content,
-  label = "Content",
+  label,
 }: {
   content: string;
   label?: string;
@@ -34,7 +35,9 @@ export const TipTapContentViewer = ({
     ],
     content: "",
     editable: false,
-    editorProps: { attributes: { role: "document", "aria-label": label } },
+    editorProps: label
+      ? { attributes: { role: "document", "aria-label": label } }
+      : undefined,
     immediatelyRender: false,
   });
   useEffect(() => {

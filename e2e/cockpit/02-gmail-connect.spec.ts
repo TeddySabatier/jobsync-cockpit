@@ -6,8 +6,18 @@ import { expect, test } from "../support/cockpit-fixtures";
 // real connect route is driven first (its redirect to Google is NOT followed)
 // and the callback gets the state + a fake code the fake token endpoint turns
 // into an unsigned id_token (the app does not verify signatures).
-// Serial: the file ends with Gmail connected, which later specs rely on.
+// Serial, and the afterAll below reconnects Gmail even when a test aborted
+// after Disconnect: later specs (03/04/08) rely on a connected account.
 test.describe.configure({ mode: "serial" });
+
+test.afterAll(async ({ playwright }) => {
+  // Test-scoped fixtures (baseURL, storageState) are not available here.
+  const { baseURL, storageState } = test.info().project.use;
+  const ctx = await playwright.request.newContext({ baseURL, storageState: storageState as string });
+  const r = await connectGmail(ctx);
+  await ctx.dispose();
+  expect(r.location).toContain("connected=1");
+});
 
 const SETTINGS = "/dashboard/review/settings";
 
@@ -70,6 +80,22 @@ test.describe("Gmail connect", () => {
     expect(fakeLog().filter((e) => e.kind === "blocked")).toHaveLength(0);
   });
 
+  // The fake validates what the app posts (PKCE verifier vs the challenge sent
+  // to Google, client secret, redirect URI) and answers 400 otherwise, so the
+  // connect above would already fail; this pins the exact fields and that
+  // nothing was refused.
+  test("token exchange sends PKCE, the client secret and the redirect URI (and the fake accepted them)", async ({ request }) => {
+    const r = await connectGmail(request);
+    expect(r.location).toContain("connected=1");
+    const exchange = fakeLog().filter((e) => e.kind === "token" && e.grant === "authorization_code");
+    expect(exchange).toHaveLength(1);
+    expect(exchange[0].fields).toEqual(
+      expect.arrayContaining(["code", "code_verifier", "client_id", "client_secret", "redirect_uri", "grant_type"]),
+    );
+    expect(exchange[0].status).toBe(200);
+    expect(fakeLog().filter((e) => e.rejected)).toEqual([]);
+  });
+
   const failures: Array<{
     name: string;
     spec: Parameters<typeof connectGmail>[1];
@@ -110,10 +136,5 @@ test.describe("Gmail connect", () => {
     expect(res.status()).toBe(302);
     expect(res.headers()["location"]).toContain("error=invalid_state");
     await ctx.dispose();
-  });
-
-  test("the connection is left in place for the next specs", async ({ page }) => {
-    await page.goto(SETTINGS);
-    await expect(page.getByText("Connected as")).toBeVisible();
   });
 });

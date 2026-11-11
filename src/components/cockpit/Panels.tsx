@@ -52,8 +52,9 @@ function Panel({
   );
 }
 
-// A scrollable box a keyboard user can focus and scroll.
-function ScrollRegion({
+// A scrollable box a keyboard user can focus and scroll. role=group, not
+// region: these are not landmarks. Names must be unique on the page.
+export function ScrollRegion({
   label,
   children,
 }: {
@@ -62,7 +63,7 @@ function ScrollRegion({
 }) {
   return (
     <div
-      role="region"
+      role="group"
       aria-label={label}
       tabIndex={0}
       className="max-h-96 overflow-auto"
@@ -80,7 +81,7 @@ const Pre = ({
   children: React.ReactNode;
 }) => (
   <pre
-    role="region"
+    role="group"
     aria-label={label}
     tabIndex={0}
     className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs"
@@ -121,9 +122,13 @@ function PdfLinks({
   );
 }
 
-// "must_haves" -> "Must haves".
+// "must_haves" and "mustHaves" -> "Must haves".
 export function humanizeKey(key: string): string {
-  const text = key.replace(/[_-]+/g, " ").trim();
+  const text = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .toLowerCase();
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : key;
 }
 
@@ -194,7 +199,7 @@ export function CvPanel({ detail }: { detail: PackageDetail }) {
   );
 }
 
-function FitValue({ value }: { value: unknown }) {
+function FitValue({ value, label }: { value: unknown; label: string }) {
   if (typeof value === "string" || typeof value === "number") {
     return <span className="whitespace-pre-wrap break-words">{String(value)}</span>;
   }
@@ -209,7 +214,7 @@ function FitValue({ value }: { value: unknown }) {
       </ul>
     );
   }
-  return <Pre label="Fit analysis value">{JSON.stringify(value, null, 2)}</Pre>;
+  return <Pre label={label}>{JSON.stringify(value, null, 2)}</Pre>;
 }
 
 export function FitPanel({ pkg }: { pkg: PackageDetail["package"] }) {
@@ -237,7 +242,7 @@ export function FitPanel({ pkg }: { pkg: PackageDetail["package"] }) {
             <div key={k}>
               <dt className="font-medium">{humanizeKey(k)}</dt>
               <dd className="mt-0.5">
-                <FitValue value={v} />
+                <FitValue value={v} label={`Fit analysis: ${humanizeKey(k)}`} />
               </dd>
             </div>
           ))}

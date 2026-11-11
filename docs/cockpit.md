@@ -14,7 +14,7 @@ COCKPIT_ENABLED=true
 
 When the flag is **not** exactly `"true"`:
 
-- The **Review** nav entry is hidden; `/dashboard/review/**` returns 404 (after auth).
+- The **Review** nav entry is hidden; `/dashboard/review/**` shows the not-found page (after auth). The HTTP status of those pages is **200**, not 404: `review/loading.tsx` flushes the shell before `notFound()` runs (a soft 404, see `e2e/cockpit/flag-off.spec.ts`).
 - `/api/cockpit/**` returns 404.
 - Cockpit MCP tools are not registered.
 - Cockpit server actions return `COCKPIT_DISABLED` (only after a signed-in session).
@@ -44,6 +44,7 @@ All six tools are registered only when `COCKPIT_ENABLED=true`. Each handler runs
 |------|-------|--------|
 | `attach_file` | `package:write` | PDF only; call before `submit_application_package` |
 | `submit_application_package` | `package:write` | Creates version *n+1*; may supersede older active versions |
+| `add_job`, `find_job` | `jobs:write` | JobSync's own job tools, not cockpit tools (hence "six" above); the bot script uses them to create or find the job before submitting |
 | `list_jobs` | `jobs:read` | Optional filters; includes active package summary. `hasPackage` means an active (not superseded) package |
 | `get_job` | `jobs:read` | Job plus all package versions (newest first); full content (body, letter, analysis, CV JSON) only on the newest version; includes `idempotencyKey` |
 | `list_change_requests` | `jobs:read` | Packages in `changes_requested`. Close each by **either** a new submit (this supersedes the request) **or** `mark_change_request_done`, never both (the second gives `INVALID_STATE`) |
@@ -76,8 +77,9 @@ Messages come from a fixed map (never raw Google/Prisma text). Common MCP codes:
 4. **`CONFLICT`** (the owner sees the same text in the UI: fetch the current state and retry the whole request): replay the **whole** submit (all checks, including idempotency and lock checks). Causes include concurrent writes, a send lock on the job, or version/idempotency races.
 5. A job with **any** past **`sent`** package cannot accept new submits (`ALREADY_SENT`). A **rejected** active package blocks submit (`JOB_REJECTED`).
 6. While **`sendStartedAt`** is set on any package for the job, submit returns **`CONFLICT`** — resolve send in the UI first.
+7. The input is **strict**: an unknown or misspelled key (e.g. `emailTooo`) is an error, never silently dropped. A whitespace-only `emailSubject` or `emailBody` is refused (D-018).
 
-`attach_file` has **no file-count or size quota** (D-013). Each PDF is still limited to the per-file size cap. To avoid bloat, every `attach_file` call first deletes the user's uploads that **no package uses** and that are older than **7 days** (set `COCKPIT_ORPHAN_DAYS`, minimum 1; a smaller value or a non-number is ignored, a warning is logged and 7 is used). Files of packages (pending, superseded, sent) are never deleted.
+`attach_file` has **no file-count or size quota** (D-013). Each PDF is still limited to the per-file size cap. To avoid bloat, every `attach_file` call first deletes the user's uploads that **no package uses** and that are older than **7 days** (set `COCKPIT_ORPHAN_DAYS` in the app environment, the same place as `COCKPIT_ENABLED`; a value below 1 or a non-number is ignored, a warning is logged and 7 is used). Files of packages (pending, superseded, sent) are never deleted.
 
 ## Cover letter as a PDF
 
@@ -87,7 +89,7 @@ The letterhead (name, title, contact line) comes from the package's CV data. The
 
 ## Claude prompt button (job page)
 
-With the cockpit on, a job page has a **Claude prompt** button next to Match with AI. One click copies a ready-made prompt for Claude: the job (company, role, location, link, JobSync id), the posting text, and the instructions to run the bot's cockpit pipeline for this one job (fit check, tailored CV, letter, hand-over with `cockpit_submit.py`). Paste it into Claude (a session that can read the bot folder); the package then appears in Review. If a package already exists for the job, the prompt says so and asks Claude not to resubmit. If the browser refuses to copy (plain http on a phone), the prompt opens in a box to copy by hand.
+With the cockpit on, a job page has a **Claude prompt** button next to Match with AI. One click copies a ready-made prompt for Claude: the job (company, role, location, link, JobSync id), the posting text, and the instructions to run the bot's cockpit pipeline for this one job (see [cockpit-bot.md](cockpit-bot.md)). Paste it into Claude (a session that can read the bot folder); the package then appears in Review. If a package already exists for the job, the prompt says so and asks Claude not to resubmit. If the browser refuses to copy (plain http on a phone), the prompt opens in a box to copy by hand.
 
 The built-in **Cover Letter** and **Match with AI** buttons are JobSync's own AI feature and use the model set in the agent panel; they do not create the cockpit package.
 
@@ -95,7 +97,7 @@ The built-in **Cover Letter** and **Match with AI** buttons are JobSync's own AI
 
 - **Queue:** `/dashboard/review` — tabs: To do (`pending` + `approved`), Changes, Sent, Rejected. Readiness chips: Gmail, PDF stale, No CV, Link apply.
 - **Detail:** `/dashboard/review/[packageId]` — posting, CV PDF, fit analysis, email preview, cover letter, version selector. **Non-active versions** show a banner; the action bar is hidden.
-- **Edit:** email fields, letter, CV JSON string leaves; editing CV text marks **PDF stale** until the bot re-renders and resubmits.
+- **Edit:** email fields, letter, CV JSON string leaves; editing CV text marks **PDF stale** until the bot re-renders and resubmits (reverting the text by hand does not clear it).
 - **Settings:** `/dashboard/review/settings` — Gmail connect/disconnect.
 
 Keyboard: **`j` / `k`** on a **To do** detail page moves to next/previous in queue order.
@@ -132,6 +134,8 @@ Flow: approve → **Send** (when Gmail connected, valid `emailTo`, CV file prese
 - Lock older than **60 s** without outcome is treated like unknown (crash recovery).
 
 **Mark applied manually** (empty `emailTo` / link apply): overflow menu; no email sent.
+
+A send (Gmail or manual) moves the job status to **Applied** only when it is still **Draft** or **New**; a job you already moved on (Interview, Offer, ...) keeps its status. Every send marks the job as applied and sets the applied date to the send time if it has none; an existing applied date is kept (D-018).
 
 ## Security notes
 

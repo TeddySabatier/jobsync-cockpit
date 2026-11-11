@@ -14,7 +14,9 @@ Commands. Each prints ONE ASCII JSON line on stdout; exit code 0 = ok, 1 = error
                               version the owner is reviewing.
   submit --folder DIR --revision PACKAGE_ID
                               Answer a change request: new version of that package.
-  changes [--limit N]         List the packages the owner asked changes for.
+  changes [--limit N] [--full | --package ID]
+                              List the packages the owner asked changes for: a summary by default
+                              (the full content is megabytes); --full or --package for the content.
   done --package ID --response TEXT
                               Mark a change request handled without a new version.
 
@@ -35,6 +37,7 @@ import os
 import re
 import socket
 import sys
+import time
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -52,6 +55,7 @@ MAX_TEXT = 20_000  # emailBody and letterMd
 MAX_CV_JSON = 200_000
 MAX_FIT_ANALYSIS = 20_000
 MAX_FILE_NAME = 120
+MAX_CHANGE_REQUESTS = 100  # the server's own maximum for list_change_requests
 LOOPBACK = ("localhost", "127.0.0.1", "::1")
 MARKER_NAME = ".cockpit-submitted.json"
 UUID = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
@@ -122,7 +126,8 @@ def load_token():
             text = raw.decode("utf-16", errors="replace")
         else:
             text = raw.decode("utf-8-sig", errors="replace")
-        token = text.strip().lstrip("﻿")
+        # UTF-16 text that already began with a BOM keeps one after decoding. Written as an escape.
+        token = text.strip().lstrip("\ufeff")
         if not token:
             raise CockpitError("NO_TOKEN", "No token: set COCKPIT_TOKEN or put it in %s" % path)
     if not TOKEN_RE.match(token):
@@ -220,7 +225,8 @@ def slug(text, limit):
 
 def u16len(text):
     """Length the server sees: it counts UTF-16 code units, not characters."""
-    return len(text.encode("utf-16-le")) // 2
+    # surrogatepass: a lone surrogate (from a lone-surrogate escape in cv.json) is counted, not a crash.
+    return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
 def idempotency_key(company, role, link, revision_package="", manual_digest=""):
@@ -231,7 +237,7 @@ def idempotency_key(company, role, link, revision_package="", manual_digest=""):
     if revision_package:
         key = "scout-rev-" + slug(revision_package, 40)
     else:
-        digest = hashlib.sha1(("%s|%s|%s" % (company, role, link)).encode("utf-8")).hexdigest()[:8]
+        digest = hashlib.sha1(("%s|%s|%s" % (company, role, link)).encode("utf-8", errors="surrogatepass")).hexdigest()[:8]
         key = "scout-%s-%s-%s" % (slug(company, 24), slug(role, 32), digest)
     if manual_digest:
         key += "-m" + manual_digest[:8]
@@ -305,7 +311,8 @@ def split_reasons(text):
 
 def validate_package(subject, recipient, body, letter, fit, cv_json=None, fit_analysis=None):
     """Everything the server would refuse, checked BEFORE any upload so a bad
-    field never leaves an orphan PDF behind (the file quota counts every upload).
+    field never leaves an orphan PDF behind (the server deletes unreferenced uploads only
+    after 7 days).
     Limits and the address pattern are the server's own."""
     if fit not in ("A", "B"):
         raise CockpitError("VALIDATION", "The fit must be A or B.")
@@ -357,10 +364,23 @@ def write_marker(folder, key, digest, result):
     entries = _read_entries(folder)
     entries[key] = {"digest": digest, "result": result}
     entries = dict(list(entries.items())[-20:])
+    target = Path(folder) / MARKER_NAME
+    temp = target.with_name(MARKER_NAME + ".tmp")
     try:
-        (Path(folder) / MARKER_NAME).write_text(json.dumps({"entries": entries}), encoding="utf-8")
+        # Write beside it, then replace: a crash never leaves a half-written marker.
+        temp.write_text(json.dumps({"entries": entries}), encoding="utf-8")
+        try:
+            os.replace(temp, target)
+        except OSError:
+            # Windows: antivirus or a sync client can hold the file for a moment.
+            time.sleep(0.2)
+            os.replace(temp, target)
     except OSError:
-        pass  # a read-only folder costs nothing: a re-run is recognised through the package's own key
+        # a read-only folder costs nothing: a re-run is recognised through the package's own key
+        try:
+            temp.unlink()
+        except OSError:
+            pass
 
 
 def load_meta(path):
@@ -441,13 +461,15 @@ def _resolve_job(url, token, values, posting):
     return parse_job_id(answer), "Job created" not in answer
 
 
-def _guard_existing_job(url, token, job_id, key, expected):
+def _guard_existing_job(url, token, job_id, key, expected, allow_id=None, replace_ok=False):
     """A second submit for a job that already has a package would supersede the
     version the owner is reviewing, editing or has approved. Stop instead, unless
     that package is THIS run's own: same key AND the same content that this run
     would send (a crash between the submit and writing the marker). Anything else,
     including the same posting found again with a regenerated letter, is refused.
-    Returns the result of such a replay, or None when the job has no live package."""
+    Returns the result of such a replay, or None when the job has no live package (or, for
+    allow_id, when the live package is exactly the change request being answered, and for
+    replace_ok, an explicit --resubmit that is meant to replace the waiting version)."""
     job = as_dict(call(url, token, "get_job", {"jobId": job_id}))
     live = [p for p in job.get("packages", []) if isinstance(p, dict) and p.get("status") != "superseded"]
     if not live:
@@ -464,6 +486,8 @@ def _guard_existing_job(url, token, job_id, key, expected):
             "supersededIds": [],
             "recovered": True,
         }
+    if replace_ok or (allow_id and package.get("id") == allow_id and status == "changes_requested"):
+        return None
     code = {"sent": "ALREADY_SENT", "rejected": "JOB_REJECTED"}.get(status, "ALREADY_SUBMITTED")
     hint = " Answer it with --revision %s." % package.get("id") if status == "changes_requested" else ""
     raise CockpitError(
@@ -499,6 +523,8 @@ def cmd_submit(args, url, token):
     if pdf.stat().st_size > MAX_PDF_BYTES:  # before reading it: the server refuses it anyway
         raise CockpitError("TOO_LARGE", "The PDF is too large (%d bytes)." % pdf.stat().st_size)
     data = pdf.read_bytes()
+    if not data.startswith(b"%PDF-"):  # the server refuses it with an opaque VALIDATION
+        raise CockpitError("VALIDATION", "%s is not a PDF file (no %%PDF- header)." % pdf.name)
     encoded = base64.b64encode(data).decode("ascii")
     if len(encoded) > MAX_BASE64_CHARS:
         raise CockpitError("TOO_LARGE", "The PDF is too large (%d bytes)." % len(data))
@@ -538,16 +564,19 @@ def cmd_submit(args, url, token):
         # Answering a change request: the job, recipient, subject and fit come from the
         # package being answered, so nothing the owner set can be lost by omission.
         item = {}
-        for candidate in json.loads(call(url, token, "list_change_requests", {"limit": 100})):
+        listed = json.loads(call(url, token, "list_change_requests", {"limit": MAX_CHANGE_REQUESTS}))
+        for candidate in listed:
             if candidate.get("packageId") == revision:
                 item = candidate
         if not item:
-            raise CockpitError("NOT_FOUND", "No open change request for package %s (already answered?)." % revision)
+            more = (" The list was full (%d, oldest first): answer or close older requests first." % MAX_CHANGE_REQUESTS
+                    if len(listed) >= MAX_CHANGE_REQUESTS else " (already answered?)")
+            raise CockpitError("NOT_FOUND", "No open change request for package %s.%s" % (revision, more))
         job_id = item["jobId"]
         analysis = as_dict(item.get("fitAnalysis"))
         subject = values["subject"] or item.get("emailSubject") or ""
         to = values["to"] if values["to"] is not None else (item.get("emailTo") or "")
-        fit = values["fit"] or analysis.get("verdict") or ""
+        fit = values["fit"] or item.get("fitGrade") or analysis.get("verdict") or ""
         previous = (item.get("emailBody") or "").strip().splitlines()[:1]
         carry = previous[0] if previous and previous[0].startswith("Apply via:") else ""
         if not to and not carry:
@@ -587,25 +616,49 @@ def cmd_submit(args, url, token):
                 write_marker(folder, key, digest, replay)
                 return replay
 
-    attached = json.loads(
-        call(url, token, "attach_file",
-             {"fileName": safe_pdf_name(pdf.name), "mimeType": "application/pdf", "contentBase64": encoded})
-    )
-    package = json.loads(
-        call(url, token, "submit_application_package", {
-            "jobId": job_id,
-            "emailTo": to,
-            "emailSubject": subject,
-            "emailBody": body,
-            "letterMd": letter,
-            "fitGrade": fit,
-            "fitAnalysis": fit_analysis,
-            "cvJson": cv_json,
-            "cvFileId": attached["fileId"],
-            "sourceFolder": (folder.resolve().name or "application")[:300],
-            "idempotencyKey": key,
-        })
-    )
+    uploaded = []  # the fileId of the first attempt is reused by a replay: no orphan, no extra rate slot
+
+    def upload_and_submit():
+        if not uploaded:
+            attached = json.loads(
+                call(url, token, "attach_file",
+                     {"fileName": safe_pdf_name(pdf.name), "mimeType": "application/pdf", "contentBase64": encoded})
+            )
+            uploaded.append(attached["fileId"])
+        return json.loads(
+            call(url, token, "submit_application_package", {
+                "jobId": job_id,
+                "emailTo": to,
+                "emailSubject": subject,
+                "emailBody": body,
+                "letterMd": letter,
+                "fitGrade": fit,
+                "fitAnalysis": fit_analysis,
+                "cvJson": cv_json,
+                "cvFileId": uploaded[0],
+                "sourceFolder": (folder.resolve().name or "application")[:300],
+                "idempotencyKey": key,
+            })
+        )
+
+    # Replaying the submit is safe (same key, same content: the server answers with the existing
+    # package), but only if nothing else happened to the job meanwhile: a concurrent run may have
+    # written its own package, which a blind replay would supersede. So look again first. One retry
+    # on CONFLICT, no more: a second CONFLICT may mean the owner is sending, or a real clash.
+    try:
+        package = upload_and_submit()
+    except CockpitError as error:
+        if error.code != "CONFLICT":
+            raise
+        replay = _guard_existing_job(
+            url, token, job_id, key,
+            {"emailSubject": subject, "emailBody": body, "letterMd": letter, "fitGrade": fit},
+            allow_id=revision or None, replace_ok=args.resubmit,
+        )
+        if replay:
+            write_marker(folder, key, digest, replay)
+            return replay
+        package = upload_and_submit()
     result = {
         "jobId": job_id,
         "packageId": package["packageId"],
@@ -619,8 +672,29 @@ def cmd_submit(args, url, token):
     return result
 
 
+SUMMARY_KEYS = ("packageId", "jobId", "company", "jobTitle", "version", "changeRequest", "sourceFolder")
+
+
 def cmd_changes(args, url, token):
-    return {"changeRequests": json.loads(call(url, token, "list_change_requests", {"limit": args.limit}))}
+    """A summary by default: the full items carry cvJson (up to 200 KB), the letter and the
+    email, so twenty of them are megabytes in the bot's context. --full (or --package ID, which
+    implies it for that one request) prints everything."""
+    # --package must see every open request (100 is the server's maximum), not just the first --limit.
+    limit = MAX_CHANGE_REQUESTS if args.package else args.limit
+    items = json.loads(call(url, token, "list_change_requests", {"limit": limit}))
+    listed = len(items)
+    if args.package:
+        items = [i for i in items if i.get("packageId") == args.package]
+        if not items:
+            raise CockpitError("NOT_FOUND", "No open change request for package %s." % args.package)
+    if not (args.full or args.package):
+        items = [{k: i[k] for k in SUMMARY_KEYS if k in i} for i in items]
+    result = {"changeRequests": items}
+    if not args.package:
+        result["count"] = listed
+        if listed >= limit:
+            result["truncated"] = True  # there may be more: answer these, then run it again
+    return result
 
 
 def cmd_done(args, url, token):
@@ -629,6 +703,10 @@ def cmd_done(args, url, token):
 
 
 class _Parser(argparse.ArgumentParser):
+    def print_help(self, file=None):
+        # One JSON line on stdout like every other answer (the argparse action then exits 0).
+        print(json.dumps({"ok": True, "help": self.format_help()}))
+
     def error(self, message):
         print(json.dumps({"ok": False, "error": "USAGE", "message": message}))
         sys.exit(2)
@@ -661,6 +739,8 @@ def build_parser():
 
     changes = sub.add_parser("changes", help="list change requests")
     changes.add_argument("--limit", type=int, default=20)
+    changes.add_argument("--full", action="store_true", help="include letter, email and CV content (large)")
+    changes.add_argument("--package", default="", help="only this packageId, with its full content")
 
     done = sub.add_parser("done", help="mark a change request as handled without a new version")
     done.add_argument("--package", required=True)

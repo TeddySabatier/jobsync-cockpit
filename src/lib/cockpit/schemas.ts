@@ -17,13 +17,21 @@ const emailAddress = z
 // "" means "apply via link"; the Schemas below turn it into null.
 const emailToField = z.union([z.literal(""), emailAddress]).optional();
 
+// Whitespace-only is empty. Checked without trimming the stored value.
+const notBlank = (v: string) => v.trim().length > 0;
+
 const emailSubjectField = z
   .string()
   .min(1)
   .max(300)
-  .regex(noLineBreak, "No line break allowed");
+  .regex(noLineBreak, "No line break allowed")
+  .refine(notBlank, "Must not be blank");
 
-const emailBodyField = z.string().min(1).max(20_000);
+const emailBodyField = z
+  .string()
+  .min(1)
+  .max(20_000)
+  .refine(notBlank, "Must not be blank");
 const letterMdField = z.string().max(20_000);
 
 const jsonObject = (maxChars: number) =>
@@ -68,9 +76,14 @@ export const SubmitApplicationPackageInputShape = {
     .regex(/^[A-Za-z0-9._:-]{1,100}$/)
     .optional(),
 };
-export const SubmitApplicationPackageSchema = z
-  .object(SubmitApplicationPackageInputShape)
-  .transform(emptyToNull);
+// Strict: an unknown key (a bot typo like `emailTooo`) is a validation error,
+// never a silently dropped field. The MCP tool registers this object, so the
+// SDK refuses the call before the handler runs.
+export const SubmitApplicationPackageObject = z.strictObject(
+  SubmitApplicationPackageInputShape,
+);
+export const SubmitApplicationPackageSchema =
+  SubmitApplicationPackageObject.transform(emptyToNull);
 export type SubmitApplicationPackageInput = z.output<
   typeof SubmitApplicationPackageSchema
 >;
@@ -120,7 +133,7 @@ export const UpdatePackageContentInputShape = {
   cvJson: jsonObject(200_000).optional(),
 };
 export const UpdatePackageContentSchema = z
-  .object(UpdatePackageContentInputShape)
+  .strictObject(UpdatePackageContentInputShape)
   .refine((v) => Object.values(v).some((x) => x !== undefined), {
     message: "At least one field is required",
   })

@@ -25,44 +25,26 @@ vi.mock("@/lib/constants", async (importOriginal) => {
 
 import { COCKPIT_ERROR_MESSAGES } from "@/lib/cockpit/errors";
 import { cockpitUserDir } from "@/lib/cockpit/files";
+import { SubmitApplicationPackageInputShape } from "@/lib/cockpit/schemas";
+import { COCKPIT_TOOL_DESCRIPTIONS } from "@/lib/mcp/tools/cockpitDescriptions";
 import { ALL_SCOPES, connectCockpit, pdfBase64 } from "./helpers/mcpClient";
+import { createJobFor, seedUserWithRefs, type SeededUser } from "./helpers/seedUser";
 
 const prisma = db.prisma;
 
 let userA: string;
 let userB: string;
 let draftId: string;
-const refs: Record<string, { titleId: string; companyId: string }> = {};
+const refs: Record<string, SeededUser> = {};
 
 async function seedUser(email: string) {
-  const user = await prisma.user.create({
-    data: { name: "Jane Doe", email, password: "x" },
-  });
-  const title = await prisma.jobTitle.create({
-    data: { label: "Engineer", value: `eng-${user.id}`, createdBy: user.id },
-  });
-  const company = await prisma.company.create({
-    data: { label: "Example Corp", value: `corp-${user.id}`, createdBy: user.id },
-  });
-  refs[user.id] = { titleId: title.id, companyId: company.id };
-  return user.id;
+  const u = await seedUserWithRefs(prisma, email);
+  refs[u.id] = u;
+  return u.id;
 }
 
-const newJob = async (userId: string, over: Record<string, unknown> = {}) =>
-  (
-    await prisma.job.create({
-      data: {
-        userId,
-        description: "A synthetic job",
-        jobType: "FT",
-        createdAt: new Date(),
-        statusId: draftId,
-        jobTitleId: refs[userId].titleId,
-        companyId: refs[userId].companyId,
-        ...over,
-      },
-    })
-  ).id;
+const newJob = (userId: string, over: Record<string, unknown> = {}) =>
+  createJobFor(prisma, refs[userId], draftId, over);
 
 const submitArgs = (jobId: string, over: Record<string, unknown> = {}) => ({
   jobId,
@@ -108,6 +90,52 @@ describe("registered tools", () => {
       "submit_application_package",
     ]);
     expect(names.filter((n) => /send|approve|reject/.test(n))).toEqual([]);
+  });
+
+  it("tools/list publishes the full strict submit schema (review 01 #6)", async () => {
+    const { client, close } = await asUser(userA);
+    const tools = (await client.listTools()).tools;
+    await close();
+    const submit = tools.find((t) => t.name === "submit_application_package");
+    expect(submit?.description).toBe(
+      COCKPIT_TOOL_DESCRIPTIONS.submit_application_package,
+    );
+    const schema = submit?.inputSchema as {
+      type: string;
+      properties: Record<string, unknown>;
+      required: string[];
+      additionalProperties?: boolean;
+    };
+    expect(schema.type).toBe("object");
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties).sort()).toEqual(
+      Object.keys(SubmitApplicationPackageInputShape).sort(),
+    );
+    expect([...schema.required].sort()).toEqual(
+      ["emailBody", "emailSubject", "fitGrade", "jobId"].sort(),
+    );
+    // The other five tools keep their published descriptions.
+    for (const t of tools.filter((x) => x.name !== submit?.name)) {
+      expect(t.description).toBe(
+        COCKPIT_TOOL_DESCRIPTIONS[t.name as keyof typeof COCKPIT_TOOL_DESCRIPTIONS],
+      );
+    }
+  });
+
+  it("submit_application_package refuses a misspelled key instead of dropping it (review 01 #6)", async () => {
+    const c = await asUser(userA);
+    const jobId = await newJob(userA);
+    const { emailTo, ...rest } = submitArgs(jobId);
+    const res = await c.call("submit_application_package", {
+      ...rest,
+      emailTooo: emailTo,
+    });
+    const ok = await c.call("submit_application_package", submitArgs(jobId));
+    await c.close();
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/emailTooo/);
+    expect(ok.isError).toBe(false);
+    expect(await prisma.applicationPackage.count({ where: { jobId } })).toBe(1);
   });
 });
 
@@ -618,6 +646,7 @@ describe("change requests (AC-11, AC-12)", () => {
           changeRequestedAt: at,
           emailSubject: "s",
           emailBody: "b",
+          fitGrade: "B",
         },
       });
     };
@@ -639,6 +668,7 @@ describe("change requests (AC-11, AC-12)", () => {
       emailBody: "b",
       letterMd: null,
       cvJson: null,
+      fitGrade: "B",
       fitAnalysis: null,
       sourceFolder: null,
     });

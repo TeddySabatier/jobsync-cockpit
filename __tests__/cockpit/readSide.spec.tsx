@@ -138,14 +138,14 @@ describe("accessible names", () => {
       </>,
     );
     for (const name of ["Posting text", "Email body", "Letter text"]) {
-      expect(screen.getByRole("region", { name })).toHaveAttribute("tabindex", "0");
+      expect(screen.getByRole("group", { name })).toHaveAttribute("tabindex", "0");
     }
   });
 
   it("the CV data block is a focusable named region", async () => {
     render(<CvPanel detail={detailFixture()} />);
     screen.getByRole("button", { name: "CV data" }).click();
-    expect(await screen.findByRole("region", { name: "CV data" })).toHaveAttribute(
+    expect(await screen.findByRole("group", { name: "CV data" })).toHaveAttribute(
       "tabindex",
       "0",
     );
@@ -161,9 +161,38 @@ describe("accessible names", () => {
   });
 });
 
+describe("TipTap viewer default is neutral", () => {
+  it("renders without role or aria-label when no label is passed", async () => {
+    const { container } = render(<TipTapContentViewer content="<p>Hello</p>" />);
+    await waitFor(() =>
+      expect(container.querySelector(".ProseMirror")).not.toBeNull(),
+    );
+    const pm = container.querySelector(".ProseMirror") as HTMLElement;
+    expect(pm).not.toHaveAttribute("aria-label");
+    expect(pm.getAttribute("role")).not.toBe("document");
+    expect(screen.queryByRole("document")).toBeNull();
+  });
+});
+
+describe("fit analysis scroll regions have unique names", () => {
+  it("names each structured value by its key", () => {
+    render(
+      <FitPanel
+        pkg={pkgFixture({
+          fitAnalysis: JSON.stringify({ mustHaves: { a: 1 }, nice_to_have: { b: 2 } }),
+        })}
+      />,
+    );
+    expect(screen.getByRole("group", { name: "Fit analysis: Must haves" })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("group", { name: "Fit analysis: Nice to have" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Fit analysis:/ })).toBeNull();
+  });
+});
+
 describe("fit analysis", () => {
   it("humanizes snake_case keys and keeps the grade announced", () => {
     expect(humanizeKey("must_haves")).toBe("Must haves");
+    expect(humanizeKey("mustHaves")).toBe("Must haves");
     render(<FitPanel pkg={pkgFixture()} />);
     expect(screen.getByText("Must haves")).toBeInTheDocument();
     expect(screen.queryByText("must_haves")).toBeNull();
