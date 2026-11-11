@@ -34,12 +34,16 @@ export function letterAttachmentName(cvFileName: string | null | undefined): str
   return sanitizePdfName(letterPdfName(sanitizePdfName(cvFileName ?? "")));
 }
 
+let orphanDaysWarned = false;
+
 function orphanMaxAgeMs(): number {
   const set = process.env.COCKPIT_ORPHAN_DAYS;
   const raw = Number(set);
   const valid = Number.isFinite(raw) && raw >= 1;
-  if (set && !valid) {
-    // Not silent: a value below 1 (or not a number) falls back to the default.
+  if (set && !valid && !orphanDaysWarned) {
+    // Not silent (once per process): a value below 1 (or not a number) falls
+    // back to the default.
+    orphanDaysWarned = true;
     log.warn("cockpit: COCKPIT_ORPHAN_DAYS ignored, using the default", {
       code: "ORPHAN_DAYS_INVALID",
     });
@@ -84,22 +88,35 @@ export async function cleanupOrphanUploads(
   // runs, and an exact path match would then see every file as stray.
   const rows = await prisma.file.findMany({
     where: { OR: old.map((name) => ({ filePath: { endsWith: name } })) },
-    select: { id: true, filePath: true },
+    select: {
+      id: true,
+      filePath: true,
+      applicationPackages: { select: { id: true }, take: 1 },
+      Resume: { select: { id: true } },
+    },
   });
   // endsWith only pre-filters: keep rows whose last segment (either separator,
-  // a row may come from a Windows install) is exactly a candidate name.
-  const oldNames = new Set(old);
+  // a row may come from a Windows install) is exactly a candidate name. Names
+  // are compared lowercased: on a case-insensitive filesystem a row differing
+  // only in case is the same file, and this can only keep more files.
+  const key = (n: string) => n.toLowerCase();
+  const oldNames = new Set(old.map(key));
   const base = (p: string) => p.split(/[\\/]/).pop() ?? "";
   const ours = path.resolve(dir);
   const rowsOf = new Map<string, string[]>();
   const deletable: string[] = [];
   for (const r of rows) {
-    const name = base(r.filePath);
+    const name = key(base(r.filePath));
     if (!oldNames.has(name)) continue;
-    rowsOf.set(name, [...(rowsOf.get(name) ?? []), r.id]);
+    rowsOf.set(name, [...(rowsOf.get(key(name)) ?? []), r.id]);
     // Only rows pointing into this user's directory are deleted here; any
-    // other row with the same name is left alone and keeps the file.
-    if (path.resolve(path.dirname(r.filePath)) === ours) deletable.push(r.id);
+    // other row with the same name is left alone and keeps the file. A row
+    // that already has a package or resume is claimed outright: no delete is
+    // attempted for it (keeps the write transaction small).
+    const referenced = r.applicationPackages.length > 0 || r.Resume !== null;
+    if (!referenced && path.resolve(path.dirname(r.filePath)) === ours) {
+      deletable.push(r.id);
+    }
   }
 
   // One transaction; each delete re-checks "still unreferenced" in its own
@@ -110,17 +127,16 @@ export async function cleanupOrphanUploads(
     applicationPackages: { none: {} },
     Resume: { is: null },
   };
-  const ids = deletable;
-  const counts = ids.length
+  const counts = deletable.length
     ? await prisma.$transaction(
-        ids.map((id) => prisma.file.deleteMany({ where: { id, ...unreferenced } })),
+        deletable.map((id) => prisma.file.deleteMany({ where: { id, ...unreferenced } })),
       )
     : [];
-  const deleted = new Set(ids.filter((_, i) => counts[i].count === 1));
+  const deleted = new Set(deletable.filter((_, i) => counts[i].count === 1));
 
   let removed = 0;
   for (const name of old) {
-    const claimed = (rowsOf.get(name) ?? []).some((id) => !deleted.has(id));
+    const claimed = (rowsOf.get(key(name)) ?? []).some((id) => !deleted.has(id));
     if (claimed) continue;
     await fs.rm(path.join(dir, name), { force: true });
     removed++;

@@ -5,11 +5,10 @@ import { Readable } from "stream";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { resolveCockpitFile } from "@/lib/cockpit/files";
-import { pdfHeaders, requireCockpitUser } from "@/lib/cockpit/route";
+import { notFound, pdfHeaders, requireCockpitUser } from "@/lib/cockpit/route";
 
 // Serves the CV PDF of one of the user's packages (cockpit/SPEC.md §4).
 // Order: flag (404) -> session (401) -> ownership + confinement (404).
-const notFound = () => new NextResponse(null, { status: 404 });
 
 export async function GET(
   _req: NextRequest,

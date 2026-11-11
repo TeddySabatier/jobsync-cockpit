@@ -241,11 +241,16 @@ describe("cleanupOrphanUploads", () => {
       expect(fs.existsSync(f.full)).toBe(!removed);
     });
 
-    it("an invalid value is reported, not silent", async () => {
-      const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    it("an invalid value is reported once per process, not silent", async () => {
+      vi.resetModules(); // fresh module: the once-flag starts unset
+      const fresh = await import("@/lib/cockpit/attachments");
+      const { log: freshLog } = await import("@/lib/telemetry");
+      const warn = vi.spyOn(freshLog, "warn").mockImplementation(() => {});
       vi.stubEnv("COCKPIT_ORPHAN_DAYS", "0.5");
       await store(userA, 1);
-      await cleanupOrphanUploads(userA);
+      await fresh.cleanupOrphanUploads(userA);
+      await fresh.cleanupOrphanUploads(userA);
+      expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
         "cockpit: COCKPIT_ORPHAN_DAYS ignored, using the default",
         { code: "ORPHAN_DAYS_INVALID" },
@@ -314,7 +319,7 @@ describe("cleanupOrphanUploads: edge cases", () => {
     expect(fs.existsSync(sub)).toBe(true);
   });
 
-  it("keeps a referenced file whose row stores a Windows-style path", async () => {
+  it("keeps the file when a row stores a foreign Windows-style path (never cleaned, safe direction)", async () => {
     const f = await store(userA, 10, {
       pathForm: (p) => ["C:", "uploads", "cockpit", userA, path.basename(p)].join(String.fromCharCode(92)),
     });
@@ -322,6 +327,27 @@ describe("cleanupOrphanUploads: edge cases", () => {
     expect(await cleanupOrphanUploads(userA)).toBe(0);
     expect(fs.existsSync(f.full)).toBe(true);
     expect(await rowExists(f.id)).toBe(true);
+  });
+
+  it("a row whose path differs from the file only in case still claims it", async () => {
+    const f = await store(userA, 10, {
+      pathForm: (p) => path.join(path.dirname(p), path.basename(p).toUpperCase()),
+    });
+    await makePackage(userA, f.id!);
+    expect(await cleanupOrphanUploads(userA)).toBe(0);
+    expect(fs.existsSync(f.full)).toBe(true);
+    expect(await rowExists(f.id)).toBe(true);
+  });
+
+  it("attempts no delete for rows a package already references", async () => {
+    const used = await store(userA, 10);
+    await makePackage(userA, used.id!);
+    const free = await store(userA, 10);
+    const spy = vi.spyOn(prisma.file, "deleteMany");
+    expect(await cleanupOrphanUploads(userA)).toBe(1);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0]?.where).toMatchObject({ id: free.id });
+    expect(fs.existsSync(used.full)).toBe(true);
   });
 
   it("does not delete the row of a different file whose name merely ends with the same text", async () => {

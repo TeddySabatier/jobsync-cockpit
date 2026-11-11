@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { pdfHeaders, requireCockpitUser } from "@/lib/cockpit/route";
+import { notFound, pdfHeaders, requireCockpitUser } from "@/lib/cockpit/route";
 import { log } from "@/lib/telemetry";
 import { renderLetterPdf } from "@/lib/cockpit/letterPdf";
 import { letterAttachmentName } from "@/lib/cockpit/attachments";
@@ -8,7 +8,6 @@ import { letterAttachmentName } from "@/lib/cockpit/attachments";
 // Cover-letter PDF of one of the user's packages, made from the current letter
 // text (D-015). The same function builds the attachment at Send, so this is the
 // exact file the recipient gets. Order: flag (404) -> session (401) -> ownership (404).
-const notFound = () => new NextResponse(null, { status: 404 });
 
 export async function GET(
   _req: NextRequest,
