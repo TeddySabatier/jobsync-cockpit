@@ -52,8 +52,6 @@ const fixture = (
 ): PackageDetail => ({
   package: {
     id: "p2",
-    userId: "u1",
-    jobId: "j1",
     version: 2,
     status: "pending",
     emailTo: "jobs@acme.example",
@@ -65,21 +63,12 @@ const fixture = (
     cvJson: JSON.stringify(CV),
     cvFileId: "f1",
     cvPdfStale: false,
-    sourceFolder: null,
-    idempotencyKey: null,
     rejectReason: null,
     changeRequest: null,
     changeRequestedAt: null,
-    changeRequestHandledAt: null,
     changeRequestResponse: null,
-    editedAt: null,
-    approvedAt: null,
-    rejectedAt: null,
     sendStartedAt: null,
     sendOutcome: null,
-    sentAt: null,
-    sentVia: null,
-    createdAt: new Date("2026-11-01T10:00:00Z"),
     updatedAt: new Date("2026-11-01T10:00:00Z"),
     job: {
       id: "j1",
@@ -99,6 +88,7 @@ const fixture = (
   attachment: { fileName: "0000-uuid.pdf", size: 12288 },
   letterAttachment: { fileName: "Cover_Letter.pdf" },
   gmail: { email: "you@example.com", scopes: "gmail.send" },
+  gmailSendAllowed: true,
   ...extra,
 });
 

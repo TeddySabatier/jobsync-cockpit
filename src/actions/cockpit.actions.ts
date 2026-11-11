@@ -1,15 +1,11 @@
 "use server";
 
 import fs from "fs/promises";
-import { revalidatePath } from "next/cache";
 import prisma from "@/lib/db";
-import { requireUser } from "./shared";
-import { isCockpitEnabled } from "@/lib/cockpit/config";
-import {
-  CockpitError,
-  toActionResult,
-  type CockpitResult,
-} from "@/lib/cockpit/errors";
+import { isGmailSendAllowed } from "@/lib/cockpit/config";
+import { mutate, reviewPaths, run } from "@/lib/cockpit/actionRunner";
+import { CockpitError } from "@/lib/cockpit/errors";
+import { toPackageView } from "@/lib/cockpit/packageView";
 import { letterAttachmentName, sanitizePdfName } from "@/lib/cockpit/attachments";
 import { resolveCockpitFile } from "@/lib/cockpit/files";
 import {
@@ -29,33 +25,8 @@ import type { UpdatePackageContentInput } from "@/lib/cockpit/schemas";
 
 // Review actions (cockpit/SPEC.md §6.1). Every export of a "use server" file is
 // a public endpoint, so only the intended async actions are exported; the
-// helpers below are module-private. Order in every body (P6): requireUser()
-// inside the try, then the flag, then the work. A throw becomes a failure
-// result and no DB access happens before the user is known.
-
-async function run<T>(
-  fn: (userId: string) => Promise<T>,
-): Promise<CockpitResult<T>> {
-  try {
-    const user = await requireUser();
-    if (!isCockpitEnabled()) throw new CockpitError("COCKPIT_DISABLED");
-    return { success: true, data: await fn(user.id) };
-  } catch (e) {
-    return toActionResult(e);
-  }
-}
-
-function revalidate(id: string) {
-  revalidatePath("/dashboard/review");
-  revalidatePath(`/dashboard/review/${id}`);
-}
-
-// Runs a mutation, then revalidates only on success.
-async function mutate<T>(id: string, fn: (userId: string) => Promise<T>) {
-  const result = await run(fn);
-  if (result.success) revalidate(id);
-  return result;
-}
+// helpers below are module-private. run/mutate (src/lib/cockpit/actionRunner.ts)
+// do requireUser(), then the flag, then the work (P6).
 
 function parseTab(tab: unknown): QueueTab {
   if (
@@ -76,19 +47,19 @@ function findGmailAccount(userId: string) {
 }
 
 export async function approvePackage(id: string) {
-  return mutate(id, (userId) => approvePackageSvc(userId, id));
+  return mutate(reviewPaths(id), (userId) => approvePackageSvc(userId, id));
 }
 
 export async function unapprovePackage(id: string) {
-  return mutate(id, (userId) => unapprovePackageSvc(userId, id));
+  return mutate(reviewPaths(id), (userId) => unapprovePackageSvc(userId, id));
 }
 
 export async function rejectPackage(id: string, reason: string) {
-  return mutate(id, (userId) => rejectPackageSvc(userId, id, reason));
+  return mutate(reviewPaths(id), (userId) => rejectPackageSvc(userId, id, reason));
 }
 
 export async function requestPackageChanges(id: string, instruction: string) {
-  return mutate(id, (userId) =>
+  return mutate(reviewPaths(id), (userId) =>
     requestPackageChangesSvc(userId, id, instruction),
   );
 }
@@ -97,25 +68,30 @@ export async function updatePackageContent(
   id: string,
   patch: UpdatePackageContentInput,
 ) {
-  return mutate(id, (userId) => updatePackageContentSvc(userId, id, patch));
+  return mutate(reviewPaths(id), (userId) => updatePackageContentSvc(userId, id, patch));
 }
 
 export async function markPackageAppliedManually(id: string) {
-  return mutate(id, (userId) => markPackageAppliedManuallySvc(userId, id));
+  return mutate(reviewPaths(id, { jobs: true }), (userId) =>
+    markPackageAppliedManuallySvc(userId, id),
+  );
 }
 
 // Queue rows plus what the readiness chips and the Gmail callout need (§5.2).
 export async function getReviewQueue(tab: QueueTab) {
   return run(async (userId) => {
-    const rows = await listPackagesByTab(userId, parseTab(tab));
-    const gmail = await findGmailAccount(userId);
-    const approvedWithEmail = await prisma.applicationPackage.count({
-      where: {
-        userId,
-        status: "approved",
-        AND: [{ emailTo: { not: null } }, { emailTo: { not: "" } }],
-      },
-    });
+    const parsedTab = parseTab(tab);
+    const [rows, gmail, approvedWithEmail] = await Promise.all([
+      listPackagesByTab(userId, parsedTab),
+      findGmailAccount(userId),
+      prisma.applicationPackage.count({
+        where: {
+          userId,
+          status: "approved",
+          AND: [{ emailTo: { not: null } }, { emailTo: { not: "" } }],
+        },
+      }),
+    ]);
     return {
       rows,
       gmail: gmail ? { email: gmail.email } : null,
@@ -126,9 +102,9 @@ export async function getReviewQueue(tab: QueueTab) {
 
 export async function getPackageDetail(id: string) {
   return run(async (userId) => {
-    const { cvFile, ...pkg } = await getPackageWithJob(userId, id);
+    const { cvFile, ...row } = await getPackageWithJob(userId, id);
     const [versions, gmail] = await Promise.all([
-      listJobVersions(userId, pkg.jobId),
+      listJobVersions(userId, row.jobId),
       findGmailAccount(userId),
     ]);
     // Attachment name and size come from disk, through the confinement helper.
@@ -150,16 +126,18 @@ export async function getPackageDetail(id: string) {
     // versions are newest first: the first non-superseded one is the active one.
     const activeId = versions.find((v) => v.status !== "superseded")?.id ?? null;
     return {
-      package: pkg,
+      package: toPackageView(row),
       versions,
       activePackageId: activeId,
-      isActive: activeId === pkg.id,
+      isActive: activeId === row.id,
       attachment,
       // The cover letter is attached as a PDF made from the letter text (D-015).
-      letterAttachment: pkg.letterMd?.trim()
+      letterAttachment: row.letterMd?.trim()
         ? { fileName: letterAttachmentName(cvFile?.fileName) }
         : null,
       gmail: gmail ? { email: gmail.email, scopes: gmail.scopes } : null,
+      // The connected address matches the send allow-list (Send is possible).
+      gmailSendAllowed: isGmailSendAllowed(gmail?.email),
     };
   });
 }

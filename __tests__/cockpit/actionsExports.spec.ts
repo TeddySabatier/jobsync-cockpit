@@ -2,26 +2,7 @@
 import fs from "fs";
 import path from "path";
 
-// AC-44: a "use server" file may only export the intended async functions.
-const ALLOWED: Record<string, string[]> = {
-  "cockpit.actions.ts": [
-    "approvePackage",
-    "unapprovePackage",
-    "rejectPackage",
-    "requestPackageChanges",
-    "updatePackageContent",
-    "markPackageAppliedManually",
-    "getReviewQueue",
-    "getPackageDetail",
-    "getAdjacentPackageIds",
-  ],
-  "cockpitGmail.actions.ts": ["getGmailSettings", "disconnectGmail"],
-  "cockpitSend.actions.ts": [
-    "sendPackage",
-    "markSendUnknownAsSent",
-    "releaseSendLock",
-  ],
-};
+import { ALLOWED } from "./helpers/actionExports";
 
 const dir = path.join(process.cwd(), "src", "actions");
 const files = fs

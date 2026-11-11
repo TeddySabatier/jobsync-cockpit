@@ -199,3 +199,19 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/mcp/tools/cockpit.ts`, `cockpitDescriptions.ts`, `src/lib/mcp/rate-limit.ts`, `src/lib/cockpit/{errors,schemas}.ts`, `__tests__/cockpit/*`, `docs/cockpit.md`.
 - **Not changed:** legacy tools, in-memory rate-limit persistence, token scope choice. SPEC stays frozen; this entry is the amendment of record.
+
+## D-019 Server actions review fixes (issue #57)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The cockpit actions share **one** run/mutate wrapper, `src/lib/cockpit/actionRunner.ts` (not a `"use server"` module) | **Accept.** `cockpit.actions.ts`, `cockpitSend.actions.ts` and `cockpitGmail.actions.ts` all use it; the `actionsExports` allow-list test stays. | The three copies had already diverged. |
+| (b) | A mutation **revalidates after every outcome except `UNAUTHENTICATED` and `COCKPIT_DISABLED`** | **Accept (was: success only for the review actions).** | A refused action (`INVALID_STATE`, `CONFLICT`, e.g. the bot superseded the package) means the page showed stale state and must refresh. |
+| (c) | An action that changes a job also revalidates `/dashboard/myjobs`: mark applied manually, send, mark unknown as sent, release lock | **Accept.** | The job list shows the job status. |
+| (d) | `requireUser()` throws a typed `AuthError` (`src/lib/authError.ts`); `toActionResult` matches the type, not the text "Not authenticated" | **Accept.** The message text is unchanged. | A reworded message must not turn an anonymous call into `INTERNAL`. |
+| (e) | `getPackageDetail` returns an **explicit view** of the package (`toPackageView`): no `idempotencyKey`, `sourceFolder`, `userId`, `jobId`, the file row, the approved, rejected, edited, sent and created timestamps, `sentVia`; it keeps `sendStartedAt`, `sendOutcome` and `updatedAt` for the UI and the Send dialog | **Accept.** | Same policy as the Gmail account select (AC-43). |
+| (f) | `getPackageDetail` also returns `gmailSendAllowed`: the connected Gmail address matches `COCKPIT_GMAIL_ALLOWED_ADDRESS` (same check as Send, `isGmailSendAllowed`) | **Accept.** The UI shows a dedicated reason in a later change. | Send refuses with `GMAIL_RECONNECT_REQUIRED` otherwise; the owner should know before pressing it. |
+| (g) | `sendPackage` accepts only a `Date` or a string for `expectedUpdatedAt`; anything else is `VALIDATION` | **Accept.** | `null` became the epoch and failed as `CONFLICT`. |
+| (h) | `getReviewQueue` runs its three queries in parallel. `getAdjacentPackageIds` still loads the To do queue | **Accept.** Personal scale. | |
+
+- **Not changed:** `updatedAt` concurrency on the review actions (last write wins, owner decision, review finding 1).
+- **Scope:** `src/actions/cockpit*.actions.ts`, `src/actions/shared.ts`, `src/lib/{authError.ts,cockpit/{actionRunner,packageView,config,errors,send}.ts}`, `__tests__/cockpit/*`.

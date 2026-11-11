@@ -1,5 +1,6 @@
 // @vitest-environment node
 import fs from "fs";
+import fsp from "fs/promises";
 import os from "os";
 import path from "path";
 
@@ -97,6 +98,12 @@ describe.each(mutations)("%s", (_name, call, service, args) => {
     expect(service).toHaveBeenCalledWith(...args);
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard/review");
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard/review/p1");
+    // Only the action that changes the job (applied) refreshes the job list.
+    expect(
+      (revalidatePath as ReturnType<typeof vi.fn>).mock.calls.some(
+        ([p]) => p === "/dashboard/myjobs",
+      ),
+    ).toBe(_name === "markPackageAppliedManually");
   });
 
   it("returns COCKPIT_DISABLED when the flag is off, without calling the service", async () => {
@@ -107,28 +114,53 @@ describe.each(mutations)("%s", (_name, call, service, args) => {
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
-  it("maps a service CockpitError to its code (INVALID_STATE) and does not revalidate", async () => {
-    service.mockRejectedValue(new CockpitError("INVALID_STATE"));
-    const r = await call();
-    expect(r).toMatchObject({ success: false, code: "INVALID_STATE" });
-    expect(revalidatePath).not.toHaveBeenCalled();
-  });
+  it.each(["INVALID_STATE", "CONFLICT", "NOT_FOUND"] as const)(
+    "maps a service CockpitError (%s) to its code and still revalidates (the page was stale)",
+    async (code) => {
+      service.mockRejectedValue(new CockpitError(code));
+      const r = await call();
+      expect(r).toMatchObject({ success: false, code });
+      expect(revalidatePath).toHaveBeenCalledWith("/dashboard/review");
+      expect(revalidatePath).toHaveBeenCalledWith("/dashboard/review/p1");
+    },
+  );
 
   it("returns UNAUTHENTICATED and skips the service when the user is null", async () => {
     m(getCurrentUser).mockResolvedValue(null);
     const r = await call();
     expect(r).toMatchObject({ success: false, code: "UNAUTHENTICATED" });
     expect(service).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
 
-describe("flag check order", () => {
-  it("anonymous + flag off gives UNAUTHENTICATED (flag not probeable)", async () => {
+// Every export, not just the approve path: auth is checked before the flag
+// (the flag is not probeable) and before any service or DB access.
+const everyAction: [string, () => Promise<unknown>][] = [
+  ...mutations.map(([n, call]) => [n, call] as [string, () => Promise<unknown>]),
+  ["getReviewQueue", () => actions.getReviewQueue("todo")],
+  ["getPackageDetail", () => actions.getPackageDetail("p1")],
+  ["getAdjacentPackageIds", () => actions.getAdjacentPackageIds("p1")],
+];
+
+describe.each(everyAction)("%s auth and flag order", (_n, call) => {
+  const serviceCalls = () =>
+    Object.values(svc).some((f) => vi.isMockFunction(f) && f.mock.calls.length > 0) ||
+    gmailFind.mock.calls.length > 0 ||
+    pkgCount.mock.calls.length > 0;
+
+  it("anonymous + flag off gives UNAUTHENTICATED and touches nothing", async () => {
     vi.stubEnv("COCKPIT_ENABLED", "false");
     m(getCurrentUser).mockResolvedValue(null);
-    expect(await actions.approvePackage("p1")).toMatchObject({
-      code: "UNAUTHENTICATED",
-    });
+    expect(await call()).toMatchObject({ success: false, code: "UNAUTHENTICATED" });
+    expect(serviceCalls()).toBe(false);
+  });
+
+  it("flag off gives COCKPIT_DISABLED and touches nothing", async () => {
+    vi.stubEnv("COCKPIT_ENABLED", "false");
+    expect(await call()).toMatchObject({ success: false, code: "COCKPIT_DISABLED" });
+    expect(serviceCalls()).toBe(false);
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });
 
@@ -203,15 +235,55 @@ describe("getPackageDetail", () => {
     return p;
   };
 
+  // A full database row, including the columns the client must never get.
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: "p2",
+    userId: "u1",
+    jobId: "j1",
+    version: 2,
+    status: "pending",
+    emailTo: "jobs@acme.example",
+    emailSubject: "Hi",
+    emailBody: "Body",
+    letterMd: null,
+    fitGrade: "A",
+    fitAnalysis: null,
+    cvJson: null,
+    cvFileId: "f1",
+    cvPdfStale: false,
+    sourceFolder: "SECRET-FOLDER",
+    idempotencyKey: "SECRET-KEY",
+    rejectReason: null,
+    changeRequest: null,
+    changeRequestedAt: null,
+    changeRequestHandledAt: null,
+    changeRequestResponse: null,
+    editedAt: null,
+    approvedAt: null,
+    rejectedAt: null,
+    sendStartedAt: null,
+    sendOutcome: null,
+    sentAt: null,
+    sentVia: null,
+    createdAt: new Date("2026-11-01T10:00:00Z"),
+    updatedAt: new Date("2026-11-01T10:00:00Z"),
+    cvFile: null,
+    job: {
+      id: "j1",
+      jobUrl: "https://acme.example/1",
+      description: "<p>d</p>",
+      JobTitle: { label: "Dev" },
+      Company: { label: "Acme" },
+    },
+    ...over,
+  });
+  const versions = (id = "p2") => [{ id, version: 2, status: "pending" }];
+
   it("returns the attachment name and size, versions, the active id and a safe gmail view (AC-43)", async () => {
     const filePath = stored();
-    m(svc.getPackageWithJob).mockResolvedValue({
-      id: "p2",
-      jobId: "j1",
-      cvJson: null,
-      cvFile: { id: "f1", fileName: "Jane Doe CV.pdf", filePath },
-      job: { id: "j1" },
-    });
+    m(svc.getPackageWithJob).mockResolvedValue(
+      row({ cvFile: { id: "f1", fileName: "Jane Doe CV.pdf", filePath } }),
+    );
     m(svc.listJobVersions).mockResolvedValue([
       { id: "p3", version: 3, status: "pending" },
       { id: "p2", version: 2, status: "superseded" },
@@ -244,17 +316,68 @@ describe("getPackageDetail", () => {
     });
   });
 
+  it("returns an explicit package view: no key, folder, user id or send internals", async () => {
+    m(svc.getPackageWithJob).mockResolvedValue(row());
+    m(svc.listJobVersions).mockResolvedValue(versions());
+    gmailFind.mockResolvedValue(null);
+    const r = await actions.getPackageDetail("p2");
+    if (!r.success) throw new Error("expected success");
+    const pkg = r.data.package as Record<string, unknown>;
+    for (const k of [
+      "idempotencyKey",
+      "sourceFolder",
+      "userId",
+      "jobId",
+      "approvedAt",
+      "rejectedAt",
+      "editedAt",
+      "sentAt",
+      "sentVia",
+      "createdAt",
+      "changeRequestHandledAt",
+      "cvFile",
+    ]) {
+      expect(pkg, k).not.toHaveProperty(k);
+    }
+    expect(JSON.stringify(r)).not.toMatch(/SECRET-(KEY|FOLDER)/);
+    // What the UI renders and the send dialog needs stays.
+    expect(pkg).toMatchObject({
+      id: "p2",
+      status: "pending",
+      emailSubject: "Hi",
+      sendStartedAt: null,
+      sendOutcome: null,
+      updatedAt: new Date("2026-11-01T10:00:00Z"),
+      job: {
+        jobUrl: "https://acme.example/1",
+        description: "<p>d</p>",
+        JobTitle: { label: "Dev" },
+        Company: { label: "Acme" },
+      },
+    });
+  });
+
+  it.each([
+    ["the connected address matches the allow-list (case and spaces ignored)", " You@Example.com ", "you@example.com", true],
+    ["a different address is connected", "other@example.com", "you@example.com", false],
+    ["the allow-list is unset", "you@example.com", "", false],
+    ["no Gmail account is connected", null, "you@example.com", false],
+  ])("gmailSendAllowed: %s", async (_n, connected, allowList, expected) => {
+    vi.stubEnv("COCKPIT_GMAIL_ALLOWED_ADDRESS", allowList);
+    m(svc.getPackageWithJob).mockResolvedValue(row());
+    m(svc.listJobVersions).mockResolvedValue(versions());
+    gmailFind.mockResolvedValue(connected ? { email: connected, scopes: "s" } : null);
+    const r = await actions.getPackageDetail("p2");
+    expect(r).toMatchObject({ success: true, data: { gmailSendAllowed: expected } });
+  });
+
   it("attachment is null when the file is outside the cockpit dir", async () => {
     const outside = path.join(root, "elsewhere.pdf");
     fs.writeFileSync(outside, "%PDF-");
-    m(svc.getPackageWithJob).mockResolvedValue({
-      id: "p1",
-      jobId: "j1",
-      cvFile: { id: "f1", fileName: "x.pdf", filePath: outside },
-    });
-    m(svc.listJobVersions).mockResolvedValue([
-      { id: "p1", version: 1, status: "pending" },
-    ]);
+    m(svc.getPackageWithJob).mockResolvedValue(
+      row({ id: "p1", cvFile: { id: "f1", fileName: "x.pdf", filePath: outside } }),
+    );
+    m(svc.listJobVersions).mockResolvedValue(versions("p1"));
     gmailFind.mockResolvedValue(null);
     const r = await actions.getPackageDetail("p1");
     expect(r).toMatchObject({
@@ -263,11 +386,72 @@ describe("getPackageDetail", () => {
     });
   });
 
+  it("attachment is null when the stored file vanished (stat fails)", async () => {
+    const filePath = stored();
+    m(svc.getPackageWithJob).mockResolvedValue(
+      row({ cvFile: { id: "f1", fileName: "x.pdf", filePath } }),
+    );
+    m(svc.listJobVersions).mockResolvedValue(versions());
+    gmailFind.mockResolvedValue(null);
+    // realpath (confinement) succeeds; only the final stat fails.
+    const statSpy = vi.spyOn(fsp, "stat").mockRejectedValue(new Error("ENOENT"));
+    try {
+      const r = await actions.getPackageDetail("p2");
+      expect(r).toMatchObject({ success: true, data: { attachment: null } });
+    } finally {
+      statSpy.mockRestore();
+    }
+  });
+
+  it("cvFile is null: no attachment; letterAttachment follows the letter text", async () => {
+    m(svc.listJobVersions).mockResolvedValue(versions());
+    gmailFind.mockResolvedValue(null);
+
+    m(svc.getPackageWithJob).mockResolvedValue(row({ letterMd: "Dear team" }));
+    const withLetter = await actions.getPackageDetail("p2");
+    expect(withLetter).toMatchObject({
+      success: true,
+      data: { attachment: null, letterAttachment: { fileName: expect.any(String) } },
+    });
+
+    for (const letterMd of [null, "", "   \n "]) {
+      m(svc.getPackageWithJob).mockResolvedValue(row({ letterMd }));
+      const r = await actions.getPackageDetail("p2");
+      expect(r, JSON.stringify(letterMd)).toMatchObject({
+        success: true,
+        data: { letterAttachment: null },
+      });
+    }
+  });
+
   it("NOT_FOUND from the service becomes a failure result", async () => {
     m(svc.getPackageWithJob).mockRejectedValue(new CockpitError("NOT_FOUND"));
     expect(await actions.getPackageDetail("nope")).toMatchObject({
       success: false,
       code: "NOT_FOUND",
+    });
+  });
+});
+
+describe("updatePackageContent patches", () => {
+  it("forwards every patch shape to the service unchanged", async () => {
+    m(svc.updatePackageContent).mockResolvedValue({ id: "p1" });
+    const patches = [
+      { emailTo: null },
+      { emailBody: "b", letterMd: "l" },
+      { cvJson: '{"name":"x"}' },
+    ];
+    for (const patch of patches) {
+      await actions.updatePackageContent("p1", patch as never);
+      expect(svc.updatePackageContent).toHaveBeenLastCalledWith("u1", "p1", patch);
+    }
+  });
+
+  it("a service VALIDATION failure comes back as VALIDATION", async () => {
+    m(svc.updatePackageContent).mockRejectedValue(new CockpitError("VALIDATION"));
+    expect(await actions.updatePackageContent("p1", { emailTo: "x" } as never)).toMatchObject({
+      success: false,
+      code: "VALIDATION",
     });
   });
 });

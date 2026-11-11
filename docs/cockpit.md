@@ -157,6 +157,8 @@ Flow: approve → **Send** (when Gmail connected, valid `emailTo`, CV file prese
 
 ### UI actions (`success: false`, `code`)
 
+After any failure except `UNAUTHENTICATED` and `COCKPIT_DISABLED` the page is refreshed, so a stale button disappears.
+
 | Code | Meaning / action |
 |------|------------------|
 | `COCKPIT_DISABLED` | Set `COCKPIT_ENABLED=true` and restart |

@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { log } from "@/lib/telemetry";
+import { AuthError } from "@/lib/authError";
 import {
   CockpitError,
   COCKPIT_ERROR_MESSAGES,
@@ -70,11 +71,17 @@ describe("cockpit errors", () => {
     expect(log.error).not.toHaveBeenCalled();
   });
 
-  it("maps requireUser's throw to UNAUTHENTICATED", () => {
-    expect(toActionResult(new Error("Not authenticated"))).toEqual({
+  it("maps the AuthError of requireUser to UNAUTHENTICATED", () => {
+    expect(toActionResult(new AuthError())).toEqual({
       success: false,
       code: "UNAUTHENTICATED",
       message: COCKPIT_ERROR_MESSAGES.UNAUTHENTICATED,
+    });
+  });
+
+  it("does not recognise the anonymous caller by message text", () => {
+    expect(toActionResult(new Error("Not authenticated"))).toMatchObject({
+      code: "INTERNAL",
     });
   });
 
