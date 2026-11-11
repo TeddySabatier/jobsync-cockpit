@@ -71,6 +71,7 @@ import { DeleteAlertDialog } from "../DeleteAlertDialog";
 import { AddJob } from "./AddJob";
 import { deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toastError, toastSuccess } from "@/lib/toast";
+import { ClaudePromptButton } from "@/components/cockpit/ClaudePromptButton";
 
 type JobDetailsProps = {
   job: JobResponse;
@@ -83,6 +84,8 @@ type JobDetailsProps = {
   // Cockpit: active package of this job. The page passes it only when
   // COCKPIT_ENABLED is on, so the card is absent otherwise.
   cockpitPackage?: { id: string; version: number; status: string } | null;
+  // Shows the "Claude prompt" button (D-014); on only with COCKPIT_ENABLED.
+  cockpitEnabled?: boolean;
 };
 
 function JobDetails({
@@ -94,6 +97,7 @@ function JobDetails({
   sources,
   tags,
   cockpitPackage = null,
+  cockpitEnabled = false,
 }: JobDetailsProps) {
   const {
     open: openChat,
@@ -204,6 +208,24 @@ function JobDetails({
           <ArrowLeft />
         </Button>
         <div className="flex items-center gap-2">
+          {cockpitEnabled && (
+            <ClaudePromptButton
+              input={{
+                jobId: job.id,
+                company: job.Company?.label,
+                title: job.JobTitle?.label,
+                location: job.Location?.label,
+                jobUrl: job.jobUrl,
+                workplaceType: job.workplaceType,
+                jobType: getJobType(job.jobType),
+                description: job.description,
+                descriptionCompleteness: job.descriptionCompleteness,
+                activePackage: cockpitPackage
+                  ? { version: cockpitPackage.version, status: cockpitPackage.status }
+                  : null,
+              }}
+            />
+          )}
           <Button
             size="sm"
             variant="outline"

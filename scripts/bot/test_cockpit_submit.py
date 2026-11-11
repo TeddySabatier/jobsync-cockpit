@@ -313,6 +313,11 @@ class ProxyTests(unittest.TestCase):
             opener = cs._opener(url)
         return [h.proxies for h in opener.handlers if isinstance(h, urllib.request.ProxyHandler)]
 
+    def test_the_default_endpoint_is_the_ipv4_loopback_address(self):
+        # "localhost" costs ~20 s per request on Windows (IPv6 tried first).
+        self.assertEqual(cs.DEFAULT_URL, "http://127.0.0.1:3737/api/mcp")
+        cs.check_endpoint(cs.DEFAULT_URL)
+
     def test_a_system_proxy_never_sees_a_token_meant_for_localhost(self):
         # An empty ProxyHandler replaces urllib's default one and registers nothing,
         # so "no active proxy handler at all" is the correct outcome for loopback.

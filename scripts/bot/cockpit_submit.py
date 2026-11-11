@@ -20,7 +20,7 @@ Commands. Each prints ONE ASCII JSON line on stdout; exit code 0 = ok, 1 = error
 
 Setup: the token comes from the COCKPIT_TOKEN environment variable, or from the
 file named by COCKPIT_TOKEN_FILE, or from secrets/cockpit_token.txt next to this
-script. It is never printed. COCKPIT_URL defaults to http://localhost:3737/api/mcp
+script. It is never printed. COCKPIT_URL defaults to http://127.0.0.1:3737/api/mcp
 (plain http is only accepted for localhost; anything else needs https).
 
 Sending email is NOT possible from here (or from any MCP tool): the owner
@@ -41,7 +41,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DEFAULT_URL = "http://localhost:3737/api/mcp"
+# 127.0.0.1, not "localhost": on Windows "localhost" tries IPv6 first and every
+# request then waits about 20 seconds before falling back to IPv4.
+DEFAULT_URL = "http://127.0.0.1:3737/api/mcp"
 TIMEOUT_SECONDS = 90
 MAX_BASE64_CHARS = 7_000_000  # the server's limit for attach_file
 MAX_PDF_BYTES = MAX_BASE64_CHARS // 4 * 3

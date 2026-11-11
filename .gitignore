@@ -84,3 +84,7 @@ evals/*/_investigate-*
 
 # Local agent config
 /.opencode/
+
+# Python bytecode
+__pycache__/
+*.pyc
