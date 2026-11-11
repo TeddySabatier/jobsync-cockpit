@@ -105,8 +105,9 @@ describe("renderLetterPdf: nothing is lost silently (review findings)", () => {
     expect(flat.length).toBe(5000);
   });
 
-  it("still breaks long words after other PDF code registered its own hyphenation callback (D-022 g)", async () => {
-    // react-pdf keeps one process-wide callback; the resume export sets (w) => [w].
+  it("still breaks long words when another callback was registered in the same process (D-022 g)", async () => {
+    // react-pdf keeps one process-wide callback. Any code in the same process
+    // (another test, future server code) may register its own, e.g. (w) => [w].
     Font.registerHyphenationCallback((word) => [word]);
     const huge = "y".repeat(5000);
     const flat = (await textOf(await renderLetterPdf({ letterMd: huge }))).replace(/[-\s]+/g, "");
