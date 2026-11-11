@@ -209,7 +209,13 @@ export function EmailPanel({ detail }: { detail: PackageDetail }) {
   );
 }
 
-export function LetterPanel({ pkg }: { pkg: PackageDetail["package"] }) {
+export function LetterPanel({
+  pkg,
+  fileName,
+}: {
+  pkg: PackageDetail["package"];
+  fileName?: string;
+}) {
   const html = useMemo(
     () => renderLetterMarkdown(pkg.letterMd ?? ""),
     [pkg.letterMd],
@@ -232,7 +238,7 @@ export function LetterPanel({ pkg }: { pkg: PackageDetail["package"] }) {
           />
           <a
             href={pdfUrl}
-            download
+            download={fileName ?? true}
             className="mt-2 inline-flex items-center gap-1 text-sm underline"
           >
             <Download className="h-3.5 w-3.5" />

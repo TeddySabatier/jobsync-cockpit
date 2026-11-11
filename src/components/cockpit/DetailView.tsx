@@ -137,7 +137,7 @@ export default function DetailView({
             <FitPanel pkg={pkg} />
             <EmailPanel detail={detail} />
             <div className="@3xl/main:col-span-2">
-              <LetterPanel pkg={pkg} />
+              <LetterPanel pkg={pkg} fileName={detail.letterAttachment?.fileName} />
             </div>
           </div>
 

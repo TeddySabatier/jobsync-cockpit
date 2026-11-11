@@ -8,6 +8,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import prisma from "@/lib/db";
 import { GET } from "@/app/api/cockpit/letter/[packageId]/route";
+import { letterAttachmentName } from "@/lib/cockpit/attachments";
 
 const find = prisma.applicationPackage.findFirst as ReturnType<typeof vi.fn>;
 const authMock = auth as unknown as ReturnType<typeof vi.fn>;
@@ -48,6 +49,15 @@ describe("GET /api/cockpit/letter/[packageId] (D-015)", () => {
       find.mockResolvedValue({ letterMd, cvJson: null });
       expect((await call()).status).toBe(404);
     }
+  });
+
+  it("names the download like the attachment the recipient gets (same helper as Send and the dialog)", async () => {
+    find.mockResolvedValue({ letterMd: "Hi", cvJson: null, cvFile: { fileName: "Jane(CV).pdf" } });
+    const res = await call();
+    expect(res.headers.get("content-disposition")).toBe('inline; filename="Jane_Cover_Letter_.pdf"');
+    expect(letterAttachmentName("Jane(CV).pdf")).toBe("Jane_Cover_Letter_.pdf");
+    expect(letterAttachmentName("CV–Acme.pdf")).toBe("Cover_Letter_Acme.pdf");
+    expect(letterAttachmentName(null)).toBe("attachment_Cover_Letter.pdf");
   });
 
   it("serves a PDF with the sandbox and no-store headers", async () => {

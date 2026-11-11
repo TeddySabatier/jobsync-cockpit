@@ -14,6 +14,7 @@ md.disable(["image", "link", "autolink"]);
 const ACCENT = "#1F4E79";
 const MUTED = "#555555";
 const PAGE_MARGIN = 54;
+const INDENT = 14;
 
 const styles = StyleSheet.create({
   page: {
@@ -29,31 +30,78 @@ const styles = StyleSheet.create({
   title: { fontSize: 11, color: MUTED, marginBottom: 2 },
   contact: { fontSize: 9.5, color: MUTED },
   rule: { height: 1, backgroundColor: ACCENT, marginTop: 8, marginBottom: 18 },
-  listEnd: { height: 8 },
   paragraph: { marginBottom: 10 },
+  code: { fontFamily: "Courier", fontSize: 10, marginBottom: 10 },
   heading: { fontFamily: "Helvetica-Bold", fontSize: 12, marginTop: 4, marginBottom: 4 },
   listRow: { flexDirection: "row", marginBottom: 2 },
-  bullet: { width: 14 },
+  bullet: { width: INDENT },
   listText: { flex: 1 },
+  listEnd: { height: 8 },
   bold: { fontFamily: "Helvetica-Bold" },
   italic: { fontFamily: "Helvetica-Oblique" },
   boldItalic: { fontFamily: "Helvetica-BoldOblique" },
 });
 
-// The standard PDF fonts cover WinAnsi only. Anything else would print as a
-// wrong glyph, so it is dropped instead.
+// The standard PDF fonts cover WinAnsi only. Nothing is dropped silently when it
+// is a letter: a letter outside the font shows as "?" so the owner sees it in
+// the preview. Symbols and emoji are dropped.
 const WIN_ANSI_EXTRA = "–—‘’‚“”„•…€™†‡‰‹›ŒœŠšŽžŸƒˆ˜";
+const SPACES = new Set([0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x202f, 0x205f, 0x3000]);
+const HYPHENS = new Set([0x2010, 0x2011, 0x2012, 0x2212]);
+const INVISIBLE = new Set([0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xad]);
+const REPLACEMENTS: Record<string, string> = {
+  "→": "->",
+  "←": "<-",
+  "≥": ">=",
+  "≤": "<=",
+  "≠": "!=",
+  "ł": "l",
+  "Ł": "L",
+  "đ": "d",
+  "Đ": "D",
+  "ħ": "h",
+  "ı": "i",
+};
+const LETTER = /\p{L}/u;
+const MARKS = /\p{M}/gu;
+
+function drawable(c: number, ch: string): boolean {
+  return c === 0x0a || (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || WIN_ANSI_EXTRA.includes(ch);
+}
+
 export function toWinAnsi(text: string): string {
   let out = "";
   for (const ch of text.normalize("NFC")) {
     const c = ch.codePointAt(0)!;
-    if (c === 0x0a || (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || WIN_ANSI_EXTRA.includes(ch)) {
+    if (c === 0xad) continue; // soft hyphen is invisible
+    if (drawable(c, ch)) {
       out += ch;
-    } else if (c === 0x09) {
+    } else if (c === 0x09 || SPACES.has(c)) {
       out += " ";
+    } else if (HYPHENS.has(c)) {
+      out += "-";
+    } else if (INVISIBLE.has(c)) {
+      continue;
+    } else if (REPLACEMENTS[ch]) {
+      out += REPLACEMENTS[ch];
+    } else if (LETTER.test(ch)) {
+      // Latin letters with a mark the font lacks (r with caron, o with double
+      // acute) keep their base letter; any other alphabet shows as "?".
+      const base = ch.normalize("NFD").replace(MARKS, "");
+      out += base !== ch && [...base].every((b) => drawable(b.codePointAt(0)!, b)) ? base : "?";
     }
   }
   return out;
+}
+
+// A word wider than the text column would run past the margin and be cut off.
+// Long words (a deep link) may break anywhere instead.
+const WORD_CHUNK = 30;
+function breakLongWords(word: string): string[] {
+  if (word.length <= WORD_CHUNK * 2) return [word];
+  const parts: string[] = [];
+  for (let i = 0; i < word.length; i += WORD_CHUNK) parts.push(word.slice(i, i + WORD_CHUNK));
+  return parts;
 }
 
 type Token = ReturnType<typeof md.parse>[number];
@@ -79,31 +127,36 @@ function inlineNodes(tokens: Token[] | null, keyPrefix: string): React.ReactNode
   return nodes;
 }
 
+type ListState = { ordered: boolean; next: number };
+
 function bodyNodes(letterMd: string): React.ReactElement[] {
   const tokens = md.parse(letterMd, {});
   const out: React.ReactElement[] = [];
-  let listDepth = 0;
-  let ordered = false;
-  let itemNo = 0;
+  const lists: ListState[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (t.type === "bullet_list_open" || t.type === "ordered_list_open") {
-      listDepth++;
-      ordered = t.type === "ordered_list_open";
-      itemNo = 0;
+      const start = Number(t.attrGet("start"));
+      lists.push({ ordered: t.type === "ordered_list_open", next: Number.isFinite(start) && start > 0 ? start : 1 });
     } else if (t.type === "bullet_list_close" || t.type === "ordered_list_close") {
-      listDepth--;
-      if (listDepth === 0) out.push(<View key={`end${i}`} style={styles.listEnd} />);
+      lists.pop();
+      if (lists.length === 0) out.push(<View key={`end${i}`} style={styles.listEnd} />);
+    } else if (t.type === "code_block" || t.type === "fence") {
+      // Indented and fenced blocks keep their line breaks, as plain text.
+      const text = toWinAnsi(t.content).replace(/\n+$/, "");
+      if (text) out.push(<Text key={`c${i}`} style={styles.code}>{text}</Text>);
     } else if (t.type === "inline") {
       const prev = tokens[i - 1];
       const kids = inlineNodes(t.children, `n${i}`);
       if (prev?.type === "heading_open") {
         out.push(<Text key={`n${i}`} style={styles.heading}>{kids}</Text>);
-      } else if (listDepth > 0) {
-        itemNo++;
+      } else if (lists.length > 0) {
+        const list = lists[lists.length - 1];
+        const marker = list.ordered ? `${list.next}.` : "•";
+        list.next++;
         out.push(
-          <View key={`n${i}`} style={styles.listRow} wrap={false}>
-            <Text style={styles.bullet}>{ordered ? `${itemNo}.` : "•"}</Text>
+          <View key={`n${i}`} style={[styles.listRow, { paddingLeft: (lists.length - 1) * INDENT }]}>
+            <Text style={styles.bullet}>{marker}</Text>
             <Text style={styles.listText}>{kids}</Text>
           </View>,
         );
@@ -135,7 +188,7 @@ export async function renderLetterPdf(input: {
   letterMd: string;
   cvJson?: string | null;
 }): Promise<Buffer> {
-  Font.registerHyphenationCallback((word) => [word]);
+  Font.registerHyphenationCallback(breakLongWords);
   const head = letterhead(input.cvJson);
   const doc = (
     <Document title="Cover letter" author={head?.name ?? ""} creator="JobSync cockpit" producer="react-pdf">

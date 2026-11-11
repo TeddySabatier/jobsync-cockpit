@@ -23,6 +23,16 @@ vi.mock("@/lib/constants", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/cockpit/letterPdf", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/lib/cockpit/letterPdf")>();
+  return { ...mod, renderLetterPdf: vi.fn(mod.renderLetterPdf) };
+});
+
+import * as letterPdfModule from "@/lib/cockpit/letterPdf";
+const renderSpy = vi.mocked(letterPdfModule.renderLetterPdf);
+const realRender = (await vi.importActual<typeof import("@/lib/cockpit/letterPdf")>(
+  "@/lib/cockpit/letterPdf",
+)).renderLetterPdf;
 import { CockpitError } from "@/lib/cockpit/errors";
 import {
   markSendUnknownAsSent,
@@ -149,6 +159,34 @@ describe("sendApplicationPackage: cover letter PDF (D-015)", () => {
       await send(pkg.id, pkg.updatedAt);
       expect(partsOf(gmail.sendRaw.mock.calls[0][1]).map((x) => x.name)).toEqual(["Jane_Doe_CV.pdf"]);
     }
+  });
+});
+
+describe("sendApplicationPackage: letter PDF and the lock (review findings)", () => {
+  it("renders the letter before the lock is taken, never inside the lock window", async () => {
+    const pkg = await s.mkApproved({ letterMd: "Dear team" });
+    const seen: (Date | null)[] = [];
+    renderSpy.mockImplementationOnce(async (input) => {
+      seen.push((await row(pkg.id)).sendStartedAt);
+      return realRender(input);
+    });
+    await send(pkg.id, pkg.updatedAt);
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([null]);
+  });
+
+  it("a render failure returns INTERNAL, takes no lock and never calls Gmail", async () => {
+    const pkg = await s.mkApproved({ letterMd: "Dear team" });
+    renderSpy.mockRejectedValueOnce(new Error("boom"));
+    const e = await rejection(send(pkg.id, pkg.updatedAt));
+    expect(e).toMatchObject({ code: "INTERNAL" });
+    expect(gmail.sendRaw).not.toHaveBeenCalled();
+    expect(gmail.getAccessToken).not.toHaveBeenCalled();
+    const after = await row(pkg.id);
+    expect(after).toMatchObject({ status: "approved", sendStartedAt: null });
+    // Nothing is stuck: the same package sends fine afterwards.
+    await send(pkg.id, pkg.updatedAt);
+    expect(gmail.sendRaw).toHaveBeenCalledOnce();
   });
 });
 

@@ -57,7 +57,7 @@ describe("renderLetterPdf", () => {
 
   it("keeps accents and typographic quotes, drops glyphs the PDF font cannot draw", async () => {
     expect(toWinAnsi("é à ç ’ – “x” €")).toBe("é à ç ’ – “x” €");
-    expect(toWinAnsi("ok → next \u{1F600} ≥ 3")).toBe("ok  next   3");
+    expect(toWinAnsi("ok → next \u{1F600} ≥ 3")).toBe("ok -> next  >= 3");
     const text = await textOf(await renderLetterPdf({ letterMd: "Café d’été → fin" }));
     expect(text).toContain("Café d’été");
   });
@@ -75,6 +75,56 @@ describe("renderLetterPdf", () => {
     const doc = await getDocumentProxy(new Uint8Array(pdf));
     expect(doc.numPages).toBeGreaterThan(1);
     expect(await textOf(pdf)).toContain("Paragraph 60");
+  });
+});
+
+describe("renderLetterPdf: nothing is lost silently (review findings)", () => {
+  it("breaks a very long unbroken word instead of cutting it at the margin", async () => {
+    const url = "https://example.com/portfolio/" + "a".repeat(100) + "/END-MARK";
+    for (const md of [`See ${url} now`, `- ${url}`]) {
+      // The PDF engine adds a hyphen where it breaks a word; the text is all there.
+      const flat = (await textOf(await renderLetterPdf({ letterMd: md }))).replace(/[-\s]+/g, "");
+      expect(flat).toContain(url.replace(/-/g, ""));
+    }
+    const huge = "x".repeat(5000);
+    const flat = (await textOf(await renderLetterPdf({ letterMd: huge }))).replace(/[-\s]+/g, "");
+    expect(flat.length).toBe(5000);
+  });
+
+  it("lets a long bullet flow over a page break", async () => {
+    const bullet = `- ${"word ".repeat(1500)}LAST-WORD`;
+    expect(await textOf(await renderLetterPdf({ letterMd: bullet }))).toContain("LAST-WORD");
+  });
+
+  it("keeps indented and fenced code as plain text", async () => {
+    const text = await textOf(
+      await renderLetterPdf({ letterMd: "Intro\n\n    INDENTED-CODE\n\n```\nFENCED-CODE\nsecond line\n```\n\nOutro" }),
+    );
+    for (const s of ["INDENTED-CODE", "FENCED-CODE", "second line", "Outro"]) expect(text).toContain(s);
+  });
+
+  it("keeps Latin letters the font lacks as their base letter, and shows other alphabets as ?", async () => {
+    expect(toWinAnsi("Łukasz Wałęsa, Dvořák, Őry, Pań")).toBe("Lukasz Walesa, Dvorák, Ory, Pan");
+    expect(toWinAnsi("Ελληνικά Москва")).toBe("???????? ??????");
+    const text = await textOf(await renderLetterPdf({ letterMd: "Szanowni Państwo, Łukasz" }));
+    expect(text).toContain("Szanowni Panstwo, Lukasz");
+  });
+
+  it("turns typographic spaces and hyphens into plain ones, so words never run together", async () => {
+    expect(toWinAnsi("99,9 %")).toBe("99,9 %");
+    expect(toWinAnsi("a b c")).toBe("a b c");
+    expect(toWinAnsi("e‑mail‐x")).toBe("e-mail-x");
+    expect(toWinAnsi("a​b­c")).toBe("abc");
+    expect(toWinAnsi("a → b ≥ c")).toBe("a -> b >= c");
+  });
+
+  it("numbers nested ordered lists correctly and honours the start number", async () => {
+    const text = await textOf(
+      await renderLetterPdf({ letterMd: "1. one\n2. two\n   - sub\n3. three\n\nBreak\n\n5. five\n6. six" }),
+    );
+    const flat = text.replace(/\s+/g, " ");
+    expect(flat).toMatch(/1\. one 2\. two .*sub 3\. three/);
+    expect(flat).toContain("5. five 6. six");
   });
 });
 

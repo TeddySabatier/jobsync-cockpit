@@ -4,6 +4,7 @@ import prisma from "@/lib/db";
 import { isCockpitEnabled } from "@/lib/cockpit/config";
 import { COCKPIT_ERROR_MESSAGES } from "@/lib/cockpit/errors";
 import { renderLetterPdf } from "@/lib/cockpit/letterPdf";
+import { letterAttachmentName } from "@/lib/cockpit/attachments";
 
 // Cover-letter PDF of one of the user's packages, made from the current letter
 // text (D-015). The same function builds the attachment at Send, so this is the
@@ -33,7 +34,7 @@ export async function GET(
   // The userId in the where clause is the ownership check.
   const pkg = await prisma.applicationPackage.findFirst({
     where: { id: packageId, userId },
-    select: { letterMd: true, cvJson: true },
+    select: { letterMd: true, cvJson: true, cvFile: { select: { fileName: true } } },
   });
   if (!pkg?.letterMd?.trim()) return notFound();
 
@@ -48,7 +49,8 @@ export async function GET(
     headers: {
       "Content-Type": "application/pdf",
       "Content-Length": String(pdf.length),
-      "Content-Disposition": 'inline; filename="cover-letter.pdf"',
+      // The name the recipient gets, so a saved copy matches the email.
+      "Content-Disposition": `inline; filename="${letterAttachmentName(pkg.cvFile?.fileName)}"`,
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "sandbox; frame-ancestors 'self'",

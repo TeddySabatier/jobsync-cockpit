@@ -21,7 +21,9 @@ test.describe("cover letter PDF", () => {
     expect((await request.get("/api/cockpit/letter/does-not-exist")).status()).toBe(404);
   });
 
-  test("Review shows the PDF preview, and Send attaches the letter next to the CV", async ({ page, bot }) => {
+  // The fake Google records only the first attachment; that the letter PDF is
+  // attached is covered by __tests__/cockpit/send.integration.spec.ts.
+  test("Review shows the PDF preview and the Send dialog lists it; the CV is still sent", async ({ page, bot }) => {
     const pkg = await bot.seed();
     await openDetail(page, pkg.packageId);
     const frame = page.getByTestId("letter-pdf-preview");
