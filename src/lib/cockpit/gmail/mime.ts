@@ -9,6 +9,8 @@ export interface MimeInput {
   subject: string;
   bodyText: string;
   attachment: { fileName: string; content: Buffer };
+  // More PDFs after the first one (the generated cover letter, D-015).
+  extraAttachments?: { fileName: string; content: Buffer }[];
 }
 
 // Test seams only; production callers pass nothing.
@@ -54,17 +56,20 @@ function encodeSubject(subject: string): string {
 
 // Returns the RFC 5322 message text (CRLF throughout).
 export function buildMimeMessage(
-  { from, to, subject, bodyText, attachment }: MimeInput,
+  { from, to, subject, bodyText, attachment, extraAttachments = [] }: MimeInput,
   opts: MimeOptions = {},
 ): string {
   header("From", from);
   header("To", to);
   header("Subject", subject);
-  header("attachment name", attachment.fileName);
-  // shortcut: ASCII-only attachment names, no RFC 2231; the stored name is a
-  // generated <uuid>.pdf. Upgrade if user-chosen names are ever sent.
-  if (!/^[\x20-\x7e]+$/.test(attachment.fileName) || /["\\]/.test(attachment.fileName)) {
-    throw new Error("Invalid attachment name");
+  const all = [attachment, ...extraAttachments];
+  for (const a of all) {
+    header("attachment name", a.fileName);
+    // shortcut: ASCII-only attachment names, no RFC 2231 (names are sanitized
+    // before they get here). Upgrade if user-chosen names are ever sent.
+    if (!/^[\x20-\x7e]+$/.test(a.fileName) || /["\\]/.test(a.fileName)) {
+      throw new Error("Invalid attachment name");
+    }
   }
   if (!from || !to) throw new Error("From and To are required");
 
@@ -72,7 +77,6 @@ export function buildMimeMessage(
   const messageId = opts.messageId ?? `<${randomUUID()}@jobsync.local>`;
   const date = (opts.now ?? new Date()).toUTCString();
   const body = bodyText.replace(/\r?\n/g, CRLF);
-  const name = attachment.fileName;
 
   return [
     `From: ${from}`,
@@ -88,12 +92,14 @@ export function buildMimeMessage(
     "Content-Transfer-Encoding: base64",
     "",
     wrap76(Buffer.from(body, "utf8").toString("base64")),
-    `--${boundary}`,
-    `Content-Type: application/pdf; name="${name}"`,
-    `Content-Disposition: attachment; filename="${name}"`,
-    "Content-Transfer-Encoding: base64",
-    "",
-    wrap76(attachment.content.toString("base64")),
+    ...all.flatMap((a) => [
+      `--${boundary}`,
+      `Content-Type: application/pdf; name="${a.fileName}"`,
+      `Content-Disposition: attachment; filename="${a.fileName}"`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      wrap76(a.content.toString("base64")),
+    ]),
     `--${boundary}--`,
     "",
   ].join(CRLF);

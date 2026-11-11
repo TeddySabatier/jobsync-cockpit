@@ -214,12 +214,35 @@ export function LetterPanel({ pkg }: { pkg: PackageDetail["package"] }) {
     () => renderLetterMarkdown(pkg.letterMd ?? ""),
     [pkg.letterMd],
   );
+  // The PDF is made from the saved letter text; the timestamp makes the
+  // browser reload it after an edit.
+  const pdfUrl = `/api/cockpit/letter/${pkg.id}?v=${new Date(pkg.updatedAt).getTime()}`;
   return (
     <Panel title="Cover letter" testId="panel-letter">
       {html ? (
-        <div className="max-h-96 overflow-auto">
-          <TipTapContentViewer content={html} />
-        </div>
+        <>
+          <p className="mb-1 text-xs text-muted-foreground">
+            PDF as it will be attached to the email:
+          </p>
+          <iframe
+            src={pdfUrl}
+            title="Cover letter PDF"
+            data-testid="letter-pdf-preview"
+            className="h-[560px] w-full rounded border"
+          />
+          <a
+            href={pdfUrl}
+            download
+            className="mt-2 inline-flex items-center gap-1 text-sm underline"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download PDF
+          </a>
+          <p className="mb-1 mt-4 text-xs text-muted-foreground">Letter text:</p>
+          <div className="max-h-96 overflow-auto">
+            <TipTapContentViewer content={html} />
+          </div>
+        </>
       ) : (
         <p className="text-sm text-muted-foreground">No cover letter.</p>
       )}

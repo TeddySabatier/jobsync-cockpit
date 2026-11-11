@@ -169,3 +169,18 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/cockpit/claudePrompt.ts`, `src/components/cockpit/ClaudePromptButton.tsx`, `JobDetails.tsx`, the job page, `__tests__/cockpit/claudePrompt.spec.tsx`, `scripts/bot/cockpit_submit.py` (default URL), docs.
 - **Not changed:** the MCP tools, Send, backup. SPEC stays frozen; this entry is the amendment of record.
+
+## D-015 The cover letter is sent as a PDF, made by the cockpit from the letter text
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | At Send, when the package has letter text (`letterMd`), the email carries a **second PDF attachment** made from that text, after the CV | **Accept (owner request).** No letter text: no second attachment (CV only, as before). | A cover letter is expected as a document next to the CV. |
+| (b) | The PDF is **rendered by the cockpit** (`@react-pdf/renderer`, already a dependency) at Send and at preview time; it is never stored and has no `File` row | **Accept.** Chosen over a bot-rendered PDF. | It always matches what the owner edited in Review: no stale-PDF problem, no migration, no change to the bot, MCP tools, backup or `attach_file`. |
+| (c) | Review shows the **exact PDF** in an iframe (`GET /api/cockpit/letter/:packageId`, same guards and headers as the CV route, framed by our own pages only) | **Accept.** | "What I see is what is sent": the preview and the attachment use the same function. |
+| (d) | Letterhead (name, title, contact line) comes from the package's `cvJson` (`name`, `title`, `contact`); without it the PDF has no letterhead | **Accept.** | The CV is the source of the owner's details; no extra profile lookup. |
+| (e) | Layout: A4, Helvetica 11 pt, paragraphs, bullet lists, bold and italic; markdown links and images stay inert text. Characters outside WinAnsi (emoji, arrows) are dropped | **Accept, known limit.** The look differs from the Word CV. | The standard PDF fonts cannot draw other glyphs; a different design needs a new template. |
+| (f) | The attachment name pairs with the CV name (`Jane_Doe_CV_Acme.pdf` becomes `Jane_Doe_Cover_Letter_Acme.pdf`); the Send dialog lists it | **Accept.** | Recognisable for the recipient. |
+| (g) | The email **body** is unchanged: it stays whatever the package says. A body that repeats the whole letter can now be shortened in Review | **Accept.** | Keeps this change small; the bot's default body is a separate choice. |
+
+- **Scope:** `src/lib/cockpit/{letterPdf.tsx,letterName.ts,send.ts,gmail/mime.ts}`, `src/app/api/cockpit/letter/[packageId]/route.ts`, `next.config.mjs` (frame header), `Panels.tsx`, `SendDialog.tsx`, `cockpit.actions.ts` (`letterAttachment`), tests (`letterPdf`, `letterRoute`, `send.integration`, e2e `09-letter-pdf`), docs.
+- **Not changed:** schema, backup, MCP tools, the bot script. SPEC stays frozen; this entry is the amendment of record.

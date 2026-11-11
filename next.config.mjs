@@ -17,6 +17,11 @@ const nextConfig = {
         source: "/api/cockpit/files/:packageId",
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
+      // The cover-letter PDF preview (D-015) is framed the same way.
+      {
+        source: "/api/cockpit/letter/:packageId",
+        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
+      },
     ];
   },
 };

@@ -5,6 +5,8 @@ import prisma from "@/lib/db";
 import { decrypt } from "@/lib/encryption";
 import { log } from "@/lib/telemetry";
 import { sanitizePdfName } from "./attachments";
+import { renderLetterPdf } from "./letterPdf";
+import { letterPdfName } from "./letterName";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
 import type { GmailClient } from "./gmail/client";
@@ -172,6 +174,19 @@ export async function sendApplicationPackage(
       fileName: content.fileName,
       content: await fs.readFile(content.filePath),
     };
+    // The cover letter goes out as a PDF too, made from the letter text as it
+    // is now (D-015). No letter text: no second attachment.
+    const extraAttachments = fresh.letterMd?.trim()
+      ? [
+          {
+            fileName: sanitizePdfName(letterPdfName(content.fileName)),
+            content: await renderLetterPdf({
+              letterMd: fresh.letterMd,
+              cvJson: fresh.cvJson,
+            }),
+          },
+        ]
+      : [];
     raw = encodeRaw(
       buildMimeMessage({
         from: account.email,
@@ -179,6 +194,7 @@ export async function sendApplicationPackage(
         subject: content.subject,
         bodyText: content.body,
         attachment,
+        extraAttachments,
       }),
     );
     let refreshToken: string;

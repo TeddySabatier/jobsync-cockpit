@@ -93,6 +93,65 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+describe("sendApplicationPackage: cover letter PDF (D-015)", () => {
+  // Pulls every attachment (file name + decoded bytes) out of the raw message.
+  const partsOf = (raw: string) => {
+    const mime = Buffer.from(raw, "base64url").toString("utf8");
+    const parts: { name: string; bytes: Buffer }[] = [];
+    for (const section of mime.split("Content-Disposition: attachment; filename=\"").slice(1)) {
+      const name = section.slice(0, section.indexOf("\""));
+      const bodyStart = section.indexOf("\r\n\r\n") + 4;
+      const bodyEnd = section.indexOf("\r\n--", bodyStart);
+      const b64 = section.slice(bodyStart, bodyEnd).replace(/\r\n/g, "");
+      parts.push({ name, bytes: Buffer.from(b64, "base64") });
+    }
+    return parts;
+  };
+  const textOf = async (pdf: Buffer) => {
+    const { extractText, getDocumentProxy } = await import("unpdf");
+    const { text } = await extractText(await getDocumentProxy(new Uint8Array(pdf)), {
+      mergePages: true,
+    });
+    return text;
+  };
+
+  it("attaches a PDF made from the current letter text next to the CV", async () => {
+    const pkg = await s.mkApproved({
+      letterMd: "Dear team,\n\nLETTER-MARKER-TEXT",
+      cvJson: JSON.stringify({ name: "Jane Doe", title: "Engineer", contact: ["jane@example.com"] }),
+    });
+    await send(pkg.id, pkg.updatedAt);
+    const parts = partsOf(gmail.sendRaw.mock.calls[0][1]);
+    expect(parts.map((x) => x.name)).toEqual(["Jane_Doe_CV.pdf", "Jane_Doe_Cover_Letter.pdf"]);
+    expect(parts[0].bytes.equals(pdfBytes)).toBe(true);
+    expect(parts[1].bytes.subarray(0, 5).toString()).toBe("%PDF-");
+    const text = await textOf(parts[1].bytes);
+    expect(text).toContain("LETTER-MARKER-TEXT");
+    expect(text).toContain("Jane Doe");
+  });
+
+  it("uses the letter as edited: the PDF is made at Send, not stored", async () => {
+    const pkg = await s.mkApproved({ letterMd: "FIRST-VERSION" });
+    await prisma.applicationPackage.update({
+      where: { id: pkg.id },
+      data: { letterMd: "EDITED-VERSION" },
+    });
+    await send(pkg.id, (await row(pkg.id)).updatedAt);
+    const text = await textOf(partsOf(gmail.sendRaw.mock.calls[0][1])[1].bytes);
+    expect(text).toContain("EDITED-VERSION");
+    expect(text).not.toContain("FIRST-VERSION");
+  });
+
+  it("sends only the CV when there is no letter text", async () => {
+    for (const letterMd of [null, "   \n "]) {
+      gmail = mockGmail();
+      const pkg = await s.mkApproved({ letterMd });
+      await send(pkg.id, pkg.updatedAt);
+      expect(partsOf(gmail.sendRaw.mock.calls[0][1]).map((x) => x.name)).toEqual(["Jane_Doe_CV.pdf"]);
+    }
+  });
+});
+
 describe("sendApplicationPackage: success (AC-25)", () => {
   it("sends the MIME, then sets package sent + SentEmail + job applied", async () => {
     const pkg = await s.mkApproved();

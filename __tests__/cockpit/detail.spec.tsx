@@ -105,6 +105,7 @@ const detailFixture = (
   activePackageId: "p2",
   isActive: true,
   attachment: { fileName: "0000-uuid.pdf", size: 12288 },
+  letterAttachment: { fileName: "Cover_Letter.pdf" },
   gmail: { email: "you@example.com", scopes: "gmail.send" },
   ...extra,
 });
@@ -176,9 +177,20 @@ describe("review detail page: panels (AC-18, AC-41)", () => {
     const frame = screen.getByTitle("CV PDF");
     expect(frame).toHaveAttribute("src", "/api/cockpit/files/p2");
     expect(frame).not.toHaveAttribute("sandbox");
-    expect(screen.getByRole("link", { name: /download pdf/i })).toHaveAttribute(
+    expect(
+      within(screen.getByTestId("panel-cv")).getByRole("link", { name: /download pdf/i }),
+    ).toHaveAttribute("href", "/api/cockpit/files/p2");
+  });
+
+  it("previews the cover letter as the PDF that will be attached (D-015)", async () => {
+    await renderPage();
+    const panel = screen.getByTestId("panel-letter");
+    const frame = within(panel).getByTestId("letter-pdf-preview");
+    expect(frame.getAttribute("src")).toMatch(/^\/api\/cockpit\/letter\/p2\?v=\d+$/);
+    expect(frame).not.toHaveAttribute("sandbox");
+    expect(within(panel).getByRole("link", { name: /download pdf/i })).toHaveAttribute(
       "href",
-      "/api/cockpit/files/p2",
+      frame.getAttribute("src")!,
     );
   });
 
