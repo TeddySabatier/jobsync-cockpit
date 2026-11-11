@@ -15,7 +15,8 @@ export interface McpRateLimitOptions {
   bucket?: string;
   max?: number;
   windowMs?: number;
-  // Report whether a call would be allowed without spending a slot.
+  // Report whether a call would be allowed without spending a slot. Only
+  // reliable if the caller spends synchronously afterwards (no await between).
   peek?: boolean;
 }
 

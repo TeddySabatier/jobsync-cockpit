@@ -45,7 +45,7 @@ All six tools are registered only when `COCKPIT_ENABLED=true`. Each handler runs
 | `attach_file` | `package:write` | PDF only; call before `submit_application_package` |
 | `submit_application_package` | `package:write` | Creates version *n+1*; may supersede older active versions |
 | `list_jobs` | `jobs:read` | Optional filters; includes active package summary. `hasPackage` means an active (not superseded) package |
-| `get_job` | `jobs:read` | Job plus all package versions (newest first); full content (body, letter, analysis, CV JSON) only on the newest version |
+| `get_job` | `jobs:read` | Job plus all package versions (newest first); full content (body, letter, analysis, CV JSON) only on the newest version; includes `idempotencyKey` |
 | `list_change_requests` | `jobs:read` | Packages in `changes_requested`. Close each by **either** a new submit (this supersedes the request) **or** `mark_change_request_done`, never both (the second gives `INVALID_STATE`) |
 | `mark_change_request_done` | `package:write` | Bot response; moves package back to `pending` |
 

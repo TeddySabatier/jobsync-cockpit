@@ -63,6 +63,8 @@ async function runTool<T>(
 ): Promise<ToolResult> {
   if (!ctx.scopes.includes(scope)) return cockpitToolResult("UNAUTHORIZED_SCOPE");
 
+  // The peek and the two spends below are consistent only because nothing is
+  // awaited between them (the store is a synchronous in-process Map).
   // attach_file: look at its bucket first without spending a slot, so a call
   // refused by it does not also burn a general `cockpit` slot.
   if (
@@ -211,6 +213,9 @@ export function registerCockpitTools(
                 id: true,
                 version: true,
                 status: true,
+                // The bot's own key: cockpit_submit.py uses it to recognise its
+                // package after a crash.
+                idempotencyKey: true,
                 emailTo: true,
                 emailSubject: true,
                 emailBody: true,

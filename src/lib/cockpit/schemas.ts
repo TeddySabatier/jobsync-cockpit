@@ -2,7 +2,8 @@ import { z } from "zod";
 
 // Field limits (cockpit/SPEC.md §2.3). Each rule set is exported twice:
 // `XInputShape` (field-level rules, what `server.tool` takes) and `XSchema`
-// (`z.object(shape)` plus cross-field rules, what handlers re-parse with).
+// (`z.object(shape)` plus cross-field rules, used by the UI services and
+// tests; the MCP handlers rely on the SDK's check of the shape).
 
 const noLineBreak = /^[^\r\n]*$/;
 const noLineBreakOrComma = /^[^\r\n,]*$/;

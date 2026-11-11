@@ -121,9 +121,12 @@ describe("tool descriptions", () => {
     expect(d.list_change_requests).toMatch(/never both/);
     expect(d.list_change_requests).not.toMatch(/only if you did not resubmit/);
     expect(d.submit_application_package).toMatch(/"A" or "B"/);
-    expect(d.submit_application_package).toMatch(/A-Z a-z 0-9/);
+    expect(d.submit_application_package).toMatch(/no line break/);
+    expect(d.submit_application_package).toMatch(/cannot send the package by Gmail/);
+    expect(d.submit_application_package).toMatch(/supersedes/);
+    expect(d.submit_application_package).not.toMatch(/20000|A-Z a-z/);
+    expect(d.get_job).toMatch(/idempotencyKey/);
     expect(d.submit_application_package).toMatch(/omit or "" to apply via a link/);
-    expect(d.submit_application_package).toMatch(/20000/);
     expect(d.attach_file).toMatch(/MCP layer/);
     expect(d.list_jobs).toMatch(/hasPackage \(true: has an active package/);
   });
@@ -441,11 +444,20 @@ describe("list_jobs / get_job (AC-11)", () => {
       expect(older).not.toHaveProperty(k);
     }
     for (const p of got.packages) {
-      for (const k of ["idempotencyKey", "sendOutcome", "sendStartedAt", "sentVia", "cvPdfStale", "cvFileId", "userId", "jobId"]) {
+      for (const k of ["sendOutcome", "sendStartedAt", "sentVia", "cvPdfStale", "cvFileId", "userId", "jobId"]) {
         expect(p).not.toHaveProperty(k);
       }
       expect(p).toMatchObject({ id: expect.any(String), status: expect.any(String), emailSubject: "Application - Engineer", cvFile: null });
     }
+    await c.close();
+  });
+
+  it("get_job returns idempotencyKey (the bot script recognises its own package by it)", async () => {
+    const c = await asUser(userA);
+    const jobId = await newJob(userA);
+    await c.call("submit_application_package", submitArgs(jobId, { idempotencyKey: "key-56:a" }));
+    const got = JSON.parse((await c.call("get_job", { jobId })).text);
+    expect(got.packages[0].idempotencyKey).toBe("key-56:a");
     await c.close();
   });
 
