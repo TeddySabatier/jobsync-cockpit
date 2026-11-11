@@ -712,7 +712,7 @@ describe("lifecycle (SPEC §2.1)", () => {
   // Every status the app seeds (JOB_STATUSES), matched by value: only draft and
   // new move to applied; every other status, and its applied fields, is kept.
   it.each(JOB_STATUSES.map((s) => [s.value, s.label] as const))(
-    "mark applied manually from job status '%s' (D-016 a)",
+    "mark applied manually from job status '%s' (D-018 a)",
     async (value, label) => {
       const status = await prisma.jobStatus.upsert({
         where: { value },
@@ -743,7 +743,7 @@ describe("lifecycle (SPEC §2.1)", () => {
     },
   );
 
-  it("forward-only matches the status value, not its label (D-016 a)", async () => {
+  it("forward-only matches the status value, not its label (D-018 a)", async () => {
     const lookalike = await prisma.jobStatus.create({
       data: { label: "Draft", value: "draft-lookalike" },
     });

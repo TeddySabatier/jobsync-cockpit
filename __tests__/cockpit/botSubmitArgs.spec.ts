@@ -8,7 +8,7 @@ import {
   SubmitApplicationPackageSchema,
 } from "@/lib/cockpit/schemas";
 
-// The submit schema is strict (D-016 (b)): an unknown key is refused. This runs
+// The submit schema is strict (D-018 (b)): an unknown key is refused. This runs
 // the repo's own bot script (scripts/bot/cockpit_submit.py) through its command
 // tests against the stub server, collects every submit_application_package
 // argument object it really sent, and checks each one against the strict

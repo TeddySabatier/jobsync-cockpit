@@ -2,7 +2,8 @@ import { z } from "zod";
 
 // Field limits (cockpit/SPEC.md §2.3). Each rule set is exported twice:
 // `XInputShape` (field-level rules, what `server.tool` takes) and `XSchema`
-// (`z.object(shape)` plus cross-field rules, what handlers re-parse with).
+// (`z.object(shape)` plus cross-field rules, used by the UI services and
+// tests; the MCP handlers rely on the SDK's check of the shape).
 
 const noLineBreak = /^[^\r\n]*$/;
 const noLineBreakOrComma = /^[^\r\n,]*$/;
@@ -42,7 +43,7 @@ const jsonObject = (maxChars: number) =>
 
 const shortText = z.string().trim().min(1).max(2_000);
 
-const emptyToNull = <T extends { emailTo?: string }>(
+export const emptyToNull = <T extends { emailTo?: string }>(
   v: T,
 ): Omit<T, "emailTo"> & { emailTo?: string | null } => ({
   ...v,

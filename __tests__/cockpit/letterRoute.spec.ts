@@ -8,6 +8,8 @@ import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import prisma from "@/lib/db";
 import { GET } from "@/app/api/cockpit/letter/[packageId]/route";
+import { log } from "@/lib/telemetry";
+import * as letterPdf from "@/lib/cockpit/letterPdf";
 import { letterAttachmentName } from "@/lib/cockpit/attachments";
 
 const find = prisma.applicationPackage.findFirst as ReturnType<typeof vi.fn>;
@@ -71,5 +73,18 @@ describe("GET /api/cockpit/letter/[packageId] (D-015)", () => {
     const body = Buffer.from(await res.arrayBuffer());
     expect(body.subarray(0, 5).toString()).toBe("%PDF-");
     expect(Number(res.headers.get("content-length"))).toBe(body.length);
+  });
+
+  it("a render failure is a 500 with an empty body and a logged code (no letter text)", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+    vi.spyOn(letterPdf, "renderLetterPdf").mockRejectedValue(new Error("boom secret letter text"));
+    find.mockResolvedValue({ letterMd: "Hello team", cvJson: null });
+    const res = await call();
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("");
+    expect(warn).toHaveBeenCalledWith("cockpit: letter pdf render failed", {
+      code: "LETTER_RENDER_FAILED",
+    });
+    warn.mockRestore();
   });
 });

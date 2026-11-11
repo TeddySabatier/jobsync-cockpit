@@ -236,7 +236,7 @@ describe("sendApplicationPackage: success (AC-25)", () => {
     expect(job.appliedDate).toEqual(res.sentAt);
   });
 
-  it("a Gmail send moves a 'new' job to applied but never rewinds a job at interview (D-016 a)", async () => {
+  it("a Gmail send moves a 'new' job to applied but never rewinds a job at interview (D-018 a)", async () => {
     const at = async (value: string) => {
       const status = await prisma.jobStatus.upsert({
         where: { value },
@@ -535,7 +535,7 @@ describe("recovery actions (AC-33)", () => {
     expect(job.appliedDate).toEqual(res.sentAt);
   });
 
-  it("markSendUnknownAsSent never rewinds a job already at offer (D-016 a)", async () => {
+  it("markSendUnknownAsSent never rewinds a job already at offer (D-018 a)", async () => {
     const offer = await prisma.jobStatus.upsert({
       where: { value: "offer" },
       update: {},

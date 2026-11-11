@@ -150,7 +150,7 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 | # | Topic | Ruling | Reason |
 |---|---|---|---|
 | (a) | The per-user quota of 200 files / 500 MB on `attach_file` is **removed** | **Accept (owner decision, issue #49).** The per-file size cap and the base64 payload cap (7,000,000) stay. | A daily bot counting every file ever uploaded would hit 200 within weeks and then fail every submit with `TOO_LARGE`. |
-| (b) | Each `attach_file` first deletes the user's files in `cockpitUserDir` that are **older than `COCKPIT_ORPHAN_DAYS` (default 7, minimum 1)** and referenced by **no `ApplicationPackage` and no `Resume`**, together with their `File` rows (stray files without a row too) | **Accept.** Best effort: a failure of the cleanup never blocks the upload. | Bounds the bloat from failed or abandoned submits without a limit. A recent orphan is kept because a submit normally follows within seconds. |
+| (b) | Each `attach_file` first deletes the user's files in `cockpitUserDir` that are **older than `COCKPIT_ORPHAN_DAYS` (default 7, minimum 1)** and referenced by **no `ApplicationPackage` and no `Resume`**, together with their `File` rows (stray files without a row too) | **Accept.** Best effort: a failure of the cleanup never blocks the upload. Files are matched to rows by file name, not by the stored path string (a relative or differently written `UPLOADS_DIR` must not make claimed files look stray); rows are deleted in one transaction only while still unreferenced, and a file whose row was claimed meanwhile is kept. A `COCKPIT_ORPHAN_DAYS` below 1 or not a number falls back to 7 with a logged warning (once per process). A row stored in a foreign path form (another directory, or a Windows-style path) is never cleaned: its file is kept, which is the safe direction but leaves a leak. File names compare case-insensitively. | Bounds the bloat from failed or abandoned submits without a limit. A recent orphan is kept because a submit normally follows within seconds. |
 | (c) | Files of packages (pending, superseded, sent, rejected) are **kept** | **Accept.** | They are history and the backup (D-012) carries them; deleting them would break the application thread. |
 | (d) | Disk use is otherwise unbounded | **Known limit.** About one CV per application and version; the rate limit on `attach_file` still applies. | A leaked bot token can fill the disk; revoke the token. |
 
@@ -187,13 +187,26 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 - **Scope:** `src/lib/cockpit/{letterPdf.tsx,letterName.ts,send.ts,gmail/mime.ts}`, `src/app/api/cockpit/letter/[packageId]/route.ts`, `next.config.mjs` (frame header), `Panels.tsx`, `SendDialog.tsx`, `cockpit.actions.ts` (`letterAttachment`), tests (`letterPdf`, `letterRoute`, `send.integration`, e2e `09-letter-pdf`), docs.
 - **Not changed:** schema, backup, MCP tools, the bot script. SPEC stays frozen; this entry is the amendment of record.
 
-## D-016 Core library hardening (review 01, issue #53)
+## D-016 MCP server review fixes (issue #56; amends N6 and SPEC §3)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The handler no longer re-parses with `XSchema`; only the SDK checks the shape (N6 amended) | **Accept (simple route).** Argument shape errors always come back in the SDK format (`MCP error -32602`), even for a token without the scope. `VALIDATION` is only for post-shape failures (a non-PDF). `emptyToNull` is applied in the submit handler. The `XSchema` exports stay for the UI services and tests. | The re-parse could not fail, and the "<CODE>: message" claim in the descriptions was false for the commonest bad-argument case. A scope-less token learning the field schema was judged harmless (it is the owner's own bot). |
+| (b) | `TOO_LARGE` reads "The content is too large"; `CONFLICT` reads "The package or job changed, or a send is in progress; fetch the current state and retry the whole request" | **Accept.** | No quota exists since D-013; the same text is shown to the bot and to the owner. The bot rule "replay the whole submit" (D7) stays in the tool description. |
+| (c) | A call refused by the `cockpit-attach` bucket spends no `cockpit` slot | **Accept.** `checkMcpRateLimit` gets an optional `peek` flag; `attach_file` peeks the attach bucket first, then spends `cockpit`, then `cockpit-attach`. Supersedes the "accepted" note in SPEC §3. | A bot looping on a refused attach was draining its whole budget. |
+| (d) | `get_job` returns an explicit field list; `emailBody`, `letterMd`, `fitAnalysis`, `cvJson` only on the newest version; `idempotencyKey` **is** returned (the bot script `cockpit_submit.py` uses it to recognise its own package after a crash; it is the bot's own key); no `sendOutcome`, `sendStartedAt`, `sentVia`, `cvPdfStale` | **Accept.** SPEC §3 "every field except cvFileId" is amended. | Smaller responses, no internals. |
+| (e) | `list_jobs` `hasPackage` means an **active** (non-superseded) package | **Accept.** | Matches `activePackage` and the description. |
+
+- **Scope:** `src/lib/mcp/tools/cockpit.ts`, `cockpitDescriptions.ts`, `src/lib/mcp/rate-limit.ts`, `src/lib/cockpit/{errors,schemas}.ts`, `__tests__/cockpit/*`, `docs/cockpit.md`.
+- **Not changed:** legacy tools, in-memory rate-limit persistence, token scope choice. SPEC stays frozen; this entry is the amendment of record.
+
+## D-018 Core library hardening (review 01, issue #53)
 
 | # | Topic | Ruling | Reason |
 |---|---|---|---|
 | (a) | A send (Gmail or **Mark applied manually**) moves the job to `applied` **only from `draft` or `new`**; a job already at `interview`, `offer` or any other status keeps its status and `appliedDate`. One shared helper (`markJobApplied` in `packages.ts`) serves both paths and refuses an empty job id | **Accept (review finding).** | The owner may have moved the job on by hand; a late send must not rewind it. Prisma reads `id: undefined` as no filter, a mass-write risk. |
 | (b) | `submit_application_package` and the edit schema are **strict**: an unknown key (`emailTooo`) is refused, not dropped. The MCP tool registers the strict object, so the SDK error names the key | **Accept (review finding).** | A dropped `emailTo` typo silently turned a package into "apply via link". |
-| (c) | A whitespace-only subject or body is refused (`VALIDATION`). The stored text is not trimmed | **Accept (review finding).** | `" "` passed `min(1)`. |
+| (c) | A whitespace-only subject or body is refused (over MCP as an SDK shape error, per D-016 (a); `VALIDATION` in the edit UI). The stored text is not trimmed | **Accept (review finding).** | `" "` passed `min(1)`. |
 | (d) | A Prisma write conflict on submit is `CONFLICT` (replay), like a version race, not `INTERNAL`: `P2034`, and `P1008` / `P2028`, which is what SQLite busy under concurrent writers actually raises on Prisma (a test holding the write lock from a second connection gets `P1008`, never `P2034`) | **Accept (review finding).** | Same remedy for the bot: replay the whole submit. |
 | (e) | Letter markdown: the `reference` rule is off too, so a line like `[1]: https://...` stays visible text | **Accept (review finding).** | With links off the definition line vanished from the letter. |
 | (f) | Request changes clears `approvedAt`; the next version needs a fresh approval | **Accept (review finding).** | Cosmetic stale timestamp. |

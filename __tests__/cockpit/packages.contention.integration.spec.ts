@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { PrismaClient } from "@prisma/client";
 
-// Real SQLite write contention on submit (review 01 #3, D-016 (d)), with no
+// Real SQLite write contention on submit (review 01 #3, D-018 (d)), with no
 // mocked Prisma error: a second connection holds the database write lock, so
 // the submit's own write waits for SQLite and gives up. The service client
 // waits 1 s (socket_timeout) instead of the default 5 s to keep the test short.

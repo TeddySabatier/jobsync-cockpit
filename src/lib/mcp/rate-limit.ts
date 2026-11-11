@@ -15,6 +15,9 @@ export interface McpRateLimitOptions {
   bucket?: string;
   max?: number;
   windowMs?: number;
+  // Report whether a call would be allowed without spending a slot. Only
+  // reliable if the caller spends synchronously afterwards (no await between).
+  peek?: boolean;
 }
 
 // Without `opts` the key, limit and window are unchanged (existing callers).
@@ -39,6 +42,17 @@ export function checkMcpRateLimit(
   }
 
   const entry = store.get(key);
+
+  if (opts?.peek) {
+    if (!entry || now > entry.resetTime) {
+      return { allowed: true, remaining: max, resetIn: windowMs };
+    }
+    return {
+      allowed: entry.count < max,
+      remaining: Math.max(0, max - entry.count),
+      resetIn: entry.resetTime - now,
+    };
+  }
 
   if (!entry || now > entry.resetTime) {
     store.set(key, { count: 1, resetTime: now + windowMs });

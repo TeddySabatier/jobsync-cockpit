@@ -12,14 +12,10 @@ const nextConfig = {
         ],
       },
       // Appended after the global rule: Next applies the last matching entry
-      // per header key, so the PDF route may be framed by our own pages.
+      // per header key, so the CV (files) and cover-letter (D-015) PDF routes
+      // may be framed by our own pages.
       {
-        source: "/api/cockpit/files/:packageId",
-        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
-      },
-      // The cover-letter PDF preview (D-015) is framed the same way.
-      {
-        source: "/api/cockpit/letter/:packageId",
+        source: "/api/cockpit/:kind(files|letter)/:packageId",
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
     ];

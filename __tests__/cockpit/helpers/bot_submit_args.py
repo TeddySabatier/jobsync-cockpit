@@ -3,7 +3,7 @@ CommandTests) and writes every `submit_application_package` argument object the
 script sent to the stub server, as a JSON list, to the path in argv[1].
 
 Used by __tests__/cockpit/botSubmitArgs.spec.ts to check those real arguments
-against the strict server schema (D-016 (b)). Standard library only.
+against the strict server schema (D-018 (b)). Standard library only.
 """
 import json
 import os
