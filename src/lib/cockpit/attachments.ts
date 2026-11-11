@@ -4,6 +4,7 @@ import path from "path";
 import prisma from "@/lib/db";
 import { APP_CONSTANTS } from "@/lib/constants";
 import { PDF_MAGIC } from "@/lib/ai/import/extract-text";
+import { log } from "@/lib/telemetry";
 import { CockpitError } from "./errors";
 import { cockpitUserDir } from "./files";
 import { letterPdfName } from "./letterName";
@@ -27,13 +28,27 @@ export function sanitizePdfName(fileName: string): string {
 
 // Display name of the cover-letter PDF. Dialog, preview download and Send all
 // use this one function, so the owner sees the name the recipient gets.
+// The inner sanitize turns the CV name into plain [A-Za-z0-9._-] so the "CV"
+// token is found between underscores; the outer one guards the final name.
 export function letterAttachmentName(cvFileName: string | null | undefined): string {
   return sanitizePdfName(letterPdfName(sanitizePdfName(cvFileName ?? "")));
 }
 
+let orphanDaysWarned = false;
+
 function orphanMaxAgeMs(): number {
-  const raw = Number(process.env.COCKPIT_ORPHAN_DAYS);
-  const days = Number.isFinite(raw) && raw >= 1 ? raw : COCKPIT_ORPHAN_DAYS_DEFAULT;
+  const set = process.env.COCKPIT_ORPHAN_DAYS;
+  const raw = Number(set);
+  const valid = Number.isFinite(raw) && raw >= 1;
+  if (set && !valid && !orphanDaysWarned) {
+    // Not silent (once per process): a value below 1 (or not a number) falls
+    // back to the default.
+    orphanDaysWarned = true;
+    log.warn("cockpit: COCKPIT_ORPHAN_DAYS ignored, using the default", {
+      code: "ORPHAN_DAYS_INVALID",
+    });
+  }
+  const days = valid ? raw : COCKPIT_ORPHAN_DAYS_DEFAULT;
   return days * 24 * 60 * 60 * 1000;
 }
 
@@ -59,30 +74,74 @@ export async function cleanupOrphanUploads(
   for (const name of names) {
     const full = path.join(dir, name);
     try {
-      const st = await fs.stat(full);
-      if (st.isFile() && st.mtimeMs < cutoff) old.push(full);
+      // lstat: a symlink is judged (and removed) as the link, never its target.
+      const st = await fs.lstat(full);
+      if ((st.isFile() || st.isSymbolicLink()) && st.mtimeMs < cutoff) old.push(name);
     } catch {
       // vanished meanwhile
     }
   }
   if (old.length === 0) return 0;
 
-  // Rows that something still points to are never touched.
-  const inUse = await prisma.file.findMany({
-    where: {
-      filePath: { in: old },
-      OR: [{ applicationPackages: { some: {} } }, { Resume: { isNot: null } }],
+  // Rows are matched by file name (a generated <uuid>.pdf), not by the stored
+  // path string: UPLOADS_DIR may be relative or absolute, or differ between
+  // runs, and an exact path match would then see every file as stray.
+  const rows = await prisma.file.findMany({
+    where: { OR: old.map((name) => ({ filePath: { endsWith: name } })) },
+    select: {
+      id: true,
+      filePath: true,
+      applicationPackages: { select: { id: true }, take: 1 },
+      Resume: { select: { id: true } },
     },
-    select: { filePath: true },
   });
-  const keep = new Set(inUse.map((r) => r.filePath));
-  const doomed = old.filter((p) => !keep.has(p));
-  if (doomed.length === 0) return 0;
+  // endsWith only pre-filters: keep rows whose last segment (either separator,
+  // a row may come from a Windows install) is exactly a candidate name. Names
+  // are compared lowercased: on a case-insensitive filesystem a row differing
+  // only in case is the same file, and this can only keep more files.
+  const key = (n: string) => n.toLowerCase();
+  const oldNames = new Set(old.map(key));
+  const base = (p: string) => p.split(/[\\/]/).pop() ?? "";
+  const ours = path.resolve(dir);
+  const rowsOf = new Map<string, string[]>();
+  const deletable: string[] = [];
+  for (const r of rows) {
+    const name = key(base(r.filePath));
+    if (!oldNames.has(name)) continue;
+    rowsOf.set(name, [...(rowsOf.get(key(name)) ?? []), r.id]);
+    // Only rows pointing into this user's directory are deleted here; any
+    // other row with the same name is left alone and keeps the file. A row
+    // that already has a package or resume is claimed outright: no delete is
+    // attempted for it (keeps the write transaction small).
+    const referenced = r.applicationPackages.length > 0 || r.Resume !== null;
+    if (!referenced && path.resolve(path.dirname(r.filePath)) === ours) {
+      deletable.push(r.id);
+    }
+  }
 
-  // Rows first: a row that outlives its bytes is harmless, the reverse is not.
-  await prisma.file.deleteMany({ where: { filePath: { in: doomed } } });
-  for (const full of doomed) await fs.rm(full, { force: true });
-  return doomed.length;
+  // One transaction; each delete re-checks "still unreferenced" in its own
+  // statement, so a package or resume that claimed the row meanwhile wins
+  // (count 0) and its file is kept. Rows first: a row that outlives its bytes
+  // is harmless, the reverse is not.
+  const unreferenced = {
+    applicationPackages: { none: {} },
+    Resume: { is: null },
+  };
+  const counts = deletable.length
+    ? await prisma.$transaction(
+        deletable.map((id) => prisma.file.deleteMany({ where: { id, ...unreferenced } })),
+      )
+    : [];
+  const deleted = new Set(deletable.filter((_, i) => counts[i].count === 1));
+
+  let removed = 0;
+  for (const name of old) {
+    const claimed = (rowsOf.get(key(name)) ?? []).some((id) => !deleted.has(id));
+    if (claimed) continue;
+    await fs.rm(path.join(dir, name), { force: true });
+    removed++;
+  }
+  return removed;
 }
 
 export async function attachFile(

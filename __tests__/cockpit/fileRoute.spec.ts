@@ -133,6 +133,7 @@ describe("GET /api/cockpit/files/[packageId] (AC-16)", () => {
       'inline; filename="0a1b2c3d-generated.pdf"',
     );
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
     expect(res.headers.get("Content-Security-Policy")).toBe(
       "sandbox; frame-ancestors 'self'",
     );

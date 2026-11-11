@@ -38,15 +38,15 @@ There is **no** MCP tool to approve, send, edit, or reject packages.
 
 ## MCP tools
 
-All six tools are registered only when `COCKPIT_ENABLED=true`. Each handler runs: **scope check → rate limit → validation → database**.
+All six tools are registered only when `COCKPIT_ENABLED=true`. Each handler runs: **scope check → rate limit → database**. The MCP SDK checks the argument types and ranges first, before the handler: a malformed argument (for example `limit: 0` or `fitGrade: "C"`) is refused with `MCP error -32602: Input validation error ...`, not the `<CODE>: message` format below, and this happens even for a token without the scope.
 
 | Tool | Scope | Notes |
 |------|-------|--------|
 | `attach_file` | `package:write` | PDF only; call before `submit_application_package` |
 | `submit_application_package` | `package:write` | Creates version *n+1*; may supersede older active versions |
-| `list_jobs` | `jobs:read` | Optional filters; includes active package summary |
-| `get_job` | `jobs:read` | Job plus all package versions (newest first) |
-| `list_change_requests` | `jobs:read` | Packages in `changes_requested` |
+| `list_jobs` | `jobs:read` | Optional filters; includes active package summary. `hasPackage` means an active (not superseded) package |
+| `get_job` | `jobs:read` | Job plus all package versions (newest first); full content (body, letter, analysis, CV JSON) only on the newest version; includes `idempotencyKey` |
+| `list_change_requests` | `jobs:read` | Packages in `changes_requested`. Close each by **either** a new submit (this supersedes the request) **or** `mark_change_request_done`, never both (the second gives `INVALID_STATE`) |
 | `mark_change_request_done` | `package:write` | Bot response; moves package back to `pending` |
 
 ### Rate limits
@@ -56,7 +56,7 @@ Per user, in-memory (resets on process restart):
 | Bucket | Limit | Applies to |
 |--------|-------|------------|
 | `cockpit` | 120 / hour | Every cockpit tool |
-| `cockpit-attach` | 30 / hour | `attach_file` (in addition to `cockpit`) |
+| `cockpit-attach` | 30 / hour | `attach_file` (in addition to `cockpit`); a call refused by this bucket does not use a `cockpit` slot |
 
 ### Error style
 
@@ -73,11 +73,11 @@ Messages come from a fixed map (never raw Google/Prisma text). Common MCP codes:
 1. **`attach_file`** → `{ fileId }` → pass `cvFileId` in **`submit_application_package`**.
 2. **`idempotencyKey`** (optional): same user + same key returns the existing package with `idempotent: true`. Reusing a key on a **different job** is `CONFLICT` — use a fresh key.
 3. **Versioning**: each submit for a job gets the next version. Prior `pending` / `approved` / `changes_requested` packages (unlocked) become **`superseded`**.
-4. **`CONFLICT`**: replay the **whole** submit (all checks, including idempotency and lock checks). Causes include concurrent writes, a send lock on the job, or version/idempotency races.
+4. **`CONFLICT`** (the owner sees the same text in the UI: fetch the current state and retry the whole request): replay the **whole** submit (all checks, including idempotency and lock checks). Causes include concurrent writes, a send lock on the job, or version/idempotency races.
 5. A job with **any** past **`sent`** package cannot accept new submits (`ALREADY_SENT`). A **rejected** active package blocks submit (`JOB_REJECTED`).
 6. While **`sendStartedAt`** is set on any package for the job, submit returns **`CONFLICT`** — resolve send in the UI first.
 
-`attach_file` has **no file-count or size quota** (D-013). Each PDF is still limited to the per-file size cap. To avoid bloat, every `attach_file` call first deletes the user's uploads that **no package uses** and that are older than **7 days** (set `COCKPIT_ORPHAN_DAYS`, minimum 1). Files of packages (pending, superseded, sent) are never deleted.
+`attach_file` has **no file-count or size quota** (D-013). Each PDF is still limited to the per-file size cap. To avoid bloat, every `attach_file` call first deletes the user's uploads that **no package uses** and that are older than **7 days** (set `COCKPIT_ORPHAN_DAYS`, minimum 1; a smaller value or a non-number is ignored, a warning is logged and 7 is used). Files of packages (pending, superseded, sent) are never deleted.
 
 ## Cover letter as a PDF
 
@@ -137,7 +137,7 @@ Flow: approve → **Send** (when Gmail connected, valid `emailTo`, CV file prese
 
 - **PDF in iframe:** file route sets `Content-Security-Policy: sandbox; frame-ancestors 'self'` and scoped `X-Frame-Options: SAMEORIGIN` in Next config. Some browsers may not render sandboxed PDFs in an iframe — use download if preview fails.
 - **Gmail tokens:** refresh tokens encrypted with `ENCRYPTION_KEY` (same key as other stored secrets). Must be set **before** OAuth callback stores a token. Changing the key requires reconnecting Gmail.
-- **Backup (D-012):** the standard backup includes review packages, sent-email records and the CV PDFs they point at, so a restore brings them back. It never includes the Gmail connection (`GmailAccount`): its refresh token stays on the server, so after restoring onto a fresh instance you reconnect Gmail. Restoring over an existing account replaces its packages and sent history with the backup contents (the automatic pre-restore snapshot contains them too). Backups made before D-012 simply have no packages. An import or rollback is refused while a package is being sent or has an unresolved send lock: resolve it in the cockpit first. A package exported while locked is restored still locked, and the recovery panel releases it (D-016).
+- **Backup (D-012):** the standard backup includes review packages, sent-email records and the CV PDFs they point at, so a restore brings them back. It never includes the Gmail connection (`GmailAccount`): its refresh token stays on the server, so after restoring onto a fresh instance you reconnect Gmail. Restoring over an existing account replaces its packages and sent history with the backup contents (the automatic pre-restore snapshot contains them too). Backups made before D-012 simply have no packages. An import or rollback is refused while a package is being sent or has an unresolved send lock: resolve it in the cockpit first. A package exported while locked is restored still locked, and the recovery panel releases it (D-017).
 - **Upload path:** CV PDFs live under `<UPLOADS_DIR>/files/cockpit/<userId>/` (`UPLOADS_DIR` is `data` in dev, `/data` in production — not a separate env var).
 
 ## Troubleshooting by code
