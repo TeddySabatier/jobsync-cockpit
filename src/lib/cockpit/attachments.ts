@@ -86,10 +86,20 @@ export async function cleanupOrphanUploads(
     where: { OR: old.map((name) => ({ filePath: { endsWith: name } })) },
     select: { id: true, filePath: true },
   });
+  // endsWith only pre-filters: keep rows whose last segment (either separator,
+  // a row may come from a Windows install) is exactly a candidate name.
+  const oldNames = new Set(old);
+  const base = (p: string) => p.split(/[\\/]/).pop() ?? "";
+  const ours = path.resolve(dir);
   const rowsOf = new Map<string, string[]>();
+  const deletable: string[] = [];
   for (const r of rows) {
-    const name = path.basename(r.filePath);
+    const name = base(r.filePath);
+    if (!oldNames.has(name)) continue;
     rowsOf.set(name, [...(rowsOf.get(name) ?? []), r.id]);
+    // Only rows pointing into this user's directory are deleted here; any
+    // other row with the same name is left alone and keeps the file.
+    if (path.resolve(path.dirname(r.filePath)) === ours) deletable.push(r.id);
   }
 
   // One transaction; each delete re-checks "still unreferenced" in its own
@@ -100,7 +110,7 @@ export async function cleanupOrphanUploads(
     applicationPackages: { none: {} },
     Resume: { is: null },
   };
-  const ids = rows.map((r) => r.id);
+  const ids = deletable;
   const counts = ids.length
     ? await prisma.$transaction(
         ids.map((id) => prisma.file.deleteMany({ where: { id, ...unreferenced } })),
