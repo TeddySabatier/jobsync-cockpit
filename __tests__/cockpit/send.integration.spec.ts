@@ -236,6 +236,36 @@ describe("sendApplicationPackage: success (AC-25)", () => {
     expect(job.appliedDate).toEqual(res.sentAt);
   });
 
+  it("a Gmail send moves a 'new' job to applied but never rewinds a job at interview (D-016 a)", async () => {
+    const at = async (value: string) => {
+      const status = await prisma.jobStatus.upsert({
+        where: { value },
+        update: {},
+        create: { value, label: value },
+      });
+      const pkg = await s.mkApproved();
+      await prisma.job.update({
+        where: { id: pkg.jobId },
+        data: { statusId: status.id, applied: false, appliedDate: null },
+      });
+      const res = await send(pkg.id, (await row(pkg.id)).updatedAt);
+      return { status, job: await jobOf(pkg.jobId), res, pkg: await row(pkg.id) };
+    };
+
+    const fresh = await at("new");
+    expect(fresh.job).toMatchObject({ applied: true, statusId: s.applied.id });
+    expect(fresh.job.appliedDate).toEqual(fresh.res.sentAt);
+
+    const later = await at("interview");
+    expect(later.pkg.status).toBe("sent");
+    expect(await sentEmails(later.pkg.id)).toBe(1);
+    expect(later.job).toMatchObject({
+      applied: false,
+      appliedDate: null,
+      statusId: later.status.id,
+    });
+  });
+
   it("a failing transaction rolls everything back: lock stays, outcome unknown", async () => {
     const pkg = await s.mkApproved();
     // A SentEmail for this package already exists: the unique key fails step 6.
@@ -503,6 +533,25 @@ describe("recovery actions (AC-33)", () => {
     const job = await jobOf(pkg.jobId);
     expect(job).toMatchObject({ applied: true, statusId: s.applied.id });
     expect(job.appliedDate).toEqual(res.sentAt);
+  });
+
+  it("markSendUnknownAsSent never rewinds a job already at offer (D-016 a)", async () => {
+    const offer = await prisma.jobStatus.upsert({
+      where: { value: "offer" },
+      update: {},
+      create: { value: "offer", label: "Offer" },
+    });
+    const pkg = await s.mkApproved({ sendStartedAt: ago(5_000), sendOutcome: "unknown" });
+    const appliedOn = new Date("2026-01-15T00:00:00Z");
+    await prisma.job.update({
+      where: { id: pkg.jobId },
+      data: { statusId: offer.id, applied: true, appliedDate: appliedOn },
+    });
+    await markSendUnknownAsSent(s.userA.id, pkg.id);
+    expect((await row(pkg.id)).status).toBe("sent");
+    const job = await jobOf(pkg.jobId);
+    expect(job).toMatchObject({ statusId: offer.id, applied: true });
+    expect(job.appliedDate).toEqual(appliedOn);
   });
 
   it("a lock older than 60 s with no outcome is recoverable, a fresh one is not", async () => {

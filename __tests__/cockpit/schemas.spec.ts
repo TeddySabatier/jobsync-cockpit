@@ -84,6 +84,16 @@ describe("SubmitApplicationPackageSchema (AC-07)", () => {
     expect(ok(over).success).toBe(false);
   });
 
+  it.each([
+    ["NBSP subject", { emailSubject: " " }],
+    ["ideographic-space subject", { emailSubject: "　 " }],
+    ["BOM subject", { emailSubject: "﻿ " }],
+    ["NBSP body", { emailBody: "  " }],
+    ["line / paragraph separator body", { emailBody: "  \n" }],
+  ])("rejects a unicode-whitespace-only %s (review 01 #5)", (_name, over) => {
+    expect(ok(over).success).toBe(false);
+  });
+
   it("keeps surrounding whitespace of a non-blank body (no trimming)", () => {
     const r = ok({ emailBody: "  Hello\n\n" });
     expect(r.success && r.data.emailBody).toBe("  Hello\n\n");
