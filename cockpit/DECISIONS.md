@@ -227,3 +227,20 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `scripts/bot/cockpit_submit.py`, its tests, `src/lib/mcp/tools/cockpit.ts` (one select field), `.gitignore`, docs.
 - **Not changed:** schema, Send, the other MCP tools.
+
+## D-022 Send path review fixes (review 02, issue #54)
+
+The lost-lock cases below need a recovery action (allowed only on a lock older than 60 s or an unknown outcome) to run while the Gmail call is still in flight (20 s timeout): unreachable today, closed anyway because the cost is a double send.
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | Step 6 (success record): if the package is no longer approved **and locked by this send**, the transaction throws and rolls back: no `SentEmail` row, no job update. The owner gets `SEND_OUTCOME_UNKNOWN` | **Accept (review finding).** | It used to only log, then record a `SentEmail` row and mark the job applied on a package that could be released and sent again (its unique `packageId` then failed the second send's step 6 after a real second email). |
+| (b) | Every write after the lock (release, outcome flag, step 6) matches the **exact lock timestamp** this send wrote, not just "some lock". The re-read after the lock checks it too | **Accept (review finding).** | Otherwise a late failure of send 1 could release or flag the lock of a send 2 that is in flight. |
+| (c) | When the email went out or may have (ambiguous Gmail failure, step 6 failure) and this send's lock is gone while the package is **approved and unlocked**, the package is **locked again** with `sendOutcome="unknown"`. A package locked by another send, or already `sent` (Mark as sent ran), is left alone | **Accept.** | "Release lock" means "the email is not in Gmail"; a late answer proves otherwise, so the owner must check again before any new send. The recovery panel shows at once; both actions work as before. |
+| (d) | A letter or CV data that differs after the lock (it cannot, by the `updatedAt` lock condition) gives `CONFLICT` and releases the lock; the letter is **never rendered inside the lock** | **Accept (review finding: remove the impossible branch or make it an assertion).** | Rendering there used the lock window and could send a letter the owner never saw. |
+| (e) | `getAccessTokenFromStored` (gmail/client.ts) is **deleted** with its tests; the send service keeps the one decrypt (after the lock; a failure gives `GMAIL_RECONNECT_REQUIRED`) and calls `getAccessToken` through `GmailClient` | **Accept (review finding).** | Production never called it, so its tests covered code the app does not run. Moving decrypt behind the interface would make the test mock re-implement it, the same problem again. The send integration tests cover the real path. |
+| (f) | When step 6 fails, the Gmail message id is **logged only**, not stored | **Reject (nit), documented.** | The package has no column for it and the `SentEmail` row is what failed; a column needs a migration for a rare path. |
+| (g) | The letter PDF sets react-pdf's hyphenation callback **on every render**, not once at module load | **Reject (nit), documented, tested.** | The callback is process-wide and other PDF code in the app sets `(w) => [w]`; registering once would let that silently stop long words from breaking in the letter. |
+
+- **Scope:** `src/lib/cockpit/send.ts`, `src/lib/cockpit/gmail/client.ts` (also: `googleRequest` returns the JSON only; comments on send 4xx and on the `sendRaw` caller), `src/lib/cockpit/letterPdf.tsx` (comment), tests (`send.integration`, `gmailClient`, `letterPdf`, `mime`), `docs/cockpit.md`.
+- **Not changed:** the allow-list comparison (issue #71), schema, the Gmail status rules (only 400/401/403 on send are definitive), MIME folding (review nit 8, out of scope).

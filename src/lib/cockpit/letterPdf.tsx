@@ -188,6 +188,10 @@ export async function renderLetterPdf(input: {
   letterMd: string;
   cvJson?: string | null;
 }): Promise<Buffer> {
+  // Set on every render on purpose: react-pdf keeps ONE process-wide
+  // hyphenation callback, and other PDF code in this app registers its own.
+  // Setting it here guarantees the letter always breaks long words (a cheap
+  // assignment), whatever ran before (D-022 g).
   Font.registerHyphenationCallback(breakLongWords);
   const head = letterhead(input.cvJson);
   const doc = (

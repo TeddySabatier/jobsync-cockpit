@@ -616,6 +616,198 @@ describe("recovery actions (AC-33)", () => {
   });
 });
 
+describe("the lock is lost while Gmail is answering (D-022, issue #54)", () => {
+  const ago = (ms: number) => new Date(Date.now() - ms);
+  // The Gmail call outlived the stale-lock window (60 s) and the owner used a
+  // recovery action from the panel before it returned.
+  const staleThen = async (
+    id: string,
+    action: (userId: string, id: string) => Promise<unknown>,
+  ) => {
+    await prisma.applicationPackage.update({
+      where: { id },
+      data: { sendStartedAt: ago(61_000) },
+    });
+    await action(s.userA.id, id);
+  };
+
+  it("step 6 after Release lock: nothing recorded, locked again as unknown; Mark as sent then closes it", async () => {
+    const pkg = await s.mkApproved();
+    gmail.sendRaw.mockImplementationOnce(async () => {
+      await staleThen(pkg.id, releaseSendLock);
+      return { id: "gmail-msg-late", threadId: "gmail-thread-late" };
+    });
+    const err = await rejection(send(pkg.id, pkg.updatedAt));
+    // The email did go out: the owner is told the outcome is unknown.
+    expect(err).toMatchObject({ code: "SEND_OUTCOME_UNKNOWN" });
+    const after = await row(pkg.id);
+    expect(after).toMatchObject({ status: "approved", sendOutcome: "unknown", sentAt: null });
+    expect(after.sendStartedAt).not.toBeNull();
+    // The whole step-6 transaction rolled back.
+    expect(await sentEmails(pkg.id)).toBe(0);
+    expect((await jobOf(pkg.jobId)).applied).toBe(false);
+
+    // Locked again: a second send (even with the current updatedAt) is refused.
+    expect(await rejection(send(pkg.id, after.updatedAt))).toMatchObject({ code: "CONFLICT" });
+    expect(gmail.sendRaw).toHaveBeenCalledOnce();
+
+    // The panel shows at once (outcome unknown) and Mark as sent closes it.
+    const res = await markSendUnknownAsSent(s.userA.id, pkg.id);
+    expect(await row(pkg.id)).toMatchObject({
+      status: "sent",
+      sentVia: "manual",
+      sendOutcome: null,
+    });
+    const job = await jobOf(pkg.jobId);
+    expect(job).toMatchObject({ applied: true, statusId: s.applied.id });
+    expect(job.appliedDate).toEqual(res.sentAt);
+    expect(await sentEmails(pkg.id)).toBe(0);
+  });
+
+  it("step 6 after Mark as sent: no SentEmail row and no second job update; the package stays sent manually", async () => {
+    const pkg = await s.mkApproved();
+    gmail.sendRaw.mockImplementationOnce(async () => {
+      await staleThen(pkg.id, markSendUnknownAsSent);
+      return { id: "gmail-msg-late", threadId: "gmail-thread-late" };
+    });
+    const err = await rejection(send(pkg.id, pkg.updatedAt));
+    expect(err).toMatchObject({ code: "SEND_OUTCOME_UNKNOWN" });
+    const after = await row(pkg.id);
+    expect(after).toMatchObject({ status: "sent", sentVia: "manual", sendOutcome: null });
+    expect(await sentEmails(pkg.id)).toBe(0);
+    const job = await jobOf(pkg.jobId);
+    expect(job.applied).toBe(true);
+    expect(job.appliedDate).toEqual(after.sentAt); // the manual mark, not the late send
+  });
+
+  it("ambiguous Gmail failure after Release lock: the package is locked again as unknown", async () => {
+    const pkg = await s.mkApproved();
+    gmail.sendRaw.mockImplementationOnce(async () => {
+      await staleThen(pkg.id, releaseSendLock);
+      throw new CockpitError("GMAIL_TIMEOUT", { definitive: false });
+    });
+    expect(await rejection(send(pkg.id, pkg.updatedAt))).toMatchObject({
+      code: "SEND_OUTCOME_UNKNOWN",
+    });
+    const after = await row(pkg.id);
+    expect(after).toMatchObject({ status: "approved", sendOutcome: "unknown" });
+    expect(after.sendStartedAt).not.toBeNull();
+    expect(await rejection(send(pkg.id, after.updatedAt))).toMatchObject({ code: "CONFLICT" });
+    expect(gmail.sendRaw).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["definitive", new CockpitError("GMAIL_SEND", { status: 400, definitive: true }), "GMAIL_SEND"],
+    ["ambiguous", new CockpitError("GMAIL_SEND", { status: 503, definitive: false }), "SEND_OUTCOME_UNKNOWN"],
+  ])("%s failure never touches a lock another send took in between", async (_n, failure, code) => {
+    const pkg = await s.mkApproved();
+    const otherLock = ago(1_000);
+    gmail.sendRaw.mockImplementationOnce(async () => {
+      // Our lock was released by recovery and a second send locked the row.
+      await prisma.applicationPackage.update({
+        where: { id: pkg.id },
+        data: { sendStartedAt: otherLock, sendOutcome: null },
+      });
+      throw failure;
+    });
+    expect(await rejection(send(pkg.id, pkg.updatedAt))).toMatchObject({ code });
+    const after = await row(pkg.id);
+    expect(after.sendStartedAt).toEqual(otherLock);
+    expect(after).toMatchObject({ status: "approved", sendOutcome: null });
+  });
+});
+
+describe("sendApplicationPackage: review 02 findings (issue #54)", () => {
+  it("a letter changed behind the lock gives CONFLICT: never rendered again inside the lock, never sent", async () => {
+    const pkg = await s.mkApproved({ letterMd: "Dear team, ORIGINAL" });
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER tamper_letter AFTER UPDATE OF sendStartedAt ON ApplicationPackage
+       WHEN NEW.id = '${pkg.id}' AND NEW.sendStartedAt IS NOT NULL
+       BEGIN UPDATE ApplicationPackage SET letterMd = 'TAMPERED' WHERE id = NEW.id; END`,
+    );
+    const err = await rejection(send(pkg.id, pkg.updatedAt));
+    await prisma.$executeRawUnsafe("DROP TRIGGER tamper_letter");
+    expect(err).toMatchObject({ code: "CONFLICT" });
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+    expect(gmail.getAccessToken).not.toHaveBeenCalled();
+    expect(gmail.sendRaw).not.toHaveBeenCalled();
+    const after = await row(pkg.id);
+    expect(after.letterMd).toBe("TAMPERED"); // the tamper did happen
+    expect(after).toMatchObject({ status: "approved", sendStartedAt: null });
+  });
+
+  it("the stored token is decrypted only after the lock is taken", async () => {
+    const pkg = await s.mkApproved();
+    vi.stubEnv("ENCRYPTION_KEY", "a-different-key-placeholder");
+    expect(await rejection(send(pkg.id, pkg.updatedAt))).toMatchObject({
+      code: "GMAIL_RECONNECT_REQUIRED",
+    });
+    // Lock then release both wrote the row: the decrypt failure came after the lock.
+    const after = await row(pkg.id);
+    expect(after.updatedAt.getTime()).toBeGreaterThan(pkg.updatedAt.getTime());
+    expect(after.sendStartedAt).toBeNull();
+  });
+
+  it("if releasing the lock fails, the original error is returned and the lock stays (stale rule)", async () => {
+    const pkg = await s.mkApproved();
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER block_release BEFORE UPDATE OF sendStartedAt ON ApplicationPackage
+       WHEN NEW.id = '${pkg.id}' AND NEW.sendStartedAt IS NULL
+       BEGIN SELECT RAISE(ABORT, 'blocked'); END`,
+    );
+    gmail.sendRaw.mockRejectedValue(new CockpitError("GMAIL_SEND", { status: 400, definitive: true }));
+    const err = await rejection(send(pkg.id, pkg.updatedAt));
+    await prisma.$executeRawUnsafe("DROP TRIGGER block_release");
+    expect(err).toMatchObject({ code: "GMAIL_SEND", status: 400 });
+    const after = await row(pkg.id);
+    expect(after).toMatchObject({ status: "approved", sendOutcome: null });
+    expect(after.sendStartedAt).not.toBeNull();
+    expect(await sentEmails(pkg.id)).toBe(0);
+  });
+
+  it("if flagging the outcome fails, SEND_OUTCOME_UNKNOWN is still returned and the lock stays", async () => {
+    const pkg = await s.mkApproved();
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER block_unknown BEFORE UPDATE OF sendOutcome ON ApplicationPackage
+       WHEN NEW.id = '${pkg.id}' AND NEW.sendOutcome = 'unknown'
+       BEGIN SELECT RAISE(ABORT, 'blocked'); END`,
+    );
+    gmail.sendRaw.mockRejectedValue(new CockpitError("GMAIL_TIMEOUT", { definitive: false }));
+    const err = await rejection(send(pkg.id, pkg.updatedAt));
+    await prisma.$executeRawUnsafe("DROP TRIGGER block_unknown");
+    expect(err).toMatchObject({ code: "SEND_OUTCOME_UNKNOWN" });
+    const after = await row(pkg.id);
+    expect(after).toMatchObject({ status: "approved", sendOutcome: null });
+    expect(after.sendStartedAt).not.toBeNull();
+    // Locked: no second send.
+    expect(await rejection(send(pkg.id, after.updatedAt))).toMatchObject({ code: "CONFLICT" });
+    expect(gmail.sendRaw).toHaveBeenCalledOnce();
+  });
+
+  // Each lock condition on its own: the row is changed between the step-1
+  // read and the lock (the letter render runs in between), by raw SQL so
+  // updatedAt is not bumped unless the case says so.
+  it.each([
+    ["already locked (sendStartedAt)", `UPDATE ApplicationPackage SET sendStartedAt = updatedAt WHERE id = ?`],
+    ["no longer approved (status)", `UPDATE ApplicationPackage SET status = 'pending' WHERE id = ?`],
+    ["edited (updatedAt)", null],
+  ])("lock refused when the row is %s", async (_n, sql) => {
+    const pkg = await s.mkApproved({ letterMd: "Dear team" });
+    let changed: Awaited<ReturnType<typeof row>> | undefined;
+    renderSpy.mockImplementationOnce(async (input) => {
+      if (sql) await prisma.$executeRawUnsafe(sql, pkg.id);
+      else await prisma.applicationPackage.update({ where: { id: pkg.id }, data: { sourceFolder: "x" } });
+      changed = await row(pkg.id);
+      return realRender(input);
+    });
+    expect(await rejection(send(pkg.id, pkg.updatedAt))).toMatchObject({ code: "CONFLICT" });
+    expect(gmail.getAccessToken).not.toHaveBeenCalled();
+    expect(gmail.sendRaw).not.toHaveBeenCalled();
+    // The lock wrote nothing: the row is exactly as the other writer left it.
+    expect(await row(pkg.id)).toEqual(changed);
+  });
+});
+
 describe("a locked package is frozen (AC-34)", () => {
   it("review transitions, edits and manual apply affect 0 rows; submit gives CONFLICT", async () => {
     const jobId = await s.newJob();
