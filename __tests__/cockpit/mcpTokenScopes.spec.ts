@@ -24,8 +24,11 @@ describe("createMcpToken default scopes (AC-10)", () => {
     delete process.env.COCKPIT_ENABLED;
   });
 
+  // Same expectation for every flag value on purpose: scopes do not depend on
+  // COCKPIT_ENABLED. Expiry and malformed scopes are covered by
+  // __tests__/mcpAuth.spec.ts (resolveMcpToken).
   it.each([undefined, "false", "true"])(
-    "grants the three existing scopes plus the cockpit scopes (COCKPIT_ENABLED=%s)",
+    "grants all five scopes regardless of the flag (COCKPIT_ENABLED=%s)",
     async (flag) => {
       if (flag !== undefined) process.env.COCKPIT_ENABLED = flag;
       db.mcpAccessToken.count.mockResolvedValue(0);
