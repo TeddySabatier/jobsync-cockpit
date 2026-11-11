@@ -76,8 +76,12 @@ describe("fake Google token endpoint", () => {
     expect((await exchange({ code_verifier: "w".repeat(43) })).status).toBe(400);
   });
 
-  it("refuses a malformed verifier", async () => {
-    expect((await exchange({ code_verifier: "short" })).status).toBe(400);
+  it("refuses a malformed verifier even when it matches the challenge", async () => {
+    // Without this, the check would be hidden behind the challenge comparison.
+    const short = "short";
+    const res = await exchange({ code: code({ challenge: challengeOf(short) }), code_verifier: short });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error_description).toBe("code_verifier malformed");
   });
 
   it("refuses a wrong client_secret, client_id and redirect_uri", async () => {
@@ -112,6 +116,19 @@ describe("fake Google token endpoint", () => {
       .map((l) => JSON.parse(l));
     expect(lines.some((l) => l.rejected === "code_verifier missing")).toBe(true);
     expect(lines.every((l) => !JSON.stringify(l).includes("fake-client-secret"))).toBe(true);
+  });
+});
+
+describe("fake Google revoke endpoint", () => {
+  const revoke = (token: string) =>
+    fakeFetch("https://oauth2.googleapis.com/revoke", {
+      method: "POST",
+      body: new URLSearchParams({ token }).toString(),
+    });
+
+  it("accepts the issued refresh token and refuses any other token", async () => {
+    expect((await revoke("fake-refresh-token")).status).toBe(200);
+    expect((await revoke("other")).status).toBe(400);
   });
 });
 
