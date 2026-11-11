@@ -441,6 +441,7 @@ describe("change requests (AC-11, AC-12)", () => {
           changeRequestedAt: at,
           emailSubject: "s",
           emailBody: "b",
+          fitGrade: "B",
         },
       });
     };
@@ -462,6 +463,7 @@ describe("change requests (AC-11, AC-12)", () => {
       emailBody: "b",
       letterMd: null,
       cvJson: null,
+      fitGrade: "B",
       fitAnalysis: null,
       sourceFolder: null,
     });

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -49,6 +50,7 @@ class Stub:
         self.delay = 0
         self.raw_body = None
         self.fail = {}  # tool -> isError text
+        self.fail_once = {}  # tool -> isError text, for the NEXT call only
         self.plain = {}  # tool -> plain-text answer (rate limit, scope, "Error: ...")
         self.change_requests = []
         self.tools = [
@@ -119,11 +121,36 @@ class Stub:
             self.packages[job_id].append({"id": "seeded-pkg-%s" % status, "version": version, "status": status})
         return job_id
 
+    def invalid_input(self, name, arguments):
+        """The server's input checks that a bot bug could hit (limits, PDF magic, key pattern)."""
+        if name == "attach_file":
+            content = arguments.get("contentBase64", "")
+            if len(content) > cs.MAX_BASE64_CHARS:
+                return "contentBase64 is too long"
+            if not base64.b64decode(content)[:5] == b"%PDF-":
+                return "The file is not a PDF"
+        if name == "submit_application_package":
+            if not KEY_RE.match(arguments.get("idempotencyKey", "")):
+                return "idempotencyKey has an invalid format"
+            if len(arguments.get("emailSubject", "")) > cs.MAX_SUBJECT or not arguments.get("emailSubject"):
+                return "emailSubject must be 1 to 300 characters"
+            for field in ("emailBody", "letterMd"):
+                if len(arguments.get(field) or "") > cs.MAX_TEXT:
+                    return field + " is too long"
+            if arguments.get("fitGrade") not in ("A", "B"):
+                return "fitGrade must be A or B"
+        return None
+
     def tool(self, name, arguments):
         if name in self.plain:
             return {"content": [{"type": "text", "text": self.plain[name]}]}
         if name in self.fail:
             return {"isError": True, "content": [{"type": "text", "text": self.fail[name]}]}
+        if name in self.fail_once:
+            return {"isError": True, "content": [{"type": "text", "text": self.fail_once.pop(name)}]}
+        invalid = self.invalid_input(name, arguments)
+        if invalid:
+            return {"isError": True, "content": [{"type": "text", "text": "MCP error -32602: Input validation error: " + invalid}]}
         if name == "find_job":
             found = self.job_urls.get(arguments["jobUrl"])
             text = ('Found existing job "Role" at "Co" (id: %s, status: draft, description: full).' % found
@@ -173,12 +200,13 @@ class Stub:
                                  "fitGrade": arguments["fitGrade"]})
                 # An answered change request is closed: it no longer shows up in the list.
                 self.change_requests = [c for c in self.change_requests if c.get("jobId") != job]
-            text = json.dumps({"packageId": self.keys[key][1], "version": 1, "status": "pending",
+            version = next(p["version"] for p in self.packages[job] if p["id"] == self.keys[key][1])
+            text = json.dumps({"packageId": self.keys[key][1], "version": version, "status": "pending",
                                "supersededIds": superseded, "idempotent": again})
         elif name == "list_jobs":
             text = json.dumps({"total": 0, "jobs": []})
         elif name == "list_change_requests":
-            text = json.dumps(self.change_requests)
+            text = json.dumps(self.change_requests[: arguments.get("limit", 50)])
         elif name == "mark_change_request_done":
             text = json.dumps({"packageId": arguments["packageId"], "status": "pending"})
         else:
@@ -805,3 +833,135 @@ class CommandTests(FolderMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewFindingTests(FolderMixin, unittest.TestCase):
+    """Issue 61: hand-over script review."""
+
+    def setUp(self):
+        self.stub = Stub()
+        self.addCleanup(self.stub.close)
+
+    def submit_args(self, folder, *extra):
+        return ["--endpoint", self.stub.url, "submit", "--folder", str(folder),
+                "--company", "Acme", "--role", "Backend Engineer", "--subject", "Application",
+                "--fit", "A", "--url", LINK, *extra]
+
+    def open_request(self, **overrides):
+        job_id = self.stub.seed_job(link="https://example.com/job/rev", status="changes_requested")
+        item = {"packageId": "pkg-9", "jobId": job_id, "company": "Acme", "jobTitle": "Engineer",
+                "version": 1, "changeRequest": "shorten", "emailTo": "hr@example.com",
+                "emailSubject": "S", "emailBody": "B", "letterMd": "L" * 5000,
+                "cvJson": {"name": "x" * 5000}, "fitAnalysis": "{}", "sourceFolder": "folder-1"}
+        item.update(overrides)
+        self.stub.change_requests = [item]
+
+    # 1. the token and the marker must never be committable
+    def test_token_folder_and_marker_are_git_ignored(self):
+        root = Path(cs.__file__).resolve().parents[2]
+        if not (root / ".gitignore").is_file() or shutil.which("git") is None:
+            self.skipTest("not inside a git checkout")
+        for path in ("scripts/bot/secrets/cockpit_token.txt", "applications/x/.cockpit-submitted.json",
+                     "applications/x/.cockpit-submitted.json.tmp"):
+            done = subprocess.run(["git", "check-ignore", "-q", path], cwd=str(root))
+            self.assertEqual(done.returncode, 0, path)
+
+    # 2. changes prints a summary by default
+    def test_changes_is_a_summary_unless_full(self):
+        self.open_request()
+        code, result, raw = run(["--endpoint", self.stub.url, "changes"])
+        (item,) = result["changeRequests"]
+        self.assertEqual(item["packageId"], "pkg-9")
+        self.assertEqual(item["changeRequest"], "shorten")
+        for heavy in ("cvJson", "letterMd", "emailBody", "fitAnalysis"):
+            self.assertNotIn(heavy, item)
+        self.assertLess(len(raw), 1000)
+        full = run(["--endpoint", self.stub.url, "changes", "--full"])[1]["changeRequests"][0]
+        self.assertEqual(len(full["letterMd"]), 5000)
+        one = run(["--endpoint", self.stub.url, "changes", "--package", "pkg-9"])[1]["changeRequests"][0]
+        self.assertIn("cvJson", one)
+        missing = run(["--endpoint", self.stub.url, "changes", "--package", "nope"])
+        self.assertEqual((missing[0], missing[1]["error"]), (1, "NOT_FOUND"))
+
+    # 3. the fit grade comes from the package column
+    def test_revision_takes_the_fit_from_the_package_grade(self):
+        self.open_request(fitGrade="B", fitAnalysis="{}")  # no verdict key in the analysis
+        code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(self.make_folder()),
+                               "--revision", "pkg-9"])
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.stub.calls[-1][1]["fitGrade"], "B")
+
+    # 4. one bounded retry on CONFLICT
+    def test_a_conflict_is_replayed_once(self):
+        self.stub.fail_once["submit_application_package"] = "CONFLICT: busy"
+        code, result, _ = run(self.submit_args(self.make_folder()))
+        self.assertEqual(code, 0, result)
+        self.assertEqual(len(self.stub.names("submit_application_package")), 2)
+
+    def test_a_second_conflict_is_reported_not_retried_again(self):
+        self.stub.fail["submit_application_package"] = "CONFLICT: That key belongs to another job."
+        code, result, _ = run(self.submit_args(self.make_folder()))
+        self.assertEqual((code, result["error"]), (1, "CONFLICT"))
+        self.assertEqual(len(self.stub.names("submit_application_package")), 2)
+
+    def test_other_errors_are_not_retried(self):
+        self.stub.fail["submit_application_package"] = "INVALID_STATE: locked"
+        code, result, _ = run(self.submit_args(self.make_folder()))
+        self.assertEqual((code, result["error"]), (1, "INVALID_STATE"))
+        self.assertEqual(len(self.stub.names("submit_application_package")), 1)
+
+    # 8. --help keeps the one-JSON-line promise
+    def test_help_is_one_json_line(self):
+        for argv in (["--help"], ["submit", "--help"]):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as raised:
+                cs.main(argv)
+            self.assertEqual(raised.exception.code, 0)
+            lines = out.getvalue().strip().splitlines()
+            self.assertEqual(len(lines), 1)
+            self.assertTrue(json.loads(lines[0])["ok"])
+
+    # 9. a lone surrogate is a count, not an INTERNAL crash
+    def test_lone_surrogate_in_cv_json(self):
+        self.assertEqual(cs.u16len("a" + chr(0xD800)), 2)
+        folder = self.make_folder(**{"cv.json": '{"name": "a\\ud800"}'})
+        code, result, _ = run(self.submit_args(folder))
+        self.assertEqual(code, 0, result)
+
+    # 10. not a PDF: refused before any upload
+    def test_a_file_that_is_not_a_pdf_is_refused_locally(self):
+        folder = self.make_folder()
+        (folder / "Jane_Doe_CV_Acme.pdf").write_bytes(b"<html>login page</html>")
+        code, result, _ = run(self.submit_args(folder))
+        self.assertEqual((code, result["error"]), (1, "VALIDATION"))
+        self.assertIn("PDF", result["message"])
+        self.assertEqual(self.stub.calls, [])
+
+    # 13. the marker is written atomically
+    def test_a_failed_marker_write_leaves_the_old_marker_intact(self):
+        folder = self.make_folder()
+        cs.write_marker(folder, "key-a", "d1", {"packageId": "p1"})
+        with mock.patch("cockpit_submit.os.replace", side_effect=OSError("disk")):
+            cs.write_marker(folder, "key-b", "d2", {"packageId": "p2"})
+        self.assertEqual(cs.read_marker(folder, "key-a")["digest"], "d1")
+        self.assertIsNone(cs.read_marker(folder, "key-b"))
+        self.assertEqual(sorted(p.name for p in folder.glob(".cockpit*")), [".cockpit-submitted.json"])
+
+    # 14. a full list says so
+    def test_revision_not_found_in_a_full_list_says_the_list_was_full(self):
+        self.stub.change_requests = [{"packageId": "other-%d" % i, "jobId": JOB % 1} for i in range(cs.MAX_CHANGE_REQUESTS)]
+        code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(self.make_folder()),
+                               "--revision", "pkg-404"])
+        self.assertEqual((code, result["error"]), (1, "NOT_FOUND"))
+        self.assertIn("full", result["message"])
+        self.assertNotIn("already answered", result["message"])
+        self.assertEqual(self.stub.calls[0][1]["limit"], cs.MAX_CHANGE_REQUESTS)
+
+    # stub fidelity: the stub now enforces what the server enforces
+    def test_the_stub_rejects_what_the_server_rejects(self):
+        junk = base64.b64encode(b"not a pdf").decode()
+        reply = self.stub.tool("attach_file", {"fileName": "a.pdf", "mimeType": "application/pdf", "contentBase64": junk})
+        self.assertTrue(reply["isError"])
+        reply = self.stub.tool("submit_application_package", {
+            "jobId": JOB % 1, "idempotencyKey": "bad key!", "emailSubject": "s", "emailBody": "b", "fitGrade": "A"})
+        self.assertTrue(reply["isError"])

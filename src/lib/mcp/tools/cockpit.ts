@@ -258,6 +258,7 @@ export function registerCockpitTools(
               emailBody: true,
               letterMd: true,
               cvJson: true,
+              fitGrade: true,
               fitAnalysis: true,
               sourceFolder: true,
               job: {

@@ -38,12 +38,13 @@ There is **no** MCP tool to approve, send, edit, or reject packages.
 
 ## MCP tools
 
-All six tools are registered only when `COCKPIT_ENABLED=true`. Each handler runs: **scope check → rate limit → validation → database**.
+The six cockpit tools below are registered only when `COCKPIT_ENABLED=true`. Each handler runs: **scope check → rate limit → validation → database**.
 
 | Tool | Scope | Notes |
 |------|-------|--------|
 | `attach_file` | `package:write` | PDF only; call before `submit_application_package` |
 | `submit_application_package` | `package:write` | Creates version *n+1*; may supersede older active versions |
+| `add_job`, `find_job` | `jobs:write` | JobSync's own job tools, not cockpit tools; the bot script uses them to create or find the job before submitting |
 | `list_jobs` | `jobs:read` | Optional filters; includes active package summary |
 | `get_job` | `jobs:read` | Job plus all package versions (newest first) |
 | `list_change_requests` | `jobs:read` | Packages in `changes_requested` |
@@ -87,7 +88,7 @@ The letterhead (name, title, contact line) comes from the package's CV data. The
 
 ## Claude prompt button (job page)
 
-With the cockpit on, a job page has a **Claude prompt** button next to Match with AI. One click copies a ready-made prompt for Claude: the job (company, role, location, link, JobSync id), the posting text, and the instructions to run the bot's cockpit pipeline for this one job (fit check, tailored CV, letter, hand-over with `cockpit_submit.py`). Paste it into Claude (a session that can read the bot folder); the package then appears in Review. If a package already exists for the job, the prompt says so and asks Claude not to resubmit. If the browser refuses to copy (plain http on a phone), the prompt opens in a box to copy by hand.
+With the cockpit on, a job page has a **Claude prompt** button next to Match with AI. One click copies a ready-made prompt for Claude: the job (company, role, location, link, JobSync id), the posting text, and the instructions to run the bot's cockpit pipeline for this one job (see [cockpit-bot.md](cockpit-bot.md)). Paste it into Claude (a session that can read the bot folder); the package then appears in Review. If a package already exists for the job, the prompt says so and asks Claude not to resubmit. If the browser refuses to copy (plain http on a phone), the prompt opens in a box to copy by hand.
 
 The built-in **Cover Letter** and **Match with AI** buttons are JobSync's own AI feature and use the model set in the agent panel; they do not create the cockpit package.
 

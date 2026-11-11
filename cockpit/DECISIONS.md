@@ -186,3 +186,16 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/cockpit/{letterPdf.tsx,letterName.ts,send.ts,gmail/mime.ts}`, `src/app/api/cockpit/letter/[packageId]/route.ts`, `next.config.mjs` (frame header), `Panels.tsx`, `SendDialog.tsx`, `cockpit.actions.ts` (`letterAttachment`), tests (`letterPdf`, `letterRoute`, `send.integration`, e2e `09-letter-pdf`), docs.
 - **Not changed:** schema, backup, MCP tools, the bot script. SPEC stays frozen; this entry is the amendment of record.
+
+## D-016 Bot hand-over: replaying a submit is safe; the script retries a CONFLICT once
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | Replaying the whole `attach_file` + `submit_application_package` with the same idempotency key and the same content is **safe** (the server answers with the existing package) | **Accept.** Documented in `docs/cockpit-bot.md`; the server tool description already said so. | The old doc line "do not retry blindly" contradicted it. |
+| (b) | The script retries a `CONFLICT` **once** (a second one is reported, no loop). `INVALID_STATE` and every other error are never retried | **Accept.** | A concurrent write clears on replay; a real clash (a key used for another job) must reach the operator. |
+| (c) | `changes` prints a **summary** by default; `--full` or `--package ID` prints the content | **Accept.** | Full items carry the CV, letter and email (up to megabytes) into the bot's context. |
+| (d) | `list_change_requests` also returns `fitGrade`, which `--revision` uses as the fit | **Accept.** | The analysis JSON of a package from another client may have no verdict. |
+| (e) | Two runs on the same link at once (daily task and the Claude prompt button) are **not** locked; the loser gets `CONFLICT` or `ALREADY_SUBMITTED` | **Accept, documented.** | Rare, and both outcomes are safe. |
+
+- **Scope:** `scripts/bot/cockpit_submit.py`, its tests, `src/lib/mcp/tools/cockpit.ts` (one select field), `.gitignore`, docs.
+- **Not changed:** schema, Send, the other MCP tools.
