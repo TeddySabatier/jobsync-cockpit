@@ -79,6 +79,12 @@ Messages come from a fixed map (never raw Google/Prisma text). Common MCP codes:
 
 `attach_file` has **no file-count or size quota** (D-013). Each PDF is still limited to the per-file size cap. To avoid bloat, every `attach_file` call first deletes the user's uploads that **no package uses** and that are older than **7 days** (set `COCKPIT_ORPHAN_DAYS`, minimum 1). Files of packages (pending, superseded, sent) are never deleted.
 
+## Claude prompt button (job page)
+
+With the cockpit on, a job page has a **Claude prompt** button next to Match with AI. One click copies a ready-made prompt for Claude: the job (company, role, location, link, JobSync id), the posting text, and the instructions to run the bot's cockpit pipeline for this one job (fit check, tailored CV, letter, hand-over with `cockpit_submit.py`). Paste it into Claude (a session that can read the bot folder); the package then appears in Review. If a package already exists for the job, the prompt says so and asks Claude not to resubmit. If the browser refuses to copy (plain http on a phone), the prompt opens in a box to copy by hand.
+
+The built-in **Cover Letter** and **Match with AI** buttons are JobSync's own AI feature and use the model set in the agent panel; they do not create the cockpit package.
+
 ## Review UI
 
 - **Queue:** `/dashboard/review` — tabs: To do (`pending` + `approved`), Changes, Sent, Rejected. Readiness chips: Gmail, PDF stale, No CV, Link apply.

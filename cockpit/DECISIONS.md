@@ -156,3 +156,16 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/cockpit/attachments.ts`, `__tests__/cockpit/mcpTools.spec.ts`, `docs/cockpit.md`, `docs/cockpit-bot.md`, `cockpit/qa/TRACEABILITY.md`.
 - **Not changed:** the MCP tool list, backup/restore (it never counted quota), Send. SPEC stays frozen; this entry is the amendment of record.
+
+## D-014 "Claude prompt" button on the job page (V1 convenience, no new server surface)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The job page gets a **Claude prompt** button (only with `COCKPIT_ENABLED`) that copies a text prompt for the owner to paste into Claude | **Accept (owner request).** Client-side only: no new endpoint, tool, scope or table. | The CV, letter and email are made by the Claude bot, not by JobSync's own AI buttons; this makes starting one application a single click. |
+| (b) | The prompt embeds the posting text, marked as data, and says never to send email and never to invent experience | **Accept.** | Same rules as the bot pipeline; the text can come from a third-party posting. |
+| (c) | An existing active package is named in the prompt and Claude is told not to resubmit | **Accept.** | Avoids duplicate packages (`ALREADY_SUBMITTED`). |
+| (d) | Copy uses `navigator.clipboard`, then `execCommand`, then a text box | **Accept.** | Plain http (a phone over the tailnet) has no `navigator.clipboard`. |
+| (e) | `cockpit_submit.py` defaults to `http://127.0.0.1:3737/api/mcp` instead of `localhost` | **Accept.** | On Windows `localhost` tries IPv6 first: about 20 s per request, which made a 39-job import take many minutes. |
+
+- **Scope:** `src/lib/cockpit/claudePrompt.ts`, `src/components/cockpit/ClaudePromptButton.tsx`, `JobDetails.tsx`, the job page, `__tests__/cockpit/claudePrompt.spec.tsx`, `scripts/bot/cockpit_submit.py` (default URL), docs.
+- **Not changed:** the MCP tools, Send, backup. SPEC stays frozen; this entry is the amendment of record.

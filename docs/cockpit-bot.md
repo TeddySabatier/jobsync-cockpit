@@ -9,7 +9,7 @@ The hand-over is a small script, `scripts/bot/cockpit_submit.py` (Python standar
 1. Copy `scripts/bot/cockpit_submit.py` into the bot folder, next to the CV renderer.
 2. In the cockpit, open **Settings → MCP Access → Generate**. Name it after the bot. Pick the **longest expiry** and note the date: when a token expires the bot silently stops being able to submit. Copy the token (it is shown once).
 3. Save it in `secrets/cockpit_token.txt` next to the script (or set `COCKPIT_TOKEN`). Never commit it.
-4. If the cockpit is not at `http://localhost:3737`, set `COCKPIT_URL` to `<address>/api/mcp`. Plain `http` is only accepted for localhost; any other address must be `https`.
+4. The script talks to `http://127.0.0.1:3737/api/mcp` by default (not `localhost`, which is slow on Windows). If the cockpit is somewhere else, set `COCKPIT_URL` to `<address>/api/mcp`. Plain `http` is only accepted for localhost; any other address must be `https`.
 5. Run `python cockpit_submit.py check`. Expected: `{"ok": true, "tools": [...]}`. `check` proves the token can read; the write permissions only show on the first real submit.
 
 A token created before the cockpit was installed lacks the new permissions: create a new one.
