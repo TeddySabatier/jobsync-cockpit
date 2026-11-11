@@ -59,6 +59,9 @@ test.describe("axe", () => {
   test("detail", async ({ page, bot }) => {
     const pkg = await bot.seed();
     await openDetail(page, pkg.packageId);
+    // The read-only viewers mount after hydration: scan only once they exist,
+    // or the aria-input-field-name check passes without the accessible name.
+    await expect(page.locator(".ProseMirror").first()).toBeVisible();
     const bad = await scan(page, "detail");
     expect(bad.length, describeBad(bad)).toBe(0);
   });
@@ -68,6 +71,7 @@ test.describe("axe", () => {
     await openDetail(page, pkg.packageId);
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await expect(page.getByRole("form", { name: "Edit package" })).toBeVisible();
+    await expect(page.getByTestId("letter-preview").locator(".ProseMirror")).toBeVisible();
     const bad = await scan(page, "edit");
     expect(bad.length, describeBad(bad)).toBe(0);
   });

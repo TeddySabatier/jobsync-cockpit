@@ -564,6 +564,73 @@ describe("j / k navigation (AC-19)", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  it.each([["ctrlKey"], ["metaKey"], ["altKey"]])(
+    "ignores j / k with %s held while focus is on the page",
+    async (mod) => {
+      getPackageDetail.mockResolvedValue(ok(detailFixture()));
+      getAdjacentPackageIds.mockResolvedValue(ok({ previousId: "a", nextId: "b" }));
+      await renderPage();
+      (document.activeElement as HTMLElement | null)?.blur();
+      fireEvent.keyDown(document.body, { key: "j", [mod]: true });
+      fireEvent.keyDown(document.body, { key: "k", [mod]: true });
+      expect(push).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["input", "textarea", "select"])(
+    "ignores keys while a %s has focus, even when the event targets the page",
+    async (tag) => {
+      getPackageDetail.mockResolvedValue(ok(detailFixture()));
+      getAdjacentPackageIds.mockResolvedValue(ok({ previousId: "a", nextId: "b" }));
+      await renderPage();
+      const field = document.createElement(tag);
+      document.body.appendChild(field);
+      field.focus();
+      expect(document.activeElement).toBe(field);
+      press("j");
+      press("k");
+      expect(push).not.toHaveBeenCalled();
+      field.remove();
+    },
+  );
+
+  it("ignores keys while a contenteditable element has focus (empty or plaintext-only value)", async () => {
+    getPackageDetail.mockResolvedValue(ok(detailFixture()));
+    getAdjacentPackageIds.mockResolvedValue(ok({ previousId: "a", nextId: "b" }));
+    await renderPage();
+    for (const value of ["", "plaintext-only"]) {
+      const box = document.createElement("div");
+      box.setAttribute("contenteditable", value);
+      box.tabIndex = 0;
+      // jsdom does not implement isContentEditable: mirror what a browser reports.
+      Object.defineProperty(box, "isContentEditable", { value: true });
+      document.body.appendChild(box);
+      press("j", box);
+      box.focus();
+      press("k");
+      expect(push).not.toHaveBeenCalled();
+      box.remove();
+    }
+  });
+
+  it.each(["dialog", "alertdialog"])(
+    "is ignored while a bare role=%s is present",
+    async (role) => {
+      getPackageDetail.mockResolvedValue(ok(detailFixture()));
+      getAdjacentPackageIds.mockResolvedValue(ok({ previousId: "a", nextId: "b" }));
+      await renderPage();
+      const el = document.createElement("div");
+      el.setAttribute("role", role);
+      document.body.appendChild(el);
+      press("j");
+      press("k");
+      expect(push).not.toHaveBeenCalled();
+      el.remove();
+      press("j");
+      expect(push).toHaveBeenCalledWith("/dashboard/review/b");
+    },
+  );
+
   it("is ignored while a menu is open", async () => {
     getPackageDetail.mockResolvedValue(ok(detailFixture()));
     getAdjacentPackageIds.mockResolvedValue(ok({ previousId: "a", nextId: "b" }));
