@@ -2,6 +2,8 @@
 
 Status: **v2 — FROZEN (2026-11-04). Changes require a DECISIONS.md entry.** The Security, Data, UX and Next.js review rulings are logged in `DECISIONS.md` (D-004..D-007).
 
+**Amended after the freeze.** The text below is the V0 wording; later decisions amend it. Each affected section or AC carries an *Amended by* line. Index: D-008 (§2.2 step 2), D-010 (§6.2), D-011 (§4, §6.4, AC-16, AC-25, AC-33), D-012 (§6.2 backup, §11, AC-39), D-013 (§3 quota, AC-38), D-014 (job-page Claude prompt button, no section of its own), D-015 (§3 file serving, §5.3, §6.3, §6.4). When the text and a DECISIONS entry disagree, the DECISIONS entry wins.
+
 A review cockpit inside JobSync. An external bot submits **application packages** (tailored CV PDF + CV JSON, cover letter, draft email, fit analysis) through MCP. The single user reviews, edits, approves and sends each one from the UI. V0 scope only. V1/V2 items from the design are out of scope.
 
 All examples use synthetic data (`Jane Doe`, `example.com`, `you@example.com`).
@@ -124,6 +126,8 @@ Statuses: `pending → approved → sent`, plus `rejected`, `changes_requested` 
 - **Change-request history:** on `changes_requested → pending`, `changeRequest`, `changeRequestedAt` and the bot's `changeRequestResponse` are kept as history (shown under "Previous review info", §5.3). A later `requestPackageChanges` overwrites `changeRequest` / `changeRequestedAt` and resets `changeRequestHandledAt` and `changeRequestResponse` to null.
 
 ### 2.2 Submission rules (domain service `src/lib/cockpit/packages.ts`)
+> *Amended by D-008:* a key that matches a package of the same user but a different job is `CONFLICT`, not a replay (step 2 and the `P2002` race path).
+
 `submitPackage(userId, input)` runs in one `prisma.$transaction`:
 1. The job must exist with `job.userId === userId`; otherwise `NOT_FOUND`.
 2. If `idempotencyKey` is given and a package with `(userId, idempotencyKey)` exists, return that package unchanged with `idempotent: true`. No new version.
@@ -183,7 +187,7 @@ The scope strings are defined once, as `COCKPIT_SCOPES = ["jobs:read", "package:
 - Content must start with `PDF_MAGIC` (imported from `@/lib/ai/import/extract-text`, reused).
 - The file name is sanitized to `[A-Za-z0-9._-]`, ends in `.pdf`, and is shown to the user.
 - Stored at `<UPLOADS_DIR>/files/cockpit/<userId>/<uuid>.pdf`, with a `File` row (`fileType: "application/pdf"`) created by `prisma.file.create` directly in `src/lib/cockpit/attachments.ts` (not through the resume helpers). The stored path never comes from input. The directory comes from `cockpitUserDir(userId)` in `files.ts`, a **function evaluated at call time**, never an import-time constant (`UPLOADS_DIR` is the relative `"data"` in dev and `/data` in production; relative values resolve against `process.cwd()`). Tests point `APP_CONSTANTS.UPLOADS_DIR` at a temp dir. The directory is created with `mkdir -p` at write time.
-- **Per-user quota:** at most 200 files and 500 MB in `<UPLOADS_DIR>/files/cockpit/<userId>/` (measured with one `readdir` + `stat` per call; at most 200 entries). Beyond that: `TOO_LARGE`.
+- ~~**Per-user quota:**~~ **Superseded by D-013: the 200 files / 500 MB quota was removed;** unreferenced uploads older than `COCKPIT_ORPHAN_DAYS` are deleted instead. The original V0 text was: at most 200 files and 500 MB in `<UPLOADS_DIR>/files/cockpit/<userId>/` (one `readdir` + `stat` per call; at most 200 entries); beyond that `TOO_LARGE`.
 - **Stricter rate bucket:** `attach_file` also consumes the `cockpit-attach` bucket (30 per hour), after the `cockpit` bucket (see **Rate limit** above).
 - No sha256 dedupe in V0 (YAGNI).
 - Unreferenced files are not cleaned up in V0 (logged as a follow-up).
@@ -195,6 +199,8 @@ There is **no MCP tool for approve, send, edit or reject.** Two checks:
 2. A static **import-graph test** fails if anything under `src/lib/mcp/**` or `src/app/api/mcp/**` (transitively) imports `@/lib/cockpit/send` or `@/lib/cockpit/gmail/client`. `send.ts` and `gmail/client.ts` both start with `import "server-only"` (Vitest already aliases `server-only` to a mock, so tests need no stub). The test is `// @vitest-environment node` and resolves `@/` aliases, relative paths and `import()` expressions.
 
 ## 4. File serving
+
+> *Amended by D-011(a):* with no session, `/api/cockpit/files/**` answers with the middleware's 307 redirect to `/signin`, not a 401 (access is still denied). *Amended by D-015:* `GET /api/cockpit/letter/[packageId]` serves the cover-letter PDF with the same guards and headers.
 **`resolveCockpitFile(userId, file)`** (`src/lib/cockpit/files.ts`) is the single helper for path confinement. It runs `path.resolve` / `fs.realpath` on both the file path and `cockpitUserDir(userId)` (= `<UPLOADS_DIR>/files/cockpit/<userId>`, resolved at call time), and requires `resolved.startsWith(base + path.sep)` (so `cockpit/u1` never matches `cockpit/u10`). Stored `File.filePath` values may be relative (`UPLOADS_DIR` is the relative string `"data"` in dev); relative paths resolve against `process.cwd()` (`/app` in the standalone build, where `UPLOADS_DIR` is `/data`). It returns the absolute path or `null`. It is used by submit (§2.2 step 6), send (§6.4) and the file route.
 
 `GET /api/cockpit/files/[packageId]`:
@@ -236,6 +242,7 @@ Rendering rules for bot-produced content (it derives from untrusted job postings
 - A small hint explains the keys: "j / k: next / previous in To do".
 
 ### 5.3 Review detail: `/dashboard/review/[packageId]`
+> *Amended by D-015:* the Cover letter panel shows the exact PDF that is sent (iframe on `/api/cockpit/letter/[packageId]`) instead of rendered text only.
 - **Header:** company, role, job link (opens the posting in a new tab, `rel="noopener noreferrer"`), fit grade, status, and a version selector listing every version (`v3 · pending`, `v2 · superseded` ...).
 - **Non-active versions:** a strong banner ("Viewing v2 — superseded. Open v3 to act.") with a link to the active version, and the **action bar is hidden entirely**. Deep links to a package show that package; the banner makes the state obvious.
 - **Panels** (two columns at ≥ `@3xl/main`, stacked below):
@@ -297,6 +304,7 @@ Actions:
 **`"use server"` rules:** every exported async function in a `"use server"` file is a public POST endpoint. (a) `cockpit*.actions.ts` start with `"use server"` and export only `async function`s (plus erased `export type`s): no zod schemas, constants, classes or `CockpitError` (a non-function export fails the Next build). They export only the intended actions listed in §6.1, §6.4 and §6.2 (`disconnectGmail`). (b) Helpers (`sendApplicationPackage`, `buildMimeMessage`, `resolveCockpitFile`, `toActionResult`, schemas, constants) live in non-`"use server"` modules; `requireUser` is imported from `@/actions/shared`. (c) `server-only` modules (`gmail/client.ts`, `send.ts`) are imported only from these action files and other server code, never from client components. A static test checks each file's export list (AC-44).
 
 ### 6.2 Gmail OAuth (`src/lib/cockpit/gmail/oauth.ts`, `src/app/api/cockpit/gmail/{connect,callback}/route.ts`)
+> *Amended by D-010:* a reconnect with the same account does not revoke the old token (they share one grant). *Amended by D-012:* cockpit packages, sent-email rows and their CV files are now part of backups; `GmailAccount` is still never exported (see the Backup bullet).
 - **Config (env):**
   - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`;
   - `GOOGLE_REDIRECT_URI`, default `http://localhost:3737/api/cockpit/gmail/callback`;
@@ -326,6 +334,7 @@ Actions:
 - **Backup:** V0 does not add the cockpit tables to the backup. The requirement is that the backup export **never includes `GmailAccount`** (AC-39). C-09 reads the backup implementation (and `backupRoundTrip.spec.ts`) first: if it dumps tables generically, it excludes `GmailAccount` (and `SentEmail` / `ApplicationPackage` only if that is needed to keep `backupRoundTrip.spec.ts` green) and logs what it found in `DECISIONS.md`. Including packages in backups is a V1 hook (§11).
 
 ### 6.3 MIME (`src/lib/cockpit/gmail/mime.ts`)
+> *Amended by D-015:* `buildMimeMessage` takes extra attachments; with letter text the email carries a second PDF (the cover letter) after the CV.
 `buildMimeMessage({ from, to, subject, bodyText, attachment: { fileName, content: Buffer } })` returns RFC 5322 text:
 - **Headers:**
   - `From`, `To`, `Subject` (RFC 2047 `=?UTF-8?B?...?=` when not ASCII, e.g. the en dash in "Application – Role");
@@ -337,6 +346,7 @@ Actions:
 - Output is base64url-encoded for the Gmail API `raw` field.
 
 ### 6.4 Send (`src/lib/cockpit/send.ts`, actions in `src/actions/cockpitSend.actions.ts`)
+> *Amended by D-011(b):* a locked, not-approved, stale or non-active package returns `CONFLICT` (the lock case is not `INVALID_STATE`). *Amended by D-015:* the letter PDF is rendered before the send lock is taken and attached after the CV.
 `sendPackage(packageId, expectedUpdatedAt)` is a server action. It is the **only** caller of `sendApplicationPackage(userId, packageId, gmailClient)`. `expectedUpdatedAt` is the package `updatedAt` the user saw in the Send dialog.
 1. `requireUser()` + flag (inside `try`, §6.1). Load the package for the user. Require:
    - `updatedAt` equal to `expectedUpdatedAt` (else `CONFLICT`: the package changed since the dialog opened);
@@ -411,7 +421,7 @@ Verification types:
 | AC-13 | With the flag on, the registered tool list has no tool matching `/send\|approve\|reject/`; with the flag off, `registerCockpitTools` is not called and the tool list equals upstream's | U + M |
 | AC-14 | The review actions follow §2.1 exactly (allowed transitions succeed; all others give `INVALID_STATE`), require a session, are scoped to the user, and every transition/edit `where` includes `sendStartedAt: null` | U |
 | AC-15 | `updatePackageContent` validates fields, rejects a cvJson whose shape changed, sets `cvPdfStale` only when a CV string changed, and refuses terminal statuses and locked packages | U |
-| AC-16 | The file route `/api/cockpit/files/[packageId]` serves the user's package PDF inline with `nosniff`, a single `Content-Security-Policy: sandbox; frame-ancestors 'self'` and a generated (not stored) `Content-Disposition` name. Flag off → 404 (checked before auth); no session → 401; authenticated but another user's package, a missing package, or a file outside the cockpit dir → 404 | U |
+| AC-16 | *Amended by D-011(a): no session gives the 307 redirect to `/signin`, not 401.* The file route `/api/cockpit/files/[packageId]` serves the user's package PDF inline with `nosniff`, a single `Content-Security-Policy: sandbox; frame-ancestors 'self'` and a generated (not stored) `Content-Disposition` name. Flag off → 404 (checked before auth); no session → 401; authenticated but another user's package, a missing package, or a file outside the cockpit dir → 404 | U |
 | AC-17 | The queue shows one row per job (active package) with correct tab filtering and newest-first order | U (query) + H (UI) |
 | AC-18 | The detail page shows the five panels (posting, CV, fit analysis, email preview with attachment size, letter); buttons appear only in allowed statuses | U (component) + H |
 | AC-19 | `j` / `k` navigate the todo queue and are ignored in form fields; a hint is shown | U (hook) + H |
@@ -420,7 +430,7 @@ Verification types:
 | AC-22 | OAuth connect sets the cookie `{state, verifier, userId, nonce}` (`Path=/api/cockpit/gmail`, `Max-Age=600`, httpOnly, `SameSite=Lax`, `Secure` iff the redirect URI is https) and redirects to Google with `gmail.send openid email`, offline, consent, S256 and the nonce | U |
 | AC-23 | The callback rejects a bad or missing state (checked before `?error=`), a `userId` mismatch, a missing `refresh_token`, an `id_token` with wrong `aud` / `iss` / `exp` / `nonce`, an unverified email (`true` and `"true"` both accepted when verified), a missing `gmail.send` scope, and a non-allowed address; it checks `ENCRYPTION_KEY` before the exchange; it deletes the cookie on every exit; it redirects relative to the origin of `GOOGLE_REDIRECT_URI`; on success it revokes the previous token (mock) and stores the refresh token **encrypted** (never in plaintext) | U |
 | AC-24 | MIME output: correct headers, RFC 2047 subject, base64 body and attachment, CRLF; header injection throws, including CR/LF in `To` and in the attachment name | U |
-| AC-25 | Send succeeds only from `approved` with all preconditions (including `expectedUpdatedAt` match and an allowed address that is set and equal). On success: package `sent`, `SentEmail` row, job `applied` + `appliedDate`; the step-6 package update is conditional | U (mock Gmail) |
+| AC-25 | *Amended by D-011(b): lock and precondition failures are `CONFLICT`.* Send succeeds only from `approved` with all preconditions (including `expectedUpdatedAt` match and an allowed address that is set and equal). On success: package `sent`, `SentEmail` row, job `applied` + `appliedDate`; the step-6 package update is conditional | U (mock Gmail) |
 | AC-26 | The send lock prevents a second concurrent send. A **definitive** failure (token error, Gmail 400/401/403) clears the lock and leaves the package `approved`. `invalid_grant` and a decrypt failure give `GMAIL_RECONNECT_REQUIRED`. The package is re-read after the lock | U (mock Gmail) |
 | AC-27 | `createHttpGmailClient()` throws under Vitest; no test performs network I/O to Google | U + M |
 | AC-28 | Only the `sendPackage` server action calls `sendApplicationPackage` (grep check, complemented by AC-35) | M |
@@ -428,13 +438,13 @@ Verification types:
 | AC-30 | Real Gmail connect, the first real send, and the PDF rendering in the `<iframe>` in a real browser | H |
 | AC-31 | Lint, typecheck and Vitest no worse than the baseline (1 known failing test in `DataSettings.spec.tsx`). Existing tests stay green after the schema, token-scope and `checkMcpRateLimit` changes, in particular `backupRoundTrip.spec.ts`, the Sidebar tests and the MCP tests that mock `checkMcpRateLimit`; the token test is updated for the five-scope default | M |
 | AC-32 | The `jobsync-cockpit:v0` Docker image builds | M |
-| AC-33 | **Send-outcome-unknown flow.** On timeout (20 s), network error, 5xx or 429, `sendPackage` keeps `sendStartedAt`, sets `sendOutcome="unknown"` and returns `SEND_OUTCOME_UNKNOWN`. A lock older than 60 s with no outcome counts as unresolved. `markSendUnknownAsSent` → `sent`, `sentVia="manual"`, job `applied`, no `SentEmail`; `releaseSendLock` → `approved`, lock and outcome cleared. Both act only on a locked `approved` package. A failed step-6 transaction leaves the lock set. The UI shows the "Check your Gmail Sent folder" panel with both actions | U (mock Gmail) + U (component) |
+| AC-33 | *Amended by D-011(b).* **Send-outcome-unknown flow.** On timeout (20 s), network error, 5xx or 429, `sendPackage` keeps `sendStartedAt`, sets `sendOutcome="unknown"` and returns `SEND_OUTCOME_UNKNOWN`. A lock older than 60 s with no outcome counts as unresolved. `markSendUnknownAsSent` → `sent`, `sentVia="manual"`, job `applied`, no `SentEmail`; `releaseSendLock` → `approved`, lock and outcome cleared. Both act only on a locked `approved` package. A failed step-6 transaction leaves the lock set. The UI shows the "Check your Gmail Sent folder" panel with both actions | U (mock Gmail) + U (component) |
 | AC-34 | **Locked package is frozen.** With `sendStartedAt` set, approve, unapprove, reject, request changes, edit, mark applied manually and supersede all affect 0 rows (`INVALID_STATE` / not superseded), and `submitPackage` for that job returns `CONFLICT` | I |
 | AC-35 | **Import-graph test.** Nothing under `src/lib/mcp/**` or `src/app/api/mcp/**` transitively imports `@/lib/cockpit/send` or `@/lib/cockpit/gmail/client`. `send.ts` and `gmail/client.ts` contain `import "server-only"`. The test is `// @vitest-environment node` and resolves `@/` aliases, relative paths and `import()` expressions | U (static test) |
 | AC-36 | **No secrets in logs.** With a mock `fetch` returning `refresh_token=SECRET` (token endpoint) and a Gmail error body echoing parts of `raw`, nothing passed to the logger, thrown or returned contains the secret or the body; errors carry only a typed code and status | U |
 | AC-37 | **Iframe headers.** `next.config.mjs` `headers()` returns the global `/(.*)` entry (`X-Frame-Options: DENY`) followed by the scoped `/api/cockpit/files/:packageId` entry with `X-Frame-Options: SAMEORIGIN` and nothing else, in that order (unit test on the `headers()` output: order and values); the file route sets `Content-Security-Policy: sandbox; frame-ancestors 'self'` | U (config) + M (`curl -I` on the built app, Phase 4: exactly one `X-Frame-Options: SAMEORIGIN`) + H (PDF renders in the iframe, AC-30) |
-| AC-38 | **Quota and payload.** `attach_file` returns `TOO_LARGE` beyond 200 files or 500 MB per user (counted from the user's cockpit dir), and a call through the registered tool with `contentBase64` > 7,000,000 chars returns `isError: true` (shape error from the SDK) | U |
-| AC-39 | **Backup exclusion.** After creating a `GmailAccount` row, the backup export contains no `GmailAccount`, `encryptedRefreshToken` or `iv`. Cockpit packages are not required in the backup (V0); `backupRoundTrip.spec.ts` stays green | I |
+| AC-38 | **Superseded by D-013 for the quota part: there is no 200 file / 500 MB quota any more; the 7,000,000-char payload check stays.** **Quota and payload.** `attach_file` returns `TOO_LARGE` beyond 200 files or 500 MB per user (counted from the user's cockpit dir), and a call through the registered tool with `contentBase64` > 7,000,000 chars returns `isError: true` (shape error from the SDK) | U |
+| AC-39 | *Amended by D-012: cockpit packages, sent emails and their CV files ARE now in the backup; only `GmailAccount` stays excluded.* **Backup exclusion.** After creating a `GmailAccount` row, the backup export contains no `GmailAccount`, `encryptedRefreshToken` or `iv`. Cockpit packages are not required in the backup (V0); `backupRoundTrip.spec.ts` stays green | I |
 | AC-40 | **Null-user, no write.** For every exported function of every `src/actions/cockpit*.actions.ts` (actions and queries) and every cockpit page, with `getCurrentUser → null` (mock `@/utils/user.utils`), the call returns a failure result (pages: redirect, no render) and performs no `prisma.*` call, in particular no write; `requireUser()` runs inside the `try` and before the flag check | U |
 | AC-41 | **Letter rendering safety.** `renderLetterMarkdown` (`src/lib/cockpit/markdown.ts`, no `stripThinking`) on `![x](http://a/b.png)` and `[x](javascript:alert(1))` yields an HTML string with no `<img>` and no `<a>`, with raw HTML escaped (primary assertion, on the markdown-it output); the output goes through `TipTapContentViewer`. `emailBody` and `fitAnalysis` render as text / `<pre>` | U |
 | AC-42 | **File confinement.** `resolveCockpitFile` accepts only files under `<UPLOADS_DIR>/files/cockpit/<userId>/` (relative `UPLOADS_DIR`, `..` segments, a `cockpit/u1` vs `cockpit/u10` prefix, and a symlink escape all return `null`) | U (temp dir) |
@@ -452,5 +462,5 @@ Verification types:
 - Upstream `/api/profile/resume?filePath=` has no path confinement (no resolve-and-prefix check, no ownership check). The cockpit does not use it and does not fix it: it is an upstream gap, logged here only.
 - Known risk: some browsers' built-in PDF viewers refuse a PDF served with `Content-Security-Policy: sandbox` inside an `<iframe>`. AC-30 checks this in a real browser. If it fails, record a decision (e.g. drop `sandbox`, keep `nosniff` and the scoped frame rules, or offer download-only).
 - Google OAuth client type (Web vs Desktop) is the user's choice.
-- V1 hook: including `ApplicationPackage` / `SentEmail` in backups (V0 only guarantees `GmailAccount` is never exported, §6.2).
+- V1 hook: including `ApplicationPackage` / `SentEmail` in backups (V0 only guarantees `GmailAccount` is never exported, §6.2). **Done by D-012** (packages, sent emails and their CV files travel in backups).
 - The rate limits are per-process memory (reset on restart, not shared across replicas).

@@ -1,6 +1,6 @@
 import { chromium, expect, type FullConfig } from "@playwright/test";
 import fs from "fs";
-import { attachPdf, connectGmail, CV_FILE_NAME, cvPdf, seedPackage } from "./cockpit-api";
+import { attachPdf, connectGmail, CV_FILE_NAME, cvPdf, listToolNames, seedPackage } from "./cockpit-api";
 import { resetFake } from "./fake-google-control";
 
 // Logs in once (storage state), picks up the seeded bot MCP token, and, with the flag on,
@@ -29,6 +29,13 @@ export default async function globalSetup(config: FullConfig) {
     .trim();
   expect(token).toMatch(/^jsync_/);
   process.env.E2E_MCP_TOKEN = token;
+  // The seeded token lives 24 h; a server kept up longer (reuseExistingServer)
+  // would otherwise fail every spec with an unexplained 401.
+  await listToolNames(baseURL).catch((e) => {
+    throw new Error(
+      `The seeded MCP token was rejected (expired after 24 h, or the server is not the one that wrote it): stop the server on port ${new URL(baseURL).port} and rerun. ${e}`,
+    );
+  });
 
   if (!flagOff) {
     // Warm the dev compiler for the pages the specs hit first.

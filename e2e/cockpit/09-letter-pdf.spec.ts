@@ -1,4 +1,5 @@
 import { expect, openDetail, test } from "../support/cockpit-fixtures";
+import { cvPdf } from "../support/cockpit-api";
 import { fakeSends } from "../support/fake-google-control";
 import { approve, openSendDialog } from "../support/cockpit-fixtures";
 
@@ -21,9 +22,7 @@ test.describe("cover letter PDF", () => {
     expect((await request.get("/api/cockpit/letter/does-not-exist")).status()).toBe(404);
   });
 
-  // The fake Google records only the first attachment; that the letter PDF is
-  // attached is covered by __tests__/cockpit/send.integration.spec.ts.
-  test("Review shows the PDF preview and the Send dialog lists it; the CV is still sent", async ({ page, bot }) => {
+  test("Review shows the PDF preview and the Send dialog lists it; the CV and the letter PDF are both sent", async ({ page, bot }) => {
     const pkg = await bot.seed();
     await openDetail(page, pkg.packageId);
     const frame = page.getByTestId("letter-pdf-preview");
@@ -38,6 +37,10 @@ test.describe("cover letter PDF", () => {
 
     const sends = fakeSends();
     expect(sends).toHaveLength(1);
-    expect(sends[0].attachmentName).toBe("jane-doe-cv.pdf");
+    // The fake records every attachment: the CV first, then the letter PDF.
+    const atts = sends[0].attachments ?? [];
+    expect(atts.map((x) => x.name)).toEqual(["jane-doe-cv.pdf", "jane-doe-Cover_Letter.pdf"]);
+    expect(atts[0].bytes).toBe(cvPdf().length);
+    expect(atts[1].bytes).toBeGreaterThan(500);
   });
 });
