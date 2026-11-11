@@ -52,10 +52,16 @@ export function validateEditValues(v: EditValues): EditErrors {
       ? "Required"
       : /[\r\n]/.test(v.emailSubject)
         ? "No line break allowed"
-        : "At most 300 characters";
+        : !v.emailSubject.trim()
+          ? "Must not be blank"
+          : "At most 300 characters";
   }
   if (!Shape.emailBody.safeParse(v.emailBody).success) {
-    errors.emailBody = !v.emailBody ? "Required" : "At most 20,000 characters";
+    errors.emailBody = !v.emailBody
+      ? "Required"
+      : !v.emailBody.trim()
+        ? "Must not be blank"
+        : "At most 20,000 characters";
   }
   if (!Shape.letterMd.safeParse(v.letterMd).success) {
     errors.letterMd = "At most 20,000 characters";

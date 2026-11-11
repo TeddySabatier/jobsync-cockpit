@@ -134,7 +134,7 @@ Flow: approve → **Send** (when Gmail connected, valid `emailTo`, CV file prese
 
 **Mark applied manually** (empty `emailTo` / link apply): overflow menu; no email sent.
 
-A send (Gmail or manual) moves the job to **Applied** only when it is still **Draft** or **New**; a job you already moved on (Interview, Offer, ...) keeps its status and applied date (D-018).
+A send (Gmail or manual) moves the job status to **Applied** only when it is still **Draft** or **New**; a job you already moved on (Interview, Offer, ...) keeps its status. Every send marks the job as applied and sets the applied date to the send time if it has none; an existing applied date is kept (D-018).
 
 ## Security notes
 

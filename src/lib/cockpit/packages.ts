@@ -1,5 +1,6 @@
 import { Prisma, type ApplicationPackage } from "@prisma/client";
 import prisma from "@/lib/db";
+import { log } from "@/lib/telemetry";
 import { walkCvLeaves } from "./cvLeaves";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
@@ -78,6 +79,10 @@ export async function submitPackage(
       e instanceof Prisma.PrismaClientKnownRequestError &&
       RETRYABLE_PRISMA_CODES.includes(e.code)
     ) {
+      // Code only: a deterministic cause must leave a trace.
+      log.warn("cockpit: submit write conflict, CONFLICT returned", {
+        prismaCode: e.code,
+      });
       throw new CockpitError("CONFLICT");
     }
     const target = p2002Target(e);
@@ -334,8 +339,8 @@ export async function markChangeRequestDone(
 }
 
 // Job statuses that a send (Gmail or manual) moves forward to "applied". A job
-// the owner already moved further (interview, offer, ...) keeps its status and
-// appliedDate.
+// the owner already moved further (interview, offer, ...) keeps its status
+// (D-018 a); `applied` and a missing appliedDate are still set.
 const PRE_APPLY_JOB_STATUSES = ["draft", "new"];
 
 // Job -> applied (SPEC §6.4 step 6). Shared by send.ts and
@@ -351,13 +356,24 @@ export async function markJobApplied(
   if (!jobId) throw new CockpitError("INTERNAL");
   const applied = await tx.jobStatus.findUnique({ where: { value: "applied" } });
   if (!applied) throw new CockpitError("INTERNAL");
+  // The status only moves forward (draft/new -> applied).
   await tx.job.updateMany({
     where: {
       id: jobId,
       userId,
       Status: { value: { in: PRE_APPLY_JOB_STATUSES } },
     },
-    data: { statusId: applied.id, applied: true, appliedDate: now },
+    data: { statusId: applied.id },
+  });
+  // The application did happen: always flag it, whatever the status.
+  await tx.job.updateMany({
+    where: { id: jobId, userId },
+    data: { applied: true },
+  });
+  // First application date wins: never overwrite an existing one.
+  await tx.job.updateMany({
+    where: { id: jobId, userId, appliedDate: null },
+    data: { appliedDate: now },
   });
 }
 

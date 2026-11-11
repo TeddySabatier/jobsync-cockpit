@@ -43,6 +43,7 @@ import {
 } from "@/lib/cockpit/packages";
 import { cockpitUserDir } from "@/lib/cockpit/files";
 import { JOB_STATUSES } from "@/lib/constants";
+import { log } from "@/lib/telemetry";
 import type { SubmitApplicationPackageInput } from "@/lib/cockpit/schemas";
 
 const prisma = db.prisma;
@@ -52,8 +53,6 @@ let userB: string;
 const refs: Record<string, { titleId: string; companyId: string }> = {};
 let draftId: string;
 let appliedId: string;
-let newStatusId: string;
-let interviewId: string;
 
 async function seedUser(email: string) {
   const user = await prisma.user.create({
@@ -137,14 +136,6 @@ beforeAll(async () => {
   appliedId = (
     await prisma.jobStatus.create({
       data: { label: "Applied", value: "applied" },
-    })
-  ).id;
-  newStatusId = (
-    await prisma.jobStatus.create({ data: { label: "New", value: "new" } })
-  ).id;
-  interviewId = (
-    await prisma.jobStatus.create({
-      data: { label: "Interview", value: "interview" },
     })
   ).id;
 }, 120_000);
@@ -297,25 +288,13 @@ describe("submitPackage", () => {
     );
   });
 
-  it("reports a P2034 write conflict (SQLite busy) as CONFLICT, not INTERNAL (review 01 #3)", async () => {
-    const jobId = await newJob(userA);
-    vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(
-      new Prisma.PrismaClientKnownRequestError("write conflict", {
-        code: "P2034",
-        clientVersion: "test",
-      }),
-    );
-    await expect(submitPackage(userA, input(jobId))).rejects.toMatchObject(
-      code("CONFLICT"),
-    );
-  });
-
-  it.each(["P1008", "P2028"])(
-    "reports a %s (SQLite busy / transaction timeout) as CONFLICT, not INTERNAL (review 01 #3)",
+  it.each(["P2034", "P1008", "P2028"])(
+    "reports a %s (write conflict / SQLite busy / transaction timeout) as CONFLICT, not INTERNAL, and logs the code only (review 01 #3)",
     async (prismaCode) => {
       const jobId = await newJob(userA);
+      const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
       vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(
-        new Prisma.PrismaClientKnownRequestError("busy", {
+        new Prisma.PrismaClientKnownRequestError("secret detail", {
           code: prismaCode,
           clientVersion: "test",
         }),
@@ -323,10 +302,18 @@ describe("submitPackage", () => {
       await expect(submitPackage(userA, input(jobId))).rejects.toMatchObject(
         code("CONFLICT"),
       );
+      expect(warn).toHaveBeenCalledWith(expect.any(String), {
+        prismaCode,
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("secret detail");
+      warn.mockRestore();
     },
   );
 
-  it("two real concurrent submits with different keys: one active package, any loser is CONFLICT (review 01 #3)", async () => {
+  // Invariant only: on SQLite the two usually serialise, so this passes with or
+  // without the busy mapping. packages.contention.integration.spec.ts is the
+  // real proof of the mapping.
+  it("invariant: two concurrent submits with different keys leave one active package, any loser is CONFLICT", async () => {
     const jobId = await newJob(userA);
     const results = await Promise.allSettled([
       submitPackage(userA, input(jobId, { idempotencyKey: "par-a" })),
@@ -622,32 +609,6 @@ describe("lifecycle (SPEC §2.1)", () => {
     );
   });
 
-  it("mark applied manually moves a 'new' job forward but never a job already further on (review 01 #2)", async () => {
-    const fresh = await mk("pending", { emailTo: null });
-    await prisma.job.update({
-      where: { id: fresh.jobId },
-      data: { statusId: newStatusId },
-    });
-    await markPackageAppliedManually(userA, fresh.id);
-    expect(
-      await prisma.job.findUniqueOrThrow({ where: { id: fresh.jobId } }),
-    ).toMatchObject({ statusId: appliedId, applied: true });
-
-    const appliedOn = new Date("2026-03-01T00:00:00Z");
-    const later = await mk("pending", { emailTo: null });
-    await prisma.job.update({
-      where: { id: later.jobId },
-      data: { statusId: interviewId, applied: true, appliedDate: appliedOn },
-    });
-    const res = await markPackageAppliedManually(userA, later.id);
-    expect(res.status).toBe("sent");
-    const job = await prisma.job.findUniqueOrThrow({
-      where: { id: later.jobId },
-    });
-    expect(job.statusId).toBe(interviewId);
-    expect(job.appliedDate).toEqual(appliedOn);
-  });
-
   it("markJobApplied refuses an empty jobId instead of updating every job (review 01 #1)", async () => {
     const other = await mk("pending");
     await expect(
@@ -709,37 +670,39 @@ describe("lifecycle (SPEC §2.1)", () => {
     expect(done).toMatchObject({ status: "pending", approvedAt: null });
   });
 
-  // Every status the app seeds (JOB_STATUSES), matched by value: only draft and
-  // new move to applied; every other status, and its applied fields, is kept.
-  it.each(JOB_STATUSES.map((s) => [s.value, s.label] as const))(
-    "mark applied manually from job status '%s' (D-018 a)",
-    async (value, label) => {
+  // Every status the app seeds (JOB_STATUSES), matched by value, with and
+  // without an existing appliedDate. Only draft and new move to applied; every
+  // job gets applied=true; an existing appliedDate is never overwritten, a
+  // missing one becomes the send time.
+  const appliedOn = new Date("2026-02-01T00:00:00Z");
+  it.each(
+    JOB_STATUSES.flatMap((s) => [
+      [s.value, s.label, appliedOn] as const,
+      [s.value, s.label, null] as const,
+    ]),
+  )(
+    "mark applied manually from job status '%s', appliedDate %s (D-018 a)",
+    async (value, label, before) => {
       const status = await prisma.jobStatus.upsert({
         where: { value },
         update: {},
         create: { value, label },
       });
       const pkg = await mk("pending", { emailTo: null });
-      const appliedOn = new Date("2026-02-01T00:00:00Z");
       await prisma.job.update({
         where: { id: pkg.jobId },
-        data: { statusId: status.id, applied: false, appliedDate: appliedOn },
+        data: { statusId: status.id, applied: false, appliedDate: before },
       });
-      await markPackageAppliedManually(userA, pkg.id);
+      const res = await markPackageAppliedManually(userA, pkg.id);
       const job = await prisma.job.findUniqueOrThrow({
         where: { id: pkg.jobId },
       });
-      expect((await row(pkg.id)).status).toBe("sent");
-      if (value === "draft" || value === "new") {
-        expect(job).toMatchObject({ statusId: appliedId, applied: true });
-        expect(job.appliedDate).not.toEqual(appliedOn);
-      } else {
-        expect(job).toMatchObject({
-          statusId: status.id,
-          applied: false,
-          appliedDate: appliedOn,
-        });
-      }
+      expect(res.status).toBe("sent");
+      expect(job.statusId).toBe(
+        value === "draft" || value === "new" ? appliedId : status.id,
+      );
+      expect(job.applied).toBe(true);
+      expect(job.appliedDate).toEqual(before ?? res.sentAt);
     },
   );
 
@@ -755,7 +718,7 @@ describe("lifecycle (SPEC §2.1)", () => {
     await markPackageAppliedManually(userA, pkg.id);
     expect(
       await prisma.job.findUniqueOrThrow({ where: { id: pkg.jobId } }),
-    ).toMatchObject({ statusId: lookalike.id, applied: false });
+    ).toMatchObject({ statusId: lookalike.id, applied: true });
   });
 
   it("mark applied manually is refused when emailTo is set", async () => {

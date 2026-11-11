@@ -236,7 +236,7 @@ describe("sendApplicationPackage: success (AC-25)", () => {
     expect(job.appliedDate).toEqual(res.sentAt);
   });
 
-  it("a Gmail send moves a 'new' job to applied but never rewinds a job at interview (D-018 a)", async () => {
+  it("a Gmail send moves a 'new' job to applied; a job at interview keeps its status but is flagged applied with the send date (D-018 a)", async () => {
     const at = async (value: string) => {
       const status = await prisma.jobStatus.upsert({
         where: { value },
@@ -260,10 +260,10 @@ describe("sendApplicationPackage: success (AC-25)", () => {
     expect(later.pkg.status).toBe("sent");
     expect(await sentEmails(later.pkg.id)).toBe(1);
     expect(later.job).toMatchObject({
-      applied: false,
-      appliedDate: null,
+      applied: true,
       statusId: later.status.id,
     });
+    expect(later.job.appliedDate).toEqual(later.res.sentAt);
   });
 
   it("a failing transaction rolls everything back: lock stays, outcome unknown", async () => {
@@ -545,11 +545,12 @@ describe("recovery actions (AC-33)", () => {
     const appliedOn = new Date("2026-01-15T00:00:00Z");
     await prisma.job.update({
       where: { id: pkg.jobId },
-      data: { statusId: offer.id, applied: true, appliedDate: appliedOn },
+      data: { statusId: offer.id, applied: false, appliedDate: appliedOn },
     });
     await markSendUnknownAsSent(s.userA.id, pkg.id);
     expect((await row(pkg.id)).status).toBe("sent");
     const job = await jobOf(pkg.jobId);
+    // Status kept, applied always set, the existing date never overwritten.
     expect(job).toMatchObject({ statusId: offer.id, applied: true });
     expect(job.appliedDate).toEqual(appliedOn);
   });
