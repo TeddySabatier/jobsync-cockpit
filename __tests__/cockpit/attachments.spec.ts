@@ -264,3 +264,85 @@ describe("attachFile", () => {
     expect(fs.existsSync(row.filePath)).toBe(true);
   });
 });
+
+// Edge cases found while mutation-checking the cleanup (issue #55).
+describe("cleanupOrphanUploads: edge cases", () => {
+  it("age boundary: a file exactly COCKPIT_ORPHAN_DAYS old is kept, one millisecond older goes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const now = new Date("2030-01-15T12:00:00.000Z");
+      vi.setSystemTime(now);
+      vi.stubEnv("COCKPIT_ORPHAN_DAYS", "7");
+      const dir = cockpitUserDir(userA);
+      fs.mkdirSync(dir, { recursive: true });
+      const mk = (name: string, mtimeMs: number) => {
+        const p = path.join(dir, name);
+        fs.writeFileSync(p, "%PDF-1.4");
+        fs.utimesSync(p, new Date(mtimeMs), new Date(mtimeMs));
+        return p;
+      };
+      const edge = mk("edge.pdf", now.getTime() - 7 * DAY);
+      const older = mk("older.pdf", now.getTime() - 7 * DAY - 1000);
+      expect(await cleanupOrphanUploads(userA)).toBe(1);
+      expect(fs.existsSync(edge)).toBe(true);
+      expect(fs.existsSync(older)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a fresh upload that has no row yet (concurrent upload in flight) is kept", async () => {
+    const inflight = await store(userA, 0, { noRow: true });
+    expect(await cleanupOrphanUploads(userA)).toBe(0);
+    expect(fs.existsSync(inflight.full)).toBe(true);
+  });
+
+  it("a row whose bytes are gone is left alone (cleanup is driven by the directory)", async () => {
+    const gone = await store(userA, 10);
+    fs.rmSync(gone.full);
+    expect(await cleanupOrphanUploads(userA)).toBe(0);
+    expect(await rowExists(gone.id)).toBe(true);
+  });
+
+  it("a subdirectory is ignored, not removed", async () => {
+    const dir = cockpitUserDir(userA);
+    const sub = path.join(dir, "sub");
+    fs.mkdirSync(sub, { recursive: true });
+    const t = new Date(Date.now() - 10 * DAY);
+    fs.utimesSync(sub, t, t);
+    expect(await cleanupOrphanUploads(userA)).toBe(0);
+    expect(fs.existsSync(sub)).toBe(true);
+  });
+
+  it("keeps a referenced file whose row stores a Windows-style path", async () => {
+    const f = await store(userA, 10, {
+      pathForm: (p) => ["C:", "uploads", "cockpit", userA, path.basename(p)].join(String.fromCharCode(92)),
+    });
+    await makePackage(userA, f.id!);
+    expect(await cleanupOrphanUploads(userA)).toBe(0);
+    expect(fs.existsSync(f.full)).toBe(true);
+    expect(await rowExists(f.id)).toBe(true);
+  });
+
+  it("does not delete the row of a different file whose name merely ends with the same text", async () => {
+    const old = await store(userA, 10);
+    // Another upload (fresh, unreferenced) whose stored name has the old name as a suffix.
+    const other = await store(userA, 0, {
+      pathForm: (p) => path.join(path.dirname(p), `keep-${path.basename(old.full)}`),
+    });
+    await cleanupOrphanUploads(userA);
+    expect(fs.existsSync(old.full)).toBe(false);
+    expect(await rowExists(old.id)).toBe(false);
+    expect(await rowExists(other.id)).toBe(true);
+  });
+
+  it("never deletes another user's row, even when its file name is identical", async () => {
+    const mine = await store(userA, 10);
+    const theirs = await store(userB, 10, {
+      pathForm: (p) => path.join(path.dirname(p), path.basename(mine.full)),
+    });
+    await cleanupOrphanUploads(userA);
+    expect(fs.existsSync(theirs.full)).toBe(true);
+    expect(await rowExists(theirs.id)).toBe(true);
+  });
+});

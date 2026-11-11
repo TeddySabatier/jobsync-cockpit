@@ -33,3 +33,31 @@ describe("next.config.mjs headers()", () => {
     );
   });
 });
+
+// The scoped source must match exactly the two PDF routes, evaluated the way
+// Next evaluates header sources (its own path-to-regexp matcher).
+describe("scoped SAMEORIGIN source pattern", () => {
+  it("matches /api/cockpit/files/x and /api/cockpit/letter/x and nothing else", async () => {
+    const { getPathMatch } = await import("next/dist/shared/lib/router/utils/path-match");
+    const entries = await loadHeaders();
+    const scoped = entries.find((e: { source: string }) => e.source !== "/(.*)");
+    const match = getPathMatch(scoped!.source);
+    for (const yes of ["/api/cockpit/files/x", "/api/cockpit/letter/x", "/api/cockpit/files/abc-123"]) {
+      expect(match(yes), yes).not.toBe(false);
+    }
+    for (const no of [
+      "/api/cockpit/files",
+      "/api/cockpit/letter",
+      "/api/cockpit/files/x/y",
+      "/api/cockpit/gmail/connect",
+      "/api/cockpit/gmail/callback",
+      "/api/cockpit/filesx/x",
+      "/api/cockpit/letters/x",
+      "/api/cockpit/mcp",
+      "/x/api/cockpit/files/x",
+      "/dashboard/cockpit/files/x",
+    ]) {
+      expect(match(no), no).toBe(false);
+    }
+  });
+});

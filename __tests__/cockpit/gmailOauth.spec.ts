@@ -335,8 +335,10 @@ describe("callback (AC-23)", () => {
 
   it("flag off → 404, no session → 401, both delete the cookie", async () => {
     vi.stubEnv("COCKPIT_ENABLED", "false");
+    authMock.mockClear();
     const off = await callCallback();
     expect(off.status).toBe(404);
+    expect(authMock).not.toHaveBeenCalled();
     expect(clearsCookie(off)).toBe(true);
 
     vi.stubEnv("COCKPIT_ENABLED", "true");
