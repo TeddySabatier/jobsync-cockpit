@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import prisma from "@/lib/db";
-import { isCockpitEnabled } from "@/lib/cockpit/config";
-import { COCKPIT_ERROR_MESSAGES } from "@/lib/cockpit/errors";
 import { exchangeAuthCode, revokeToken } from "@/lib/cockpit/gmail/client";
 import {
   COOKIE_NAME,
@@ -16,6 +13,7 @@ import {
   safeEqual,
   verifyIdToken,
 } from "@/lib/cockpit/gmail/oauth";
+import { requireCockpitUser } from "@/lib/cockpit/route";
 import { decrypt, encrypt } from "@/lib/encryption";
 import { log } from "@/lib/telemetry";
 
@@ -32,8 +30,9 @@ async function quietly(fn: () => Promise<unknown>) {
 
 export async function GET(req: NextRequest) {
   const cookieRaw = req.cookies.get(COOKIE_NAME)?.value;
-  const secure = (getGoogleConfig()?.secure ??
-    (process.env.GOOGLE_REDIRECT_URI ?? "").startsWith("https:")) as boolean;
+  const secure =
+    getGoogleConfig()?.secure ??
+    (process.env.GOOGLE_REDIRECT_URI ?? "").startsWith("https:");
 
   const finish = (res: NextResponse) => {
     res.cookies.set(COOKIE_NAME, "", {
@@ -50,22 +49,9 @@ export async function GET(req: NextRequest) {
       }),
     );
 
-  if (!isCockpitEnabled()) return finish(new NextResponse(null, { status: 404 }));
-
-  const session = await auth();
-  const userId = session?.user?.id;
-  if (!userId) {
-    return finish(
-      NextResponse.json(
-        {
-          success: false,
-          code: "UNAUTHENTICATED",
-          message: COCKPIT_ERROR_MESSAGES.UNAUTHENTICATED,
-        },
-        { status: 401 },
-      ),
-    );
-  }
+  const user = await requireCockpitUser();
+  if (user.response) return finish(user.response);
+  const { userId } = user;
 
   // The new refresh token, once Google has issued it; revoked if we then
   // refuse to store it, so it is not left alive at Google.

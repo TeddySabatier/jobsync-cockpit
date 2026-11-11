@@ -2,7 +2,7 @@
 
 Status: **v2 — FROZEN (2026-11-04). Changes require a DECISIONS.md entry.** The Security, Data, UX and Next.js review rulings are logged in `DECISIONS.md` (D-004..D-007).
 
-**Amended after the freeze.** The text below is the V0 wording; later decisions amend it. Each affected section or AC carries an *Amended by* line. Index: D-008 (§2.2 step 2), D-010 (§6.2), D-011 (§4, §6.4, AC-16, AC-25, AC-33), D-012 (§6.2 backup, §11, AC-39), D-013 (§3 quota, AC-38), D-014 (job-page Claude prompt button, no section of its own), D-015 (§3 file serving, §5.3, §6.3, §6.4). When the text and a DECISIONS entry disagree, the DECISIONS entry wins.
+**Amended after the freeze.** The text below is the V0 wording; later decisions amend it. Each affected section or AC carries an *Amended by* line. Index: D-008 (§2.2 step 2), D-010 (§6.2), D-011 (§4, §6.4, AC-16, AC-25, AC-33), D-012 (§6.2 backup, §11, AC-39), D-013 (§3 quota, AC-38), D-014 (job-page Claude prompt button, no section of its own), D-015 (§3 file serving, §5.3, §6.3, §6.4), D-016 (§3 MCP tools). When the text and a DECISIONS entry disagree, the DECISIONS entry wins.
 
 A review cockpit inside JobSync. An external bot submits **application packages** (tailored CV PDF + CV JSON, cover letter, draft email, fit analysis) through MCP. The single user reviews, edits, approves and sends each one from the UI. V0 scope only. V1/V2 items from the design are out of scope.
 
