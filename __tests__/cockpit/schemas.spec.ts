@@ -75,6 +75,25 @@ describe("SubmitApplicationPackageSchema (AC-07)", () => {
     ).toBe(true);
   });
 
+  it.each([
+    ["blank subject", { emailSubject: " " }],
+    ["tab-only subject", { emailSubject: "\t  " }],
+    ["blank body", { emailBody: " " }],
+    ["whitespace-only body", { emailBody: " \n\n \t" }],
+  ])("rejects a %s (review 01 #5)", (_name, over) => {
+    expect(ok(over).success).toBe(false);
+  });
+
+  it("keeps surrounding whitespace of a non-blank body (no trimming)", () => {
+    const r = ok({ emailBody: "  Hello\n\n" });
+    expect(r.success && r.data.emailBody).toBe("  Hello\n\n");
+  });
+
+  it("rejects an unknown key instead of dropping it (review 01 #6)", () => {
+    const r = ok({ emailTooo: "hr@example.com" });
+    expect(r.success).toBe(false);
+  });
+
   it("exports the field-level shape separately", () => {
     expect(
       z.object(SubmitApplicationPackageInputShape).safeParse(valid).success,
@@ -163,5 +182,15 @@ describe("other schemas", () => {
     expect(
       UpdatePackageContentSchema.safeParse({ emailSubject: "a\nb" }).success,
     ).toBe(false);
+  });
+
+  it("edit: refuses blank subject / body and unknown keys (review 01 #5, #6)", () => {
+    for (const patch of [
+      { emailSubject: "  " },
+      { emailBody: " \n " },
+      { emailBody: "ok", emailBdy: "typo" },
+    ]) {
+      expect(UpdatePackageContentSchema.safeParse(patch).success).toBe(false);
+    }
   });
 });

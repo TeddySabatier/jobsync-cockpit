@@ -9,7 +9,9 @@ import MarkdownIt from "markdown-it";
 // the security property: a markdown link or image is a network request steered
 // by injected posting content. Disabled means the URL stays as inert text.
 const md = new MarkdownIt({ html: false, linkify: false, breaks: true });
-md.disable(["image", "link", "autolink"]);
+// "reference" too: with links off it would still swallow a definition line
+// such as "[1]: https://example.com", so the line vanished from the letter.
+md.disable(["image", "link", "autolink", "reference"]);
 
 export function renderLetterMarkdown(text: string): string {
   return text ? md.render(text) : "";

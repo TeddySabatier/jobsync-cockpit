@@ -109,6 +109,22 @@ describe("registered tools", () => {
     ]);
     expect(names.filter((n) => /send|approve|reject/.test(n))).toEqual([]);
   });
+
+  it("submit_application_package refuses a misspelled key instead of dropping it (review 01 #6)", async () => {
+    const c = await asUser(userA);
+    const jobId = await newJob(userA);
+    const { emailTo, ...rest } = submitArgs(jobId);
+    const res = await c.call("submit_application_package", {
+      ...rest,
+      emailTooo: emailTo,
+    });
+    const ok = await c.call("submit_application_package", submitArgs(jobId));
+    await c.close();
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/emailTooo/);
+    expect(ok.isError).toBe(false);
+    expect(await prisma.applicationPackage.count({ where: { jobId } })).toBe(1);
+  });
 });
 
 describe("attach_file + submit_application_package", () => {
