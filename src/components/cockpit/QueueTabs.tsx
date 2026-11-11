@@ -1,17 +1,11 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import type { QUEUE_TABS, QueueTabValue } from "./queueTabs";
+import { QUEUE_TABS, type QueueTabValue } from "./queueTabs";
 
-export default function QueueTabs({
-  tab,
-  tabs,
-}: {
-  tab: QueueTabValue;
-  tabs: typeof QUEUE_TABS;
-}) {
+export default function QueueTabs({ tab }: { tab: QueueTabValue }) {
   return (
     <nav aria-label="Review queue filters" className="flex flex-wrap gap-1">
-      {tabs.map((t) => (
+      {QUEUE_TABS.map((t) => (
         <Link
           key={t.value}
           href={`/dashboard/review?tab=${t.value}`}

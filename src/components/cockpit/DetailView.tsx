@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { TriangleAlert } from "lucide-react";
+import { Info } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { formatUrl } from "@/lib/utils";
@@ -17,16 +17,23 @@ import {
   PreviousReviewInfo,
   type PackageDetail,
 } from "./Panels";
+import FitGradeBadge from "./FitGradeBadge";
+import { statusLabel } from "./statusLabels";
 import { useQueueKeys } from "./useQueueKeys";
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Pending",
-  approved: "Approved",
-  changes_requested: "Changes requested",
-  sent: "Sent",
-  rejected: "Rejected",
-  superseded: "Superseded",
-};
+// Plain sentence for a version that is not the active one. Never the raw status.
+function versionNote(version: number, status: string): string {
+  switch (status) {
+    case "superseded":
+      return `Viewing v${version}, which a newer version replaced.`;
+    case "sent":
+      return `Viewing v${version}, which was sent.`;
+    case "rejected":
+      return `Viewing v${version}, which was rejected.`;
+    default:
+      return `Viewing v${version} (${statusLabel(status)}).`;
+  }
+}
 
 export type Adjacent = { previousId: string | null; nextId: string | null };
 
@@ -78,14 +85,8 @@ export default function DetailView({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {pkg.fitGrade && (
-              <Badge variant="outline" aria-label={`Fit grade ${pkg.fitGrade}`}>
-                {pkg.fitGrade}
-              </Badge>
-            )}
-            <Badge variant="secondary">
-              {STATUS_LABELS[pkg.status] ?? pkg.status}
-            </Badge>
+            {pkg.fitGrade && <FitGradeBadge grade={pkg.fitGrade} />}
+            <Badge variant="secondary">{statusLabel(pkg.status)}</Badge>
             {pkg.cvPdfStale && <Badge variant="outline">PDF stale</Badge>}
             <select
               aria-label="Version"
@@ -95,7 +96,7 @@ export default function DetailView({
             >
               {versions.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {`v${v.version} · ${v.status}`}
+                  {`v${v.version} · ${statusLabel(v.status)}`}
                 </option>
               ))}
             </select>
@@ -104,10 +105,10 @@ export default function DetailView({
       </header>
 
       {!isActive && (
-        <Alert variant="destructive" data-testid="version-banner">
-          <TriangleAlert />
+        <Alert data-testid="version-banner">
+          <Info />
           <AlertDescription className="font-medium">
-            {`Viewing v${pkg.version} — ${pkg.status}. `}
+            {`${versionNote(pkg.version, pkg.status)} `}
             {activeVersion && activePackageId ? (
               <>
                 <Link
@@ -140,6 +141,12 @@ export default function DetailView({
               <LetterPanel pkg={pkg} fileName={detail.letterAttachment?.fileName} />
             </div>
           </div>
+
+          {(adjacent.previousId || adjacent.nextId) && (
+            <p className="text-xs text-muted-foreground">
+              j / k: next / previous in To do
+            </p>
+          )}
 
           {isActive && (
             <ActionBar

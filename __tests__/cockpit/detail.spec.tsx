@@ -267,8 +267,8 @@ describe("review detail page: panels (AC-18, AC-41)", () => {
     await renderPage();
     const select = screen.getByLabelText("Version");
     expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual([
-      "v2 · pending",
-      "v1 · superseded",
+      "v2 · Pending",
+      "v1 · Superseded",
     ]);
     fireEvent.change(select, { target: { value: "p1" } });
     expect(push).toHaveBeenCalledWith("/dashboard/review/p1");
@@ -294,7 +294,7 @@ describe("non-active version (AC-48)", () => {
     );
     await renderPage("p1");
     const banner = screen.getByTestId("version-banner");
-    expect(banner).toHaveTextContent("Viewing v1 — superseded.");
+    expect(banner).toHaveTextContent("Viewing v1, which a newer version replaced.");
     expect(within(banner).getByRole("link", { name: "Open v2" })).toHaveAttribute(
       "href",
       "/dashboard/review/p2",
@@ -308,6 +308,57 @@ describe("non-active version (AC-48)", () => {
     getPackageDetail.mockResolvedValue(ok(detailFixture()));
     await renderPage();
     expect(screen.queryByTestId("version-banner")).toBeNull();
+  });
+});
+
+describe("status wording (no raw status values)", () => {
+  const nonActive = (status: string) =>
+    ok(
+      detailFixture(
+        { id: "p1", version: 1, status },
+        {
+          versions: [{ id: "p1", version: 1, status }],
+          activePackageId: null,
+          isActive: false,
+        },
+      ),
+    );
+
+  it.each([
+    ["sent", "Viewing v1, which was sent.", "Sent"],
+    ["rejected", "Viewing v1, which was rejected.", "Rejected"],
+  ])("%s: own sentence, label in the header and selector", async (status, sentence, label) => {
+    getPackageDetail.mockResolvedValue(nonActive(status));
+    await renderPage("p1");
+    const banner = screen.getByTestId("version-banner");
+    expect(banner).toHaveTextContent(sentence);
+    expect(banner).toHaveTextContent("There is no active version.");
+    expect(banner).not.toHaveTextContent(status === "sent" ? "— sent" : "— rejected");
+    expect(
+      within(screen.getByLabelText("Version")).getAllByRole("option")[0],
+    ).toHaveTextContent(`v1 · ${label}`);
+  });
+
+  it("the banner is informational, not a destructive alert", async () => {
+    getPackageDetail.mockResolvedValue(nonActive("superseded"));
+    await renderPage("p1");
+    expect(screen.getByTestId("version-banner").className).not.toMatch(/destructive/);
+  });
+
+  it("changes_requested reads 'Changes requested' in the selector and header", async () => {
+    getPackageDetail.mockResolvedValue(
+      ok(
+        detailFixture(
+          { status: "changes_requested" },
+          { versions: [{ id: "p2", version: 2, status: "changes_requested" }] },
+        ),
+      ),
+    );
+    await renderPage();
+    expect(
+      within(screen.getByLabelText("Version")).getAllByRole("option")[0],
+    ).toHaveTextContent("v2 · Changes requested");
+    expect(screen.queryByText(/changes_requested/)).toBeNull();
   });
 });
 
@@ -511,6 +562,54 @@ describe("j / k navigation (AC-19)", () => {
     await screen.findByRole("dialog");
     press("j");
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("is ignored while a menu is open", async () => {
+    getPackageDetail.mockResolvedValue(ok(detailFixture()));
+    getAdjacentPackageIds.mockResolvedValue(ok({ previousId: "a", nextId: "b" }));
+    await renderPage();
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    document.body.appendChild(menu);
+    press("j");
+    expect(push).not.toHaveBeenCalled();
+    menu.remove();
+    press("j");
+    expect(push).toHaveBeenCalledWith("/dashboard/review/b");
+  });
+
+  it("ignores a keydown whose target is contenteditable", async () => {
+    getPackageDetail.mockResolvedValue(ok(detailFixture()));
+    getAdjacentPackageIds.mockResolvedValue(ok({ previousId: "a", nextId: "b" }));
+    await renderPage();
+    const box = document.createElement("div");
+    box.setAttribute("contenteditable", "true");
+    document.body.appendChild(box);
+    press("j", box);
+    expect(push).not.toHaveBeenCalled();
+    box.remove();
+  });
+
+  it("is disabled while the edit form is open", async () => {
+    getPackageDetail.mockResolvedValue(ok(detailFixture()));
+    getAdjacentPackageIds.mockResolvedValue(ok({ previousId: "a", nextId: "b" }));
+    await renderPage();
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByRole("form", { name: "Edit package" });
+    press("j");
+    press("k");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("shows the key hint on the detail page only when there is a neighbour", async () => {
+    getPackageDetail.mockResolvedValue(ok(detailFixture()));
+    getAdjacentPackageIds.mockResolvedValue(ok({ previousId: null, nextId: "b" }));
+    const { unmount } = await renderPage();
+    expect(screen.getByText("j / k: next / previous in To do")).toBeInTheDocument();
+    unmount();
+    getAdjacentPackageIds.mockResolvedValue(ok({ previousId: null, nextId: null }));
+    await renderPage();
+    expect(screen.queryByText(/j \/ k/)).toBeNull();
   });
 
   it("a failed adjacent lookup disables the keys instead of failing the page", async () => {

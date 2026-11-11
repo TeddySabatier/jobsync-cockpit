@@ -199,3 +199,15 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/mcp/tools/cockpit.ts`, `cockpitDescriptions.ts`, `src/lib/mcp/rate-limit.ts`, `src/lib/cockpit/{errors,schemas}.ts`, `__tests__/cockpit/*`, `docs/cockpit.md`.
 - **Not changed:** legacy tools, in-memory rate-limit persistence, token scope choice. SPEC stays frozen; this entry is the amendment of record.
+
+## D-017 Review UI read-side fixes (issue #58)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The "j / k: next / previous in To do" hint is shown on the **detail** page, only when a neighbour exists; the queue list no longer shows it | **Accept.** The keys are only bound on the detail page (SPEC §5.3). | The hint on the queue promised keys that did nothing there. |
+| (b) | One shared `STATUS_LABELS` / `statusLabel()` (`src/components/cockpit/statusLabels.ts`) for queue row, detail header, version selector, banner and the job page card. The "not the active version" banner is an informational Alert with its own sentence for superseded, sent and rejected | **Accept.** | Raw values such as `changes_requested` and a red error style for a normal state. |
+| (c) | The CV and cover-letter PDF iframes stay (the sandbox CSP is unchanged: owner decision 2026-11-11, they render in desktop Chrome). Both panels get an "Open in new tab" link next to Download | **Accept.** Iframes are not hidden on narrow viewports. | iOS Safari shows only page 1 of an inline PDF. |
+| (d) | Read-only TipTap viewers render as `role="document"` with a name (`label` prop); scrollable boxes are focusable named regions | **Accept.** The axe waiver for `aria-input-field-name` is removed. | Unnamed textbox and keyboard-unreachable scroll areas. |
+
+- **Scope:** `src/components/cockpit/*`, `TipTapContentViewer.tsx`, the cockpit card in `JobDetails.tsx`, `__tests__/cockpit/*`, e2e 01/07/08.
+- **Not changed:** finding 2 (PDF sandbox) and finding 10 (tab counts, pagination, send-time column), which belong to the decisions issue.

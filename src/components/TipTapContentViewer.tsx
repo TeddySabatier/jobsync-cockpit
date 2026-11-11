@@ -3,7 +3,15 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect } from "react";
 
-export const TipTapContentViewer = ({ content }: { content: string }) => {
+// The editor renders an unnamed role=textbox; a read-only view is a document
+// with a name (assistive tech, axe aria-input-field-name).
+export const TipTapContentViewer = ({
+  content,
+  label = "Content",
+}: {
+  content: string;
+  label?: string;
+}) => {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -26,6 +34,7 @@ export const TipTapContentViewer = ({ content }: { content: string }) => {
     ],
     content: "",
     editable: false,
+    editorProps: { attributes: { role: "document", "aria-label": label } },
     immediatelyRender: false,
   });
   useEffect(() => {
