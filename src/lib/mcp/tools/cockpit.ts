@@ -12,17 +12,12 @@ import { attachFile } from "@/lib/cockpit/attachments";
 import { markChangeRequestDone, submitPackage } from "@/lib/cockpit/packages";
 import {
   AttachFileInputShape,
-  AttachFileSchema,
   GetJobInputShape,
-  GetJobSchema,
   ListChangeRequestsInputShape,
-  ListChangeRequestsSchema,
   ListJobsInputShape,
-  ListJobsSchema,
   MarkChangeRequestDoneInputShape,
-  MarkChangeRequestDoneSchema,
   SubmitApplicationPackageInputShape,
-  SubmitApplicationPackageSchema,
+  emptyToNull,
 } from "@/lib/cockpit/schemas";
 import { COCKPIT_TOOL_DESCRIPTIONS } from "./cockpitDescriptions";
 
@@ -53,33 +48,39 @@ const okResult = (data: unknown): ToolResult => ({
   content: [{ type: "text", text: JSON.stringify(data) }],
 });
 
-type Schema<T> = {
-  safeParse(v: unknown): { success: true; data: T } | { success: false };
-};
-
-// Order is fixed: scope → rate limit → XSchema → DB (SPEC §3).
+// The MCP SDK validates the arguments against the tool's InputShape *before*
+// this callback runs, so a malformed argument is refused by the SDK in its own
+// format ("MCP error -32602: Input validation error"), even for a token
+// without the scope. Only domain errors (VALIDATION for a non-PDF, ...) reach
+// the "<CODE>: message" format. `input` is the SDK-parsed value.
+// Order inside the callback: scope → rate limit → DB (SPEC §3).
 async function runTool<T>(
   ctx: CockpitToolContext,
   scope: "jobs:read" | "package:write",
   attach: boolean,
-  schema: Schema<T>,
-  rawInput: unknown,
+  input: T,
   run: (input: T) => Promise<unknown>,
 ): Promise<ToolResult> {
   if (!ctx.scopes.includes(scope)) return cockpitToolResult("UNAUTHORIZED_SCOPE");
 
+  // The peek and the two spends below are consistent only because nothing is
+  // awaited between them (the store is a synchronous in-process Map).
+  // attach_file: look at its bucket first without spending a slot, so a call
+  // refused by it does not also burn a general `cockpit` slot.
+  if (
+    attach &&
+    !checkMcpRateLimit(ctx.userId, { ...COCKPIT_RATE_LIMITS.attach, peek: true })
+      .allowed
+  ) {
+    return cockpitToolResult("RATE_LIMITED");
+  }
   if (!checkMcpRateLimit(ctx.userId, COCKPIT_RATE_LIMITS.cockpit).allowed) {
     return cockpitToolResult("RATE_LIMITED");
   }
-  if (attach && !checkMcpRateLimit(ctx.userId, COCKPIT_RATE_LIMITS.attach).allowed) {
-    return cockpitToolResult("RATE_LIMITED");
-  }
-
-  const parsed = schema.safeParse(rawInput);
-  if (!parsed.success) return cockpitToolResult("VALIDATION");
+  if (attach) checkMcpRateLimit(ctx.userId, COCKPIT_RATE_LIMITS.attach);
 
   try {
-    return okResult(await run(parsed.data));
+    return okResult(await run(input));
   } catch (e) {
     // Unknown errors become INTERNAL and are logged by code only.
     const r = toActionResult(e);
@@ -98,7 +99,7 @@ export function registerCockpitTools(
     COCKPIT_TOOL_DESCRIPTIONS.attach_file,
     AttachFileInputShape,
     (raw) =>
-      runTool(ctx, "package:write", true, AttachFileSchema, raw, (input) =>
+      runTool(ctx, "package:write", true, raw, (input) =>
         attachFile(userId, input),
       ),
   );
@@ -112,10 +113,9 @@ export function registerCockpitTools(
         ctx,
         "package:write",
         false,
-        SubmitApplicationPackageSchema,
         raw,
         async (input) => {
-          const r = await submitPackage(userId, input);
+          const r = await submitPackage(userId, emptyToNull(input));
           return {
             packageId: r.package.id,
             version: r.package.version,
@@ -132,16 +132,18 @@ export function registerCockpitTools(
     COCKPIT_TOOL_DESCRIPTIONS.list_jobs,
     ListJobsInputShape,
     (raw) =>
-      runTool(ctx, "jobs:read", false, ListJobsSchema, raw, async (input) => {
+      runTool(ctx, "jobs:read", false, raw, async (input) => {
         const where = {
           userId,
           ...(input.status ? { Status: { value: input.status } } : {}),
           ...(input.hasPackage === undefined
             ? {}
             : {
+                // "Has a package" means an active one (not superseded), as
+                // activePackage below.
                 applicationPackages: input.hasPackage
-                  ? { some: { userId } }
-                  : { none: { userId } },
+                  ? { some: { userId, status: { not: "superseded" } } }
+                  : { none: { userId, status: { not: "superseded" } } },
               }),
         };
         const [total, rows] = await Promise.all([
@@ -190,7 +192,7 @@ export function registerCockpitTools(
     COCKPIT_TOOL_DESCRIPTIONS.get_job,
     GetJobInputShape,
     (raw) =>
-      runTool(ctx, "jobs:read", false, GetJobSchema, raw, async (input) => {
+      runTool(ctx, "jobs:read", false, raw, async (input) => {
         const job = await prisma.job.findFirst({
           where: { id: input.jobId, userId },
           select: {
@@ -207,7 +209,32 @@ export function registerCockpitTools(
             applicationPackages: {
               where: { userId },
               orderBy: { version: "desc" },
-              include: { cvFile: { select: { id: true, fileName: true } } },
+              select: {
+                id: true,
+                version: true,
+                status: true,
+                // The bot's own key: cockpit_submit.py uses it to recognise its
+                // package after a crash.
+                idempotencyKey: true,
+                emailTo: true,
+                emailSubject: true,
+                emailBody: true,
+                letterMd: true,
+                fitGrade: true,
+                fitAnalysis: true,
+                cvJson: true,
+                cvFile: { select: { id: true, fileName: true } },
+                sourceFolder: true,
+                rejectReason: true,
+                changeRequest: true,
+                changeRequestedAt: true,
+                changeRequestHandledAt: true,
+                changeRequestResponse: true,
+                createdAt: true,
+                approvedAt: true,
+                rejectedAt: true,
+                sentAt: true,
+              },
             },
           },
         });
@@ -223,9 +250,10 @@ export function registerCockpitTools(
           matchScore: job.matchScore,
           applied: job.applied,
           appliedDate: job.appliedDate,
-          // Every package field except cvFileId (the file is cvFile).
+          // Full content only on the newest version; older ones are a summary.
           packages: job.applicationPackages.map(
-            ({ cvFileId: _cvFileId, ...pkg }) => pkg,
+            ({ emailBody, letterMd, fitAnalysis, cvJson, ...summary }, i) =>
+              i === 0 ? { ...summary, emailBody, letterMd, fitAnalysis, cvJson } : summary,
           ),
         };
       }),
@@ -240,7 +268,6 @@ export function registerCockpitTools(
         ctx,
         "jobs:read",
         false,
-        ListChangeRequestsSchema,
         raw,
         async (input) => {
           const rows = await prisma.applicationPackage.findMany({
@@ -288,7 +315,6 @@ export function registerCockpitTools(
         ctx,
         "package:write",
         false,
-        MarkChangeRequestDoneSchema,
         raw,
         async (input) => {
           const pkg = await markChangeRequestDone(

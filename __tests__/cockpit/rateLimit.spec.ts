@@ -58,3 +58,14 @@ describe("checkMcpRateLimit extension (AC-50)", () => {
     expect(checkMcpRateLimit("rl-c", COCKPIT_RATE_LIMITS.cockpit).allowed).toBe(false);
   });
 });
+
+describe("checkMcpRateLimit peek", () => {
+  it("reports without spending a slot", () => {
+    const o = { bucket: "peek-t", max: 2, windowMs: 60_000 };
+    expect(checkMcpRateLimit("pk", { ...o, peek: true })).toMatchObject({ allowed: true, remaining: 2 });
+    checkMcpRateLimit("pk", o);
+    checkMcpRateLimit("pk", o);
+    expect(checkMcpRateLimit("pk", { ...o, peek: true })).toMatchObject({ allowed: false, remaining: 0 });
+    expect(checkMcpRateLimit("pk", { ...o, peek: true }).allowed).toBe(false);
+  });
+});
