@@ -310,6 +310,22 @@ describe("submitPackage", () => {
     );
   });
 
+  it.each(["P1008", "P2028"])(
+    "reports a %s (SQLite busy / transaction timeout) as CONFLICT, not INTERNAL (review 01 #3)",
+    async (prismaCode) => {
+      const jobId = await newJob(userA);
+      vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError("busy", {
+          code: prismaCode,
+          clientVersion: "test",
+        }),
+      );
+      await expect(submitPackage(userA, input(jobId))).rejects.toMatchObject(
+        code("CONFLICT"),
+      );
+    },
+  );
+
   it("two real concurrent submits with different keys: one active package, any loser is CONFLICT (review 01 #3)", async () => {
     const jobId = await newJob(userA);
     const results = await Promise.allSettled([

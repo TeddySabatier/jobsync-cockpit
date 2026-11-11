@@ -59,6 +59,8 @@ function replay(existing: ApplicationPackage, jobId: string): SubmitResult {
   return { package: existing, supersededIds: [], idempotent: true };
 }
 
+const RETRYABLE_PRISMA_CODES = ["P2034", "P1008", "P2028"];
+
 export async function submitPackage(
   userId: string,
   input: SubmitApplicationPackageInput,
@@ -68,11 +70,13 @@ export async function submitPackage(
       submitInTransaction(tx, userId, input),
     );
   } catch (e) {
-    // Write conflict / deadlock (SQLite busy under concurrent writers): the
-    // caller replays the submit, same as a version race.
+    // Write conflict / deadlock (P2034), and what SQLite busy under concurrent
+    // writers really raises on Prisma: P1008 (gave up waiting for the write
+    // lock) or P2028 (transaction could not start / expired). The transaction
+    // rolled back, so the caller replays the submit, same as a version race.
     if (
       e instanceof Prisma.PrismaClientKnownRequestError &&
-      e.code === "P2034"
+      RETRYABLE_PRISMA_CODES.includes(e.code)
     ) {
       throw new CockpitError("CONFLICT");
     }
