@@ -199,3 +199,16 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/mcp/tools/cockpit.ts`, `cockpitDescriptions.ts`, `src/lib/mcp/rate-limit.ts`, `src/lib/cockpit/{errors,schemas}.ts`, `__tests__/cockpit/*`, `docs/cockpit.md`.
 - **Not changed:** legacy tools, in-memory rate-limit persistence, token scope choice. SPEC stays frozen; this entry is the amendment of record.
+
+## D-019 Bot hand-over: replaying a submit is safe; the script retries a CONFLICT once
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | Replaying the whole `attach_file` + `submit_application_package` with the same idempotency key and the same content is **safe** (the server answers with the existing package); consistent with D-016(b), whose `CONFLICT` text says to fetch the current state and retry the whole request | **Accept.** Documented in `docs/cockpit-bot.md`; the server tool description already said so. | The old doc line "do not retry blindly" contradicted it. |
+| (b) | The script retries a `CONFLICT` **once** (a second one is reported, no loop; it can mean the owner is sending). Before the replay it **re-reads the job**: another live package (a concurrent run) gives `ALREADY_SUBMITTED`, its own landed package gives the recovered result; only a clean job is replayed, reusing the first upload's file id (no second `attach_file`). `INVALID_STATE` and every other error are never retried | **Accept.** | A concurrent write clears on replay; a real clash (a key used for another job) must reach the operator. |
+| (c) | `changes` prints a **summary** by default (`count`, and `truncated` when the list is full; default limit 20); `--full` or `--package ID` prints the content, and `--package` always searches up to 100 requests | **Accept.** | Full items carry the CV, letter and email (up to megabytes) into the bot's context. |
+| (d) | `list_change_requests` also returns `fitGrade`, which `--revision` uses as the fit | **Accept.** | The analysis JSON of a package from another client may have no verdict. |
+| (e) | Two runs on the same link at once (daily task and the Claude prompt button) are **not** locked; the loser gets `CONFLICT` or `ALREADY_SUBMITTED` | **Accept, documented.** | Rare, and both outcomes are safe. |
+
+- **Scope:** `scripts/bot/cockpit_submit.py`, its tests, `src/lib/mcp/tools/cockpit.ts` (one select field), `.gitignore`, docs.
+- **Not changed:** schema, Send, the other MCP tools.
