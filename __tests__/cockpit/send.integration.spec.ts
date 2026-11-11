@@ -808,6 +808,133 @@ describe("sendApplicationPackage: review 02 findings (issue #54)", () => {
   });
 });
 
+describe("own-lock checks, independent tester (PR #73)", () => {
+  const ago = (ms: number) => new Date(Date.now() - ms);
+
+  it("re-read after the lock: a lock that is not ours gives CONFLICT, no Gmail call, the other lock untouched", async () => {
+    const pkg = await s.mkApproved();
+    // Right after our lock, the row is locked by "someone else" (createdAt is
+    // a timestamp our send can never have written).
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER swap_lock AFTER UPDATE OF sendStartedAt ON ApplicationPackage
+       WHEN NEW.id = '${pkg.id}' AND NEW.sendStartedAt IS NOT NULL
+       BEGIN UPDATE ApplicationPackage SET sendStartedAt = createdAt WHERE id = NEW.id; END`,
+    );
+    const err = await rejection(send(pkg.id, pkg.updatedAt));
+    await prisma.$executeRawUnsafe("DROP TRIGGER swap_lock");
+    expect(err).toMatchObject({ code: "CONFLICT" });
+    expect(gmail.getAccessToken).not.toHaveBeenCalled();
+    expect(gmail.sendRaw).not.toHaveBeenCalled();
+    const after = await row(pkg.id);
+    expect(after.sendStartedAt).toEqual(after.createdAt);
+    expect(after).toMatchObject({ status: "approved", sendOutcome: null });
+  });
+
+  it("Gmail success while another send holds the lock: step 6 records nothing and leaves that lock alone", async () => {
+    const pkg = await s.mkApproved();
+    const otherLock = ago(1_000);
+    gmail.sendRaw.mockImplementationOnce(async () => {
+      // Our lock was released by recovery and a second send locked the row.
+      await prisma.applicationPackage.update({
+        where: { id: pkg.id },
+        data: { sendStartedAt: otherLock, sendOutcome: null },
+      });
+      return { id: "gmail-msg-late", threadId: "gmail-thread-late" };
+    });
+    expect(await rejection(send(pkg.id, pkg.updatedAt))).toMatchObject({
+      code: "SEND_OUTCOME_UNKNOWN",
+    });
+    const after = await row(pkg.id);
+    expect(after.sendStartedAt).toEqual(otherLock);
+    expect(after).toMatchObject({ status: "approved", sendOutcome: null, sentAt: null });
+    expect(await sentEmails(pkg.id)).toBe(0);
+    expect((await jobOf(pkg.jobId)).applied).toBe(false);
+  });
+
+  it("step 6 after Release lock then un-approve: the late result never locks a package that is not approved", async () => {
+    const pkg = await s.mkApproved();
+    gmail.sendRaw.mockImplementationOnce(async () => {
+      await prisma.applicationPackage.update({
+        where: { id: pkg.id },
+        data: { sendStartedAt: ago(61_000) },
+      });
+      await releaseSendLock(s.userA.id, pkg.id);
+      await unapprovePackage(s.userA.id, pkg.id);
+      return { id: "gmail-msg-late", threadId: "gmail-thread-late" };
+    });
+    expect(await rejection(send(pkg.id, pkg.updatedAt))).toMatchObject({
+      code: "SEND_OUTCOME_UNKNOWN",
+    });
+    const after = await row(pkg.id);
+    expect(after).toMatchObject({ status: "pending", sendStartedAt: null, sendOutcome: null });
+    expect(await sentEmails(pkg.id)).toBe(0);
+    expect((await jobOf(pkg.jobId)).applied).toBe(false);
+  });
+
+  it("CV data (cvJson) changed behind the lock gives CONFLICT, lock released, never sent", async () => {
+    const pkg = await s.mkApproved({
+      letterMd: "Dear team",
+      cvJson: JSON.stringify({ name: "Jane Doe" }),
+    });
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER tamper_cv AFTER UPDATE OF sendStartedAt ON ApplicationPackage
+       WHEN NEW.id = '${pkg.id}' AND NEW.sendStartedAt IS NOT NULL
+       BEGIN UPDATE ApplicationPackage SET cvJson = '{"name":"Someone Else"}' WHERE id = NEW.id; END`,
+    );
+    const err = await rejection(send(pkg.id, pkg.updatedAt));
+    await prisma.$executeRawUnsafe("DROP TRIGGER tamper_cv");
+    expect(err).toMatchObject({ code: "CONFLICT" });
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+    expect(gmail.sendRaw).not.toHaveBeenCalled();
+    const after = await row(pkg.id);
+    expect(after.cvJson).toBe('{"name":"Someone Else"}'); // the tamper did happen
+    expect(after).toMatchObject({ status: "approved", sendStartedAt: null });
+  });
+
+  it("a DB error in the job update rolls step 6 back: no SentEmail, lock kept, outcome unknown", async () => {
+    const pkg = await s.mkApproved();
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER block_job BEFORE UPDATE ON Job
+       WHEN NEW.id = '${pkg.jobId}'
+       BEGIN SELECT RAISE(ABORT, 'blocked'); END`,
+    );
+    const err = await rejection(send(pkg.id, pkg.updatedAt));
+    await prisma.$executeRawUnsafe("DROP TRIGGER block_job");
+    expect(err).toMatchObject({ code: "SEND_OUTCOME_UNKNOWN" });
+    expect(gmail.sendRaw).toHaveBeenCalledOnce();
+    const after = await row(pkg.id);
+    expect(after).toMatchObject({ status: "approved", sendOutcome: "unknown", sentAt: null });
+    expect(after.sendStartedAt).not.toBeNull();
+    expect(await sentEmails(pkg.id)).toBe(0);
+    expect((await jobOf(pkg.jobId)).applied).toBe(false);
+    // Locked: no second send.
+    expect(await rejection(send(pkg.id, after.updatedAt))).toMatchObject({ code: "CONFLICT" });
+    expect(gmail.sendRaw).toHaveBeenCalledOnce();
+  });
+
+  it("two sends in the same millisecond: exactly one Gmail call, one SentEmail", async () => {
+    const pkg = await s.mkApproved();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(Date.now() + 5_000));
+      const results = await Promise.allSettled([
+        send(pkg.id, pkg.updatedAt),
+        send(pkg.id, pkg.updatedAt),
+        send(pkg.id, pkg.updatedAt),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      for (const r of results.filter((x) => x.status === "rejected")) {
+        expect((r as PromiseRejectedResult).reason).toMatchObject({ code: "CONFLICT" });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(gmail.sendRaw).toHaveBeenCalledOnce();
+    expect(await sentEmails(pkg.id)).toBe(1);
+    expect((await row(pkg.id)).status).toBe("sent");
+  });
+});
+
 describe("a locked package is frozen (AC-34)", () => {
   it("review transitions, edits and manual apply affect 0 rows; submit gives CONFLICT", async () => {
     const jobId = await s.newJob();
