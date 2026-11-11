@@ -31,7 +31,6 @@ Flip the two `fixme` to `test` when the fixes land.
 
 - [ ] `File` rows have no `userId` column; ownership is path-based (V1 hook).
 - [ ] Edits have no optimistic concurrency; two tabs can overwrite each other (Send re-checks `updatedAt`).
-- [ ] `attach_file` quota check is not atomic (single user).
 - [ ] Upstream `/api/profile/resume` has no path confinement (upstream code, not changed in V0).
 - [ ] Leaving edit mode through a sidebar link does not warn about unsaved changes (known limit).
 - [ ] Rate limits are per process and a fixed window (can pass up to 2× max across a window edge); not shared across replicas.

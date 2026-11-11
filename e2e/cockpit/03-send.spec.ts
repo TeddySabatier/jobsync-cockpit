@@ -41,6 +41,7 @@ test.describe("send", () => {
     expect(sends[0].from).toBe("you@example.com");
     expect(sends[0].attachmentName).toBe(CV_FILE_NAME);
     expect(sends[0].attachmentBytes).toBe(cvPdf().length);
+    expect(sends[0].attachments).toHaveLength(2); // CV + the generated letter PDF
     expect(fakeLog().filter((e) => e.kind === "blocked")).toHaveLength(0);
 
     // Job became applied (SPEC §6.4 step 6).

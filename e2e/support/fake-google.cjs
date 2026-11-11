@@ -13,11 +13,22 @@
 // tokens, secrets and authorization redacted; send requests carry the decoded
 // To / Subject / attachment name from the raw MIME.
 //
+// Requests are VALIDATED, not just answered (a rejected one gets a Google-style
+// 4xx and is logged with `rejected: <reason>`):
+//   - authorization_code: client_id, client_secret and redirect_uri must be the
+//     configured ones, code_verifier must be present and look like an RFC 7636
+//     verifier and, when the code carries a `challenge` (connectGmail copies it
+//     from the redirect to Google), SHA-256(verifier) must equal it (PKCE);
+//   - refresh_token: client_id, client_secret and the refresh token must match;
+//   - revoke: the token must be the refresh token;
+//   - send: Authorization must be the Bearer access token the fake handed out.
+//
 // The authorization-code "code" is a test seam: "fc_" + base64url(JSON) with
-// { nonce, email?, emailVerified?, scope?, refreshToken?, aud?, expOffsetS? }.
+// { nonce, challenge?, email?, emailVerified?, scope?, refreshToken?, aud?, expOffsetS? }.
 // The fake token endpoint turns it into an unsigned id_token (the app does not
 // verify signatures, only aud/iss/exp/nonce).
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
@@ -28,6 +39,15 @@ const logFile = path.join(tmpDir, "fake-google.log");
 
 const GOOGLE_HOST = /(^|\.)(google|googleapis|gstatic|googleusercontent|gmail)\.com$/i;
 const b64url = (s) => Buffer.from(s).toString("base64url");
+
+// What the app is configured with (cockpit-server.mjs sets the env).
+const EXPECTED = {
+  clientId: process.env.GOOGLE_CLIENT_ID || "fake-client-id",
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET || "fake-client-secret",
+  redirectUri: process.env.GOOGLE_REDIRECT_URI || null,
+};
+const ACCESS_TOKEN = "fake-access-token";
+const REFRESH_TOKEN = "fake-refresh-token";
 
 function readMode() {
   const defaults = { send: "ok", token: "ok", revoke: "ok", delayMs: 0 };
@@ -82,22 +102,26 @@ function describeMime(raw) {
     const m = head.match(new RegExp(`^${name}:[ \\t]*(.*)$`, "im"));
     return m ? decodeWord(m[1].trim()) : null;
   };
-  const att = text.match(
-    /Content-Disposition:\s*attachment;\s*filename="([^"]*)"/i,
-  );
-  const pdfPart = text.match(
-    /Content-Type:\s*application\/pdf[^\r\n]*\r\n(?:[^\r\n]+\r\n)*?\r\n([A-Za-z0-9+/=\r\n]+)/i,
-  );
-  let attachmentBytes = null;
-  if (pdfPart) {
-    attachmentBytes = Buffer.from(pdfPart[1].replace(/\s+/g, ""), "base64").length;
+  // Every attachment part, in order: name from Content-Disposition, size from
+  // the base64 body that follows the part headers.
+  const attachments = [];
+  const partRe =
+    /Content-Disposition:\s*attachment;\s*filename="([^"]*)"[^\r\n]*\r\n(?:[^\r\n]+\r\n)*?\r\n([A-Za-z0-9+/=\r\n]*)/gi;
+  let m;
+  while ((m = partRe.exec(text))) {
+    attachments.push({
+      name: m[1],
+      bytes: Buffer.from(m[2].replace(/\s+/g, ""), "base64").length,
+    });
   }
   return {
     from: header("From"),
     to: header("To"),
     subject: header("Subject"),
-    attachmentName: att ? att[1] : null,
-    attachmentBytes,
+    // attachmentName / attachmentBytes describe the FIRST attachment.
+    attachmentName: attachments[0] ? attachments[0].name : null,
+    attachmentBytes: attachments[0] ? attachments[0].bytes : null,
+    attachments,
     mimeBytes: text.length,
   };
 }
@@ -145,6 +169,30 @@ async function bodyText(input, init) {
 
 let sendCounter = 0;
 
+// Returns a reason when the app sent something Google would refuse.
+function tokenProblem(form, grant, spec) {
+  if (form.get("client_id") !== EXPECTED.clientId) return "client_id mismatch";
+  if (form.get("client_secret") !== EXPECTED.clientSecret) return "client_secret mismatch";
+  if (grant === "authorization_code") {
+    const verifier = form.get("code_verifier");
+    if (!verifier) return "code_verifier missing";
+    if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) return "code_verifier malformed";
+    if (spec.challenge) {
+      const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+      if (challenge !== spec.challenge) return "code_verifier does not match code_challenge";
+    }
+    const redirect = form.get("redirect_uri");
+    if (!redirect) return "redirect_uri missing";
+    if (EXPECTED.redirectUri && redirect !== EXPECTED.redirectUri) return "redirect_uri mismatch";
+    return null;
+  }
+  if (grant === "refresh_token") {
+    if (form.get("refresh_token") !== REFRESH_TOKEN) return "refresh_token mismatch";
+    return null;
+  }
+  return `unsupported grant_type ${grant}`;
+}
+
 async function handleToken(form, mode) {
   const grant = form.get("grant_type");
   // Only key names are logged: values hold codes, secrets and refresh tokens.
@@ -153,29 +201,42 @@ async function handleToken(form, mode) {
     log({ ...entry, status: 400, mode: "invalid_grant" });
     return json(400, { error: "invalid_grant" });
   }
+  const spec = grant === "authorization_code" ? parseCode(form.get("code")) : {};
+  const problem = tokenProblem(form, grant, spec);
+  if (problem) {
+    log({ ...entry, status: 400, mode: "rejected", rejected: problem });
+    return json(400, { error: "invalid_request", error_description: problem });
+  }
   if (grant === "authorization_code") {
-    const spec = parseCode(form.get("code"));
     const scope =
       spec.scope ??
       "https://www.googleapis.com/auth/gmail.send openid https://www.googleapis.com/auth/userinfo.email";
     const out = {
-      access_token: "fake-access-token",
+      access_token: ACCESS_TOKEN,
       expires_in: 3599,
       scope,
       token_type: "Bearer",
       id_token: fakeIdToken(form.get("client_id"), spec),
     };
-    if (spec.refreshToken !== false) out.refresh_token = "fake-refresh-token";
+    if (spec.refreshToken !== false) out.refresh_token = REFRESH_TOKEN;
     log({ ...entry, status: 200, mode: "ok" });
     return json(200, out);
   }
   log({ ...entry, status: 200, mode: "ok" });
   return json(200, {
-    access_token: "fake-access-token",
+    access_token: ACCESS_TOKEN,
     expires_in: 3599,
     scope: "https://www.googleapis.com/auth/gmail.send",
     token_type: "Bearer",
   });
+}
+
+function headerOf(input, init, name) {
+  const h = (init && init.headers) || (typeof Request !== "undefined" && input instanceof Request ? input.headers : null);
+  if (!h) return null;
+  if (typeof h.get === "function") return h.get(name);
+  const key = Object.keys(h).find((k) => k.toLowerCase() === name.toLowerCase());
+  return key ? h[key] : null;
 }
 
 async function handleSend(input, init, mode) {
@@ -191,6 +252,11 @@ async function handleSend(input, init, mode) {
     authorization: "[redacted]",
     ...describeMime(raw),
   };
+
+  if (headerOf(input, init, "authorization") !== `Bearer ${ACCESS_TOKEN}`) {
+    log({ ...entry, status: 401, outcome: "rejected", rejected: "bad Authorization" });
+    return json(401, { error: { code: 401, message: "FAKE-GOOGLE-BODY-MARKER" } });
+  }
 
   if (mode.send === "timeout") {
     // Hang until the caller's AbortSignal fires (the real 20 s client timeout),
@@ -255,6 +321,11 @@ globalThis.fetch = async function fakeGoogleFetch(input, init) {
     return handleToken(form, mode);
   }
   if (target === "https://oauth2.googleapis.com/revoke") {
+    const token = new URLSearchParams(await bodyText(input, init)).get("token");
+    if (token !== REFRESH_TOKEN) {
+      log({ kind: "revoke", status: 400, rejected: "token mismatch" });
+      return json(400, { error: "invalid_token" });
+    }
     log({ kind: "revoke", status: mode.revoke === "500" ? 500 : 200 });
     return mode.revoke === "500" ? json(500, {}) : json(200, {});
   }
