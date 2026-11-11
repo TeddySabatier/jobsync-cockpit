@@ -69,6 +69,15 @@ describe("renderLetterPdf", () => {
     expect(text).toContain("https://evil.example/x");
   });
 
+  it("keeps a reference-definition line in the PDF, like the HTML preview (D-018 e)", async () => {
+    const text = await textOf(
+      await renderLetterPdf({
+        letterMd: "See my work [1].\n\n[1]: https://portfolio.example/jane",
+      }),
+    );
+    expect(text).toContain("[1]: https://portfolio.example/jane");
+  });
+
   it("flows a long letter onto more pages instead of cutting it", async () => {
     const long = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} ${"word ".repeat(40)}`).join("\n\n");
     const pdf = await renderLetterPdf({ letterMd: long, cvJson: CV_JSON });

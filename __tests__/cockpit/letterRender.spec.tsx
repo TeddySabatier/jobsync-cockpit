@@ -20,6 +20,14 @@ describe("renderLetterMarkdown (AC-41)", () => {
     expect(html).not.toMatch(/(href|src)\s*=/i);
   });
 
+  it("keeps a reference-definition line as visible text (review 01 #7)", () => {
+    const html = renderLetterMarkdown(
+      "See my work [1].\n\n[1]: https://portfolio.example/jane",
+    );
+    expect(html).toContain("[1]: https://portfolio.example/jane");
+    expect(html).not.toMatch(/(href|src)\s*=/i);
+  });
+
   it("escapes raw HTML", () => {
     const html = renderLetterMarkdown(
       '<script>alert(1)</script><img src=x onerror=alert(1)><a href="http://evil.example">x</a>',

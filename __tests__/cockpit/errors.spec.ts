@@ -79,6 +79,12 @@ describe("cockpit errors", () => {
     });
   });
 
+  it("recognises an AuthError from a duplicated module by its name", () => {
+    const foreign = new Error("anything");
+    foreign.name = "AuthError";
+    expect(toActionResult(foreign)).toMatchObject({ code: "UNAUTHENTICATED" });
+  });
+
   it("does not recognise the anonymous caller by message text", () => {
     expect(toActionResult(new Error("Not authenticated"))).toMatchObject({
       code: "INTERNAL",

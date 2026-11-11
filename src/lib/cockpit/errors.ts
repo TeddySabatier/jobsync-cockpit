@@ -59,7 +59,11 @@ export function toActionResult(err: unknown): CockpitResult<never> {
   let code: CockpitErrorCode;
   if (err instanceof CockpitError) {
     code = err.code;
-  } else if (err instanceof AuthError) {
+  } else if (
+    err instanceof AuthError ||
+    // instanceof can fail across duplicated modules (dev HMR, RSC/SSR layers).
+    (err instanceof Error && err.name === "AuthError")
+  ) {
     code = "UNAUTHENTICATED";
   } else {
     code = "INTERNAL";

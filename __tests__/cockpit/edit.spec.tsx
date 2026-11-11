@@ -294,6 +294,12 @@ describe("edit form: client validation mirrors the zod rules", () => {
     expect(e.emailBody).toBe("Required");
   });
 
+  it("says 'Must not be blank' for a whitespace-only subject and body (D-018 c)", () => {
+    const e = validateEditValues({ ...base, emailSubject: "  ", emailBody: " \n" });
+    expect(e.emailSubject).toBe("Must not be blank");
+    expect(e.emailBody).toBe("Must not be blank");
+  });
+
   it("blocks Save and shows the error", async () => {
     render(<EditForm detail={fixture()} onClose={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("To"), { target: { value: "not-an-email" } });

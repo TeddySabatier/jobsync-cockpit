@@ -4,8 +4,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { APIRequestContext } from "@playwright/test";
 import { makePdf } from "./pdf";
 
-// Bot-side helpers: the real MCP protocol over HTTP with the token the global
-// setup created through the Settings UI. Synthetic data only.
+// Bot-side helpers: the real MCP protocol over HTTP with the bot token the
+// e2e server script seeds directly into the DB. Synthetic data only.
 
 export type ToolOutcome = {
   isError: boolean;
@@ -173,7 +173,11 @@ export async function connectGmail(
   const auth = new URL(start.headers()["location"]);
   const state = stateOverride ?? auth.searchParams.get("state") ?? "";
   const nonce = auth.searchParams.get("nonce") ?? "";
-  const code = "fc_" + Buffer.from(JSON.stringify({ nonce, ...spec })).toString("base64url");
+  // The fake token endpoint checks the verifier the app posts against this
+  // challenge (PKCE), so dropping or breaking the verifier fails the connect.
+  const challenge = auth.searchParams.get("code_challenge") ?? "";
+  const code =
+    "fc_" + Buffer.from(JSON.stringify({ nonce, challenge, ...spec })).toString("base64url");
   const cb = await request.get(
     `/api/cockpit/gmail/callback?state=${encodeURIComponent(state)}&code=${code}`,
     { maxRedirects: 0 },

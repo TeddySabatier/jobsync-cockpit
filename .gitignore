@@ -88,3 +88,7 @@ evals/*/_investigate-*
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Bot hand-over: the API token and the per-folder submit marker (never commit)
+/scripts/bot/secrets/
+.cockpit-submitted.json*
