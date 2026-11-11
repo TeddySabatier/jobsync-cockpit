@@ -474,6 +474,107 @@ describe("list_jobs / get_job (AC-11)", () => {
     await c.close();
   });
 
+  it("get_job with a sent / rejected / superseded mix: only the newest version carries full content", async () => {
+    const u = await seedUser("mix@example.com");
+    const other = await seedUser("mix-other@example.com");
+    const jobId = await newJob(u);
+    const mk = (userId: string, version: number, status: string, extra: Record<string, unknown> = {}) =>
+      prisma.applicationPackage.create({
+        data: { userId, jobId, version, status, emailSubject: `S${version}`, emailBody: `Body ${version}`, letterMd: `Letter ${version}`, ...extra },
+      });
+    await mk(u, 1, "sent", { sentAt: new Date("2026-01-01"), sentVia: "gmail", sendOutcome: "sent" });
+    await mk(u, 2, "rejected", { rejectReason: "Not this one", rejectedAt: new Date("2026-01-02") });
+    await mk(u, 3, "superseded");
+    await mk(other, 4, "pending", { emailBody: "OTHER USER BODY" }); // not this user's row
+    const c = await asUser(u);
+    const got = JSON.parse((await c.call("get_job", { jobId })).text);
+    await c.close();
+    expect(got.packages.map((p: { version: number }) => p.version)).toEqual([3, 2, 1]);
+    const [v3, v2, v1] = got.packages;
+    expect(v3).toMatchObject({ status: "superseded", emailBody: "Body 3", letterMd: "Letter 3" });
+    expect(v2).toMatchObject({ status: "rejected", rejectReason: "Not this one", emailSubject: "S2" });
+    expect(v1).toMatchObject({ status: "sent", emailSubject: "S1" });
+    for (const old of [v2, v1]) {
+      for (const k of ["emailBody", "letterMd", "fitAnalysis", "cvJson", "sendOutcome", "sentVia"]) {
+        expect(old).not.toHaveProperty(k);
+      }
+    }
+    expect(JSON.stringify(got)).not.toContain("OTHER USER BODY");
+  });
+
+  it("list_jobs hasPackage: sent / rejected / pending count as a package, an active one wins over old superseded ones", async () => {
+    const u = await seedUser("haspkg@example.com");
+    const mk = (jobId: string, version: number, status: string) =>
+      prisma.applicationPackage.create({
+        data: { userId: u, jobId, version, status, emailSubject: "s", emailBody: "b" },
+      });
+    const mixed = await newJob(u);
+    await mk(mixed, 1, "superseded");
+    await mk(mixed, 2, "superseded");
+    await mk(mixed, 3, "pending");
+    const sent = await newJob(u);
+    await mk(sent, 1, "sent");
+    const rejected = await newJob(u);
+    await mk(rejected, 1, "rejected");
+    const dead = await newJob(u);
+    await mk(dead, 1, "superseded");
+    const c = await asUser(u);
+    const list = async (hasPackage: boolean) =>
+      JSON.parse((await c.call("list_jobs", { hasPackage })).text);
+    const yes = await list(true);
+    const no = await list(false);
+    await c.close();
+    expect(yes.jobs.map((j: { id: string }) => j.id).sort()).toEqual([mixed, sent, rejected].sort());
+    expect(yes.total).toBe(3);
+    expect(no.jobs.map((j: { id: string }) => j.id)).toEqual([dead]);
+    expect(no.total).toBe(1);
+    const byId = Object.fromEntries(yes.jobs.map((j: { id: string }) => [j.id, j]));
+    expect(byId[mixed].activePackage).toMatchObject({ version: 3, status: "pending" });
+    expect(byId[sent].activePackage).toMatchObject({ version: 1, status: "sent" });
+    expect(no.jobs[0].activePackage).toBeNull();
+  });
+
+  it("descriptions vs behaviour: limits, key regex, emailTo omitted, cvFileId omitted, resubmit closes a change request", async () => {
+    const u = await seedUser("contract@example.com");
+    const c = await asUser(u);
+    const ok = async (over: Record<string, unknown>, jobId?: string) =>
+      c.call("submit_application_package", submitArgs(jobId ?? (await newJob(u)), over));
+    const shape = /^MCP error -32602/;
+    expect((await ok({ emailSubject: "x".repeat(300) })).isError).toBe(false);
+    expect((await ok({ emailSubject: "x".repeat(301) })).text).toMatch(shape);
+    expect((await ok({ emailSubject: "a\nb" })).text).toMatch(shape);
+    expect((await ok({ emailBody: "x".repeat(20_000) })).isError).toBe(false);
+    expect((await ok({ emailBody: "x".repeat(20_001) })).text).toMatch(shape);
+    expect((await ok({ idempotencyKey: "a._:-".padEnd(100, "Z") })).isError).toBe(false);
+    expect((await ok({ idempotencyKey: "k".repeat(101) })).text).toMatch(shape);
+    expect((await ok({ idempotencyKey: "has space" })).text).toMatch(shape);
+    expect((await ok({ fitGrade: "C" })).text).toMatch(shape);
+    expect((await ok({ emailTo: "a@example.com,b@example.com" })).text).toMatch(shape);
+
+    // emailTo omitted -> apply via link (null); cvFileId omitted -> no file.
+    const jobId = await newJob(u);
+    const { emailTo: _drop, ...noTo } = submitArgs(jobId);
+    const r = JSON.parse((await c.call("submit_application_package", noTo)).text);
+    const row = await prisma.applicationPackage.findUniqueOrThrow({ where: { id: r.packageId } });
+    expect(row).toMatchObject({ emailTo: null, cvFileId: null });
+
+    // A resubmit supersedes a pending change request: mark_change_request_done then fails.
+    await prisma.applicationPackage.update({
+      where: { id: r.packageId },
+      data: { status: "changes_requested", changeRequest: "please fix", changeRequestedAt: new Date() },
+    });
+    const r2 = JSON.parse((await c.call("submit_application_package", submitArgs(jobId))).text);
+    const old = await prisma.applicationPackage.findUniqueOrThrow({ where: { id: r.packageId } });
+    expect(old.status).toBe("superseded");
+    expect(old.changeRequestHandledAt).not.toBeNull();
+    expect(r2.version).toBe(2);
+    expect(await c.call("mark_change_request_done", { packageId: r.packageId, response: "done" })).toEqual({
+      isError: true,
+      text: errorText("INVALID_STATE"),
+    });
+    await c.close();
+  });
+
   it("get_job on another user's job is NOT_FOUND (user scoping)", async () => {
     const c = await asUser(userA);
     const foreign = await newJob(userB);

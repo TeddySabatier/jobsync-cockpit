@@ -61,4 +61,35 @@ describe("rate-limit slots of attach_file", () => {
     });
     expect(peek.remaining).toBe(8);
   });
+
+  const C = { bucket: "cockpit", max: 10, windowMs: 3_600_000, peek: true };
+  const A = { bucket: "cockpit-attach", max: 2, windowMs: 3_600_000, peek: true };
+  const args = { fileName: "a.pdf", mimeType: "application/pdf", contentBase64: pdfBase64() };
+
+  it("an accepted attach_file spends one slot in each bucket", async () => {
+    const c = await connectCockpit({ userId: "both-u", tokenName: "bot", scopes: ALL_SCOPES });
+    await c.call("attach_file", args);
+    await c.close();
+    expect(checkMcpRateLimit("both-u", C).remaining).toBe(9);
+    expect(checkMcpRateLimit("both-u", A).remaining).toBe(1);
+  });
+
+  it("when the cockpit bucket is the exhausted one, the attach bucket stays untouched", async () => {
+    const c = await connectCockpit({ userId: "cockpit-full-u", tokenName: "bot", scopes: ALL_SCOPES });
+    for (let i = 0; i < 10; i++) await c.call("list_jobs", {}); // DB proxy throws: INTERNAL, slot spent
+    expect(checkMcpRateLimit("cockpit-full-u", C).remaining).toBe(0);
+    for (let i = 0; i < 3; i++) {
+      expect((await c.call("attach_file", args)).text).toMatch(/^RATE_LIMITED/);
+    }
+    await c.close();
+    expect(checkMcpRateLimit("cockpit-full-u", A).remaining).toBe(2);
+  });
+
+  it("a token without the scope spends no slot in either bucket", async () => {
+    const c = await connectCockpit({ userId: "noscope-u", tokenName: "bot", scopes: [] });
+    expect((await c.call("attach_file", args)).text).toMatch(/^UNAUTHORIZED_SCOPE/);
+    await c.close();
+    expect(checkMcpRateLimit("noscope-u", C).remaining).toBe(10);
+    expect(checkMcpRateLimit("noscope-u", A).remaining).toBe(2);
+  });
 });

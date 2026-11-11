@@ -184,4 +184,17 @@ describe("argument errors (finding: SDK validates the shape first)", () => {
     });
     await c.close();
   });
+
+  it.each(CALLS.map(([tool]) => tool))(
+    "%s: an unscoped token with a malformed argument gets the SDK shape error and spends no slot",
+    async (tool) => {
+      limiter.mockClear();
+      const c = await connectCockpit({ userId: "u1", tokenName: "bot", scopes: [] });
+      const res = await c.call(tool, { jobId: 42, packageId: 42, limit: "x", fileName: 1 });
+      expect(res.isError).toBe(true);
+      expect(res.text).toMatch(/^MCP error -32602: Input validation error/);
+      await c.close();
+      expect(limiter).not.toHaveBeenCalled();
+    },
+  );
 });
