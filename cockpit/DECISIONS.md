@@ -200,6 +200,21 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 - **Scope:** `src/lib/mcp/tools/cockpit.ts`, `cockpitDescriptions.ts`, `src/lib/mcp/rate-limit.ts`, `src/lib/cockpit/{errors,schemas}.ts`, `__tests__/cockpit/*`, `docs/cockpit.md`.
 - **Not changed:** legacy tools, in-memory rate-limit persistence, token scope choice. SPEC stays frozen; this entry is the amendment of record.
 
+## D-018 Core library hardening (review 01, issue #53)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | A send (Gmail, **Mark as sent (manual)** or **Mark applied manually**) moves the job **status** to `applied` **only from `draft` or `new`**; a job already at `interview`, `offer` or any other status keeps its status. Whatever the status, the send **always sets `applied = true`** and sets `appliedDate` to the send time **only when it is empty** (an existing date is never overwritten). One shared helper (`markJobApplied` in `packages.ts`) serves every path and refuses an empty job id | **Accept (review finding; applied/appliedDate rule by maintainer decision on PR #68).** | The owner may have moved the job on by hand; a late send must not rewind the status. But the application did happen: the job card must not say "Not applied" after a real send. Prisma reads `id: undefined` as no filter, a mass-write risk. |
+| (b) | `submit_application_package` and the edit schema are **strict**: an unknown key (`emailTooo`) is refused, not dropped. The MCP tool registers the strict object, so the SDK error names the key | **Accept (review finding).** | A dropped `emailTo` typo silently turned a package into "apply via link". |
+| (c) | A whitespace-only subject or body is refused (over MCP as an SDK shape error, per D-016 (a); the edit form says "Must not be blank"). The stored text is not trimmed | **Accept (review finding).** | `" "` passed `min(1)`. |
+| (d) | A Prisma write conflict on submit is `CONFLICT` (replay), like a version race, not `INTERNAL`: `P2034`, and `P1008` / `P2028`, which is what SQLite busy under concurrent writers actually raises on Prisma (a test holding the write lock from a second connection gets `P1008`, never `P2034`) | **Accept (review finding).** | Same remedy for the bot: replay the whole submit. |
+| (e) | Letter markdown: the `reference` rule is off too, so a line like `[1]: https://...` stays visible text. The HTML preview and the letter PDF (D-015) share **one** parser instance (`letterMarkdown` in `markdown.ts`), so they never disagree | **Accept (review finding).** | With links off the definition line vanished from the letter. |
+| (f) | Request changes clears `approvedAt`; the next version needs a fresh approval | **Accept (review finding).** | Cosmetic stale timestamp. |
+| (g) | `cvPdfStale` stays set once a CV string changed, even if a later edit restores the original text | **Accept, documented.** | Conservative: only the bot re-render clears it. |
+
+- **Scope:** `src/lib/cockpit/{packages.ts,cvLeaves.ts,schemas.ts,markdown.ts,letterPdf.tsx,send.ts}`, `src/components/cockpit/EditForm.tsx`, `src/lib/mcp/tools/cockpit.ts` (submit registration), tests (`packages.integration`, `packages.contention.integration`, `send.integration`, `schemas`, `letterRender`, `mcpTools`, `botSubmitArgs`), docs.
+- **Not changed:** schema, Job delete cascade, error messages (owned by other issues). SPEC stays frozen; this entry is the amendment of record.
+
 ## D-019 Bot hand-over: replaying a submit is safe; the script retries a CONFLICT once
 
 | # | Topic | Ruling | Reason |

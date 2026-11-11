@@ -16,7 +16,7 @@ import {
   ListChangeRequestsInputShape,
   ListJobsInputShape,
   MarkChangeRequestDoneInputShape,
-  SubmitApplicationPackageInputShape,
+  SubmitApplicationPackageObject,
   emptyToNull,
 } from "@/lib/cockpit/schemas";
 import { COCKPIT_TOOL_DESCRIPTIONS } from "./cockpitDescriptions";
@@ -104,10 +104,14 @@ export function registerCockpitTools(
       ),
   );
 
-  server.tool(
+  // registerTool, not tool(): a raw shape would be wrapped in a stripping
+  // z.object and a misspelled key silently dropped (strict object instead).
+  server.registerTool(
     "submit_application_package",
-    COCKPIT_TOOL_DESCRIPTIONS.submit_application_package,
-    SubmitApplicationPackageInputShape,
+    {
+      description: COCKPIT_TOOL_DESCRIPTIONS.submit_application_package,
+      inputSchema: SubmitApplicationPackageObject,
+    },
     (raw) =>
       runTool(
         ctx,

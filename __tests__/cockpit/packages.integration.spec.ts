@@ -32,6 +32,7 @@ import {
   listJobVersions,
   listPackagesByTab,
   markChangeRequestDone,
+  markJobApplied,
   markPackageAppliedManually,
   rejectPackage,
   requestPackageChanges,
@@ -41,6 +42,8 @@ import {
   type PackageStatus,
 } from "@/lib/cockpit/packages";
 import { cockpitUserDir } from "@/lib/cockpit/files";
+import { JOB_STATUSES } from "@/lib/constants";
+import { log } from "@/lib/telemetry";
 import type { SubmitApplicationPackageInput } from "@/lib/cockpit/schemas";
 import { createJobFor, seedUserWithRefs, type SeededUser } from "./helpers/seedUser";
 
@@ -259,6 +262,51 @@ describe("submitPackage", () => {
     await expect(submitPackage(userA, input(jobId))).rejects.toMatchObject(
       code("CONFLICT"),
     );
+  });
+
+  it.each(["P2034", "P1008", "P2028"])(
+    "reports a %s (write conflict / SQLite busy / transaction timeout) as CONFLICT, not INTERNAL, and logs the code only (review 01 #3)",
+    async (prismaCode) => {
+      const jobId = await newJob(userA);
+      const warn = vi.spyOn(log, "warn").mockImplementation(() => {});
+      vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError("secret detail", {
+          code: prismaCode,
+          clientVersion: "test",
+        }),
+      );
+      await expect(submitPackage(userA, input(jobId))).rejects.toMatchObject(
+        code("CONFLICT"),
+      );
+      expect(warn).toHaveBeenCalledWith(expect.any(String), {
+        prismaCode,
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("secret detail");
+      warn.mockRestore();
+    },
+  );
+
+  // Invariant only: on SQLite the two usually serialise, so this passes with or
+  // without the busy mapping. packages.contention.integration.spec.ts is the
+  // real proof of the mapping.
+  it("invariant: two concurrent submits with different keys leave one active package, any loser is CONFLICT", async () => {
+    const jobId = await newJob(userA);
+    const results = await Promise.allSettled([
+      submitPackage(userA, input(jobId, { idempotencyKey: "par-a" })),
+      submitPackage(userA, input(jobId, { idempotencyKey: "par-b" })),
+    ]);
+    const won = results.filter((r) => r.status === "fulfilled");
+    const lost = results.filter((r) => r.status === "rejected");
+    expect(won.length).toBeGreaterThanOrEqual(1);
+    for (const l of lost) {
+      expect((l as PromiseRejectedResult).reason).toMatchObject(
+        code("CONFLICT"),
+      );
+    }
+    const rows = await prisma.applicationPackage.findMany({ where: { jobId } });
+    expect(rows).toHaveLength(won.length);
+    expect(new Set(rows.map((r) => r.version)).size).toBe(rows.length);
+    expect(rows.filter((r) => r.status !== "superseded")).toHaveLength(1);
   });
 
   it("does not swallow other errors", async () => {
@@ -537,6 +585,118 @@ describe("lifecycle (SPEC §2.1)", () => {
     );
   });
 
+  it("markJobApplied refuses an empty jobId instead of updating every job (review 01 #1)", async () => {
+    const other = await mk("pending");
+    await expect(
+      prisma.$transaction((tx) =>
+        markJobApplied(tx, userA, undefined as unknown as string, new Date()),
+      ),
+    ).rejects.toMatchObject(code("INTERNAL"));
+    const job = await prisma.job.findUniqueOrThrow({
+      where: { id: other.jobId },
+    });
+    expect(job).toMatchObject({ statusId: draftId, applied: false });
+  });
+
+  it("mark applied manually rolls back when the 'applied' job status is missing (review 01 #14)", async () => {
+    const pkg = await mk("approved", { emailTo: null });
+    const before = await row(pkg.id);
+    await prisma.jobStatus.update({
+      where: { id: appliedId },
+      data: { value: "applied-hidden" },
+    });
+    try {
+      await expect(
+        markPackageAppliedManually(userA, pkg.id),
+      ).rejects.toMatchObject(code("INTERNAL"));
+    } finally {
+      await prisma.jobStatus.update({
+        where: { id: appliedId },
+        data: { value: "applied" },
+      });
+    }
+    expect(await row(pkg.id)).toEqual(before);
+    expect(
+      await prisma.job.findUniqueOrThrow({ where: { id: pkg.jobId } }),
+    ).toMatchObject({ statusId: draftId, applied: false, appliedDate: null });
+  });
+
+  it("mark applied manually under a send lock leaves the job untouched (review 01 #14)", async () => {
+    const pkg = await mk("approved", {
+      emailTo: null,
+      sendStartedAt: new Date(),
+    });
+    const jobBefore = await prisma.job.findUniqueOrThrow({
+      where: { id: pkg.jobId },
+    });
+    await expect(
+      markPackageAppliedManually(userA, pkg.id),
+    ).rejects.toMatchObject(code("INVALID_STATE"));
+    expect(
+      await prisma.job.findUniqueOrThrow({ where: { id: pkg.jobId } }),
+    ).toEqual(jobBefore);
+  });
+
+  it("request changes clears approvedAt; the next version needs a fresh approval (review 01 #11)", async () => {
+    const pkg = await mk("pending");
+    await approvePackage(userA, pkg.id);
+    const req = await requestPackageChanges(userA, pkg.id, "Shorten it");
+    expect(req.approvedAt).toBeNull();
+    const done = await markChangeRequestDone(userA, pkg.id, "Shortened");
+    expect(done).toMatchObject({ status: "pending", approvedAt: null });
+  });
+
+  // Every status the app seeds (JOB_STATUSES), matched by value, with and
+  // without an existing appliedDate. Only draft and new move to applied; every
+  // job gets applied=true; an existing appliedDate is never overwritten, a
+  // missing one becomes the send time.
+  const appliedOn = new Date("2026-02-01T00:00:00Z");
+  it.each(
+    JOB_STATUSES.flatMap((s) => [
+      [s.value, s.label, appliedOn] as const,
+      [s.value, s.label, null] as const,
+    ]),
+  )(
+    "mark applied manually from job status '%s', appliedDate %s (D-018 a)",
+    async (value, label, before) => {
+      const status = await prisma.jobStatus.upsert({
+        where: { value },
+        update: {},
+        create: { value, label },
+      });
+      const pkg = await mk("pending", { emailTo: null });
+      await prisma.job.update({
+        where: { id: pkg.jobId },
+        data: { statusId: status.id, applied: false, appliedDate: before },
+      });
+      const res = await markPackageAppliedManually(userA, pkg.id);
+      const job = await prisma.job.findUniqueOrThrow({
+        where: { id: pkg.jobId },
+      });
+      expect(res.status).toBe("sent");
+      expect(job.statusId).toBe(
+        value === "draft" || value === "new" ? appliedId : status.id,
+      );
+      expect(job.applied).toBe(true);
+      expect(job.appliedDate).toEqual(before ?? res.sentAt);
+    },
+  );
+
+  it("forward-only matches the status value, not its label (D-018 a)", async () => {
+    const lookalike = await prisma.jobStatus.create({
+      data: { label: "Draft", value: "draft-lookalike" },
+    });
+    const pkg = await mk("pending", { emailTo: null });
+    await prisma.job.update({
+      where: { id: pkg.jobId },
+      data: { statusId: lookalike.id },
+    });
+    await markPackageAppliedManually(userA, pkg.id);
+    expect(
+      await prisma.job.findUniqueOrThrow({ where: { id: pkg.jobId } }),
+    ).toMatchObject({ statusId: lookalike.id, applied: true });
+  });
+
   it("mark applied manually is refused when emailTo is set", async () => {
     const pkg = await mk("pending", { emailTo: "hr@example.com" });
     await expect(
@@ -603,6 +763,52 @@ describe("updatePackageContent", () => {
       updatePackageContent(userA, pkg.id, { cvJson: next }),
     ).rejects.toMatchObject(code("VALIDATION"));
     expect((await row(pkg.id)).cvJson).toBe(JSON.stringify(cv));
+  });
+
+  it.each([
+    ["a stored __proto__ key vs a renamed key", '{"__proto__":{}}', { other: {} }],
+    ["a stored toString key vs a renamed key", '{"toString":"x"}', { other: "x" }],
+    ["a renamed key vs an inherited name", '{"x":{}}', { constructor: {} }],
+  ])("compares own keys only: %s (review 01 #10)", async (_n, stored, next) => {
+    const pkg = await mk("pending", { cvJson: stored });
+    await expect(
+      updatePackageContent(userA, pkg.id, { cvJson: next }),
+    ).rejects.toMatchObject(code("VALIDATION"));
+    expect((await row(pkg.id)).cvJson).toBe(stored);
+  });
+
+  it("keeps empty arrays / objects in the shape", async () => {
+    const stored = { a: [], b: {} };
+    const pkg = await mk("pending", { cvJson: JSON.stringify(stored) });
+    await expect(
+      updatePackageContent(userA, pkg.id, { cvJson: { a: {}, b: [] } }),
+    ).rejects.toMatchObject(code("VALIDATION"));
+    const same = await updatePackageContent(userA, pkg.id, { cvJson: stored });
+    expect(same.cvPdfStale).toBe(false);
+  });
+
+  it("keeps the PDF stale after an edit is reverted (conservative, documented)", async () => {
+    const pkg = await mk("pending", { cvJson: JSON.stringify(cv) });
+    const edited = { ...cv, name: "Jane Q. Doe" };
+    await updatePackageContent(userA, pkg.id, { cvJson: edited });
+    const reverted = await updatePackageContent(userA, pkg.id, { cvJson: cv });
+    expect(reverted.cvJson).toBe(JSON.stringify(cv));
+    expect(reverted.cvPdfStale).toBe(true);
+  });
+
+  it.each([
+    ["NBSP-only subject", { emailSubject: "  " }],
+    ["ideographic-space subject", { emailSubject: "　" }],
+    ["NBSP / line-separator body", { emailBody: "  \n" }],
+    ["BOM-only body", { emailBody: "﻿" }],
+    ["misspelled key", { emailSubjct: "Typo" }],
+  ])("edit refuses a %s and leaves the package unchanged (review 01 #5, #6)", async (_n, patch) => {
+    const pkg = await mk("pending");
+    const before = await row(pkg.id);
+    await expect(
+      updatePackageContent(userA, pkg.id, patch),
+    ).rejects.toMatchObject(code("VALIDATION"));
+    expect(await row(pkg.id)).toEqual(before);
   });
 
   it("rejects cvJson when none is stored, and invalid fields", async () => {

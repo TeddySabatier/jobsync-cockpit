@@ -14,19 +14,30 @@ export function formatCvPath(segments: CvSegment[]): string {
   );
 }
 
-export function collectCvLeaves(cv: unknown, prefix: CvSegment[] = []): CvLeaf[] {
-  if (typeof cv === "string") {
-    return [{ path: formatCvPath(prefix), segments: prefix, value: cv }];
-  }
-  if (Array.isArray(cv)) {
-    return cv.flatMap((v, i) => collectCvLeaves(v, [...prefix, i]));
-  }
-  if (cv && typeof cv === "object") {
-    return Object.entries(cv).flatMap(([k, v]) =>
-      collectCvLeaves(v, [...prefix, k]),
-    );
-  }
-  return [];
+// The one cvJson walker: every leaf with its segments. A leaf is any
+// non-container value, or an empty array / object (so it still has a place in
+// the shape). Only own keys are walked (Object.entries), so a "__proto__" or
+// "toString" key is just a key. Shared by collectCvLeaves (edit form) and
+// compareCv (server shape check).
+export function walkCvLeaves(
+  cv: unknown,
+  prefix: CvSegment[] = [],
+): Array<{ segments: CvSegment[]; value: unknown }> {
+  const children: Array<[CvSegment, unknown]> = Array.isArray(cv)
+    ? cv.map((v, i) => [i, v])
+    : cv && typeof cv === "object"
+      ? Object.entries(cv)
+      : [];
+  if (children.length === 0) return [{ segments: prefix, value: cv }];
+  return children.flatMap(([k, v]) => walkCvLeaves(v, [...prefix, k]));
+}
+
+export function collectCvLeaves(cv: unknown): CvLeaf[] {
+  return walkCvLeaves(cv).flatMap(({ segments, value }) =>
+    typeof value === "string"
+      ? [{ path: formatCvPath(segments), segments, value }]
+      : [],
+  );
 }
 
 // Returns a copy with one string leaf replaced; the input is not mutated.

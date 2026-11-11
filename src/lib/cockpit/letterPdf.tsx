@@ -1,6 +1,6 @@
 import "server-only";
 import React from "react";
-import MarkdownIt from "markdown-it";
+import { letterMarkdown } from "./markdown";
 import { Document, Font, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
 
 // Cover-letter PDF (cockpit/DECISIONS.md D-015). The Review preview and the
@@ -8,8 +8,8 @@ import { Document, Font, Page, StyleSheet, Text, View, renderToBuffer } from "@r
 // sees is exactly what is sent. Input is the current letter text (markdown,
 // as edited in Review) and the package's cvJson for the letterhead.
 
-const md = new MarkdownIt({ html: false, linkify: false, breaks: true });
-md.disable(["image", "link", "autolink"]);
+// Same parser instance as the HTML preview (markdown.ts).
+const md = letterMarkdown;
 
 const ACCENT = "#1F4E79";
 const MUTED = "#555555";

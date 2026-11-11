@@ -8,6 +8,7 @@ import { letterAttachmentName, sanitizePdfName } from "./attachments";
 import { renderLetterPdf } from "./letterPdf";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
+import { markJobApplied } from "./packages";
 import type { GmailClient } from "./gmail/client";
 import { buildMimeMessage, encodeRaw } from "./gmail/mime";
 import { UpdatePackageContentSchema } from "./schemas";
@@ -19,8 +20,6 @@ import { UpdatePackageContentSchema } from "./schemas";
 
 // 20 s Gmail timeout + margin (SPEC §6.4 "Stale lock").
 export const STALE_LOCK_MS = 60_000;
-
-type Db = Prisma.TransactionClient;
 
 export type SendResult = { id: string; sentAt: Date };
 
@@ -90,21 +89,6 @@ const withFile = (userId: string, id: string) =>
     where: { id, userId },
     include: { cvFile: { select: { filePath: true, fileName: true } } },
   });
-
-// Job -> applied, same update as markPackageAppliedManually (SPEC §6.4 step 6).
-async function markJobApplied(
-  tx: Db,
-  userId: string,
-  jobId: string,
-  now: Date,
-): Promise<void> {
-  const applied = await tx.jobStatus.findUnique({ where: { value: "applied" } });
-  if (!applied) throw new CockpitError("INTERNAL");
-  await tx.job.updateMany({
-    where: { id: jobId, userId },
-    data: { statusId: applied.id, applied: true, appliedDate: now },
-  });
-}
 
 // Clears the lock after a definitive failure. If this write itself fails the
 // lock stays and the stale-lock rule (60 s) opens the recovery panel.
