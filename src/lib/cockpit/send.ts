@@ -172,10 +172,6 @@ export async function sendApplicationPackage(
   });
   if (active?.id !== pkg.id) throw new CockpitError("CONFLICT");
   await checkContent(userId, pkg);
-  // Rendered here, before the lock: a long letter takes seconds, and the lock
-  // window (STALE_LOCK_MS) is sized for the Gmail calls. The lock is tied to
-  // updatedAt and edits are refused while it is held, so the text cannot change.
-  const letterReady = await buildLetterAttachment(pkg, pkg.cvFile?.fileName ?? "");
 
   const account = await prisma.gmailAccount.findUnique({
     where: { userId },
@@ -186,6 +182,12 @@ export async function sendApplicationPackage(
   if (!account || !allowed || account.email.trim().toLowerCase() !== allowed) {
     throw new CockpitError("GMAIL_RECONNECT_REQUIRED");
   }
+
+  // Rendered here, after the cheap checks and before the lock: a long letter
+  // takes seconds, and the lock window (STALE_LOCK_MS) is sized for the Gmail
+  // calls. Edits are refused while the lock is held, and an edit before the
+  // lock fails the updatedAt condition, so the text cannot change.
+  const letterReady = await buildLetterAttachment(pkg, pkg.cvFile?.fileName ?? "");
 
   // ---- Step 2: lock (conditional, includes the updatedAt the user saw) ---
   // lockedAt identifies this send's lock in every later write (D-022 b).
@@ -272,8 +274,23 @@ export async function sendApplicationPackage(
 
   // ---- Step 6: success, one transaction -----------------------------------
   const now = new Date();
+  let recordedAfterLostLock = false;
   try {
     await prisma.$transaction(async (tx) => {
+      const recordSent = async () => {
+        await tx.sentEmail.create({
+          data: {
+            userId,
+            packageId,
+            fromAddress: account.email,
+            toAddress: content.to,
+            gmailMessageId: sent.id,
+            threadId: sent.threadId,
+            sentAt: now,
+          },
+        });
+        await markJobApplied(tx, userId, pkg.jobId, now);
+      };
       const res = await tx.applicationPackage.updateMany({
         where: {
           id: packageId,
@@ -288,28 +305,32 @@ export async function sendApplicationPackage(
           sendOutcome: null,
         },
       });
-      // Our lock is gone (a recovery action ran while Gmail was answering):
-      // record nothing. Throwing rolls the whole transaction back, so no
-      // SentEmail row and no job update; the catch below keeps the package
-      // locked with an unknown outcome (D-022 a).
-      if (res.count === 0) {
-        log.error("cockpit: package not in the locked approved state after send", {
-          packageId,
-        });
-        throw new CockpitError("CONFLICT");
+      if (res.count > 0) {
+        await recordSent();
+        return;
       }
-      await tx.sentEmail.create({
-        data: {
-          userId,
-          packageId,
-          fromAddress: account.email,
-          toAddress: content.to,
-          gmailMessageId: sent.id,
-          threadId: sent.threadId,
-          sentAt: now,
-        },
+      // Our lock is gone (a recovery action ran while Gmail was answering).
+      log.error("cockpit: package not in the locked approved state after send", {
+        packageId,
       });
-      await markJobApplied(tx, userId, pkg.jobId, now);
+      const current = await tx.applicationPackage.findFirst({
+        where: { id: packageId, userId },
+        select: { status: true },
+      });
+      // Released then superseded, un-approved, rejected...: no panel can
+      // reach this package any more, so record the fact that the email went
+      // out (SentEmail row, job applied) without touching the package
+      // (D-022 h). A repeat fails on the unique packageId: rolled back below.
+      if (current && current.status !== "approved" && current.status !== "sent") {
+        await recordSent();
+        recordedAfterLostLock = true;
+        return;
+      }
+      // Approved (released, maybe locked again) or already sent (Mark as
+      // sent ran): record nothing. Throwing rolls the whole transaction
+      // back; the catch below locks an approved, unlocked package again
+      // with an unknown outcome (D-022 a, c).
+      throw new CockpitError("CONFLICT");
     });
   } catch {
     // The email is out but we could not record it. The lock stays (no second
@@ -321,6 +342,15 @@ export async function sendApplicationPackage(
       gmailMessageId: sent.id,
     });
     await holdAsUnknownQuietly(userId, packageId, lockedAt);
+    throw new CockpitError("SEND_OUTCOME_UNKNOWN");
+  }
+  if (recordedAfterLostLock) {
+    // Recorded, but the package left the approved state before Gmail
+    // answered: the owner should check Gmail and this package (D-022 h).
+    log.warn("cockpit: late send recorded on a package no longer approved", {
+      packageId,
+      gmailMessageId: sent.id,
+    });
     throw new CockpitError("SEND_OUTCOME_UNKNOWN");
   }
   return { id: packageId, sentAt: now };

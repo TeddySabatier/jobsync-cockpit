@@ -79,6 +79,19 @@ const sentEmails = (packageId: string) =>
   prisma.sentEmail.count({ where: { packageId } });
 const jobOf = (jobId: string) =>
   prisma.job.findUniqueOrThrow({ where: { id: jobId }, include: { Status: true } });
+const ago = (ms: number) => new Date(Date.now() - ms);
+// The Gmail call outlived the stale-lock window (60 s) and the owner used a
+// recovery action from the panel before it returned (D-022).
+const staleThen = async (
+  id: string,
+  action: (userId: string, id: string) => Promise<unknown>,
+) => {
+  await prisma.applicationPackage.update({
+    where: { id },
+    data: { sendStartedAt: ago(61_000) },
+  });
+  await action(s.userA.id, id);
+};
 
 beforeAll(async () => {
   vi.stubEnv("ENCRYPTION_KEY", "test-encryption-key-placeholder");
@@ -519,7 +532,6 @@ describe("sendApplicationPackage: ambiguous failures keep the lock (AC-33)", () 
 });
 
 describe("recovery actions (AC-33)", () => {
-  const ago = (ms: number) => new Date(Date.now() - ms);
 
   it("markSendUnknownAsSent: unknown outcome -> sent manually, job applied, no SentEmail", async () => {
     const pkg = await s.mkApproved({ sendStartedAt: ago(5_000), sendOutcome: "unknown" });
@@ -617,20 +629,6 @@ describe("recovery actions (AC-33)", () => {
 });
 
 describe("the lock is lost while Gmail is answering (D-022, issue #54)", () => {
-  const ago = (ms: number) => new Date(Date.now() - ms);
-  // The Gmail call outlived the stale-lock window (60 s) and the owner used a
-  // recovery action from the panel before it returned.
-  const staleThen = async (
-    id: string,
-    action: (userId: string, id: string) => Promise<unknown>,
-  ) => {
-    await prisma.applicationPackage.update({
-      where: { id },
-      data: { sendStartedAt: ago(61_000) },
-    });
-    await action(s.userA.id, id);
-  };
-
   it("step 6 after Release lock: nothing recorded, locked again as unknown; Mark as sent then closes it", async () => {
     const pkg = await s.mkApproved();
     gmail.sendRaw.mockImplementationOnce(async () => {
@@ -736,6 +734,19 @@ describe("sendApplicationPackage: review 02 findings (issue #54)", () => {
     expect(after).toMatchObject({ status: "approved", sendStartedAt: null });
   });
 
+  it("a disconnected or not-allowed account is refused before the letter is rendered", async () => {
+    const noGmail = await s.mkApproved({ letterMd: "Dear team" }, s.userNoGmail);
+    expect(await rejection(send(noGmail.id, noGmail.updatedAt, s.userNoGmail.id))).toMatchObject({
+      code: "GMAIL_RECONNECT_REQUIRED",
+    });
+    vi.stubEnv("COCKPIT_GMAIL_ALLOWED_ADDRESS", "other@example.com");
+    const other = await s.mkApproved({ letterMd: "Dear team" });
+    expect(await rejection(send(other.id, other.updatedAt))).toMatchObject({
+      code: "GMAIL_RECONNECT_REQUIRED",
+    });
+    expect(renderSpy).not.toHaveBeenCalled();
+  });
+
   it("the stored token is decrypted only after the lock is taken", async () => {
     const pkg = await s.mkApproved();
     vi.stubEnv("ENCRYPTION_KEY", "a-different-key-placeholder");
@@ -809,7 +820,6 @@ describe("sendApplicationPackage: review 02 findings (issue #54)", () => {
 });
 
 describe("own-lock checks, independent tester (PR #73)", () => {
-  const ago = (ms: number) => new Date(Date.now() - ms);
 
   it("re-read after the lock: a lock that is not ours gives CONFLICT, no Gmail call, the other lock untouched", async () => {
     const pkg = await s.mkApproved();
@@ -851,24 +861,44 @@ describe("own-lock checks, independent tester (PR #73)", () => {
     expect((await jobOf(pkg.jobId)).applied).toBe(false);
   });
 
-  it("step 6 after Release lock then un-approve: the late result never locks a package that is not approved", async () => {
+  // D-022 (h): Release lock, then the package leaves the approved state, then
+  // Gmail accepts the late send. No panel can reach the package any more, so
+  // the fact is recorded (SentEmail row, job applied); the package itself is
+  // never locked or changed, and the owner is told to check Gmail.
+  it.each([
+    ["superseded by a newer version", "superseded", (pkg: { id: string; jobId: string }) =>
+      submitPackage(s.userA.id, {
+        jobId: pkg.jobId,
+        emailSubject: "Newer",
+        emailBody: "Newer body",
+        fitGrade: "A",
+      })],
+    ["un-approved", "pending", (pkg: { id: string }) => unapprovePackage(s.userA.id, pkg.id)],
+    ["rejected", "rejected", (pkg: { id: string }) => rejectPackage(s.userA.id, pkg.id, "no")],
+  ])("late Gmail success after Release lock, package %s: the send is recorded, the package untouched", async (_n, status, leave) => {
     const pkg = await s.mkApproved();
     gmail.sendRaw.mockImplementationOnce(async () => {
-      await prisma.applicationPackage.update({
-        where: { id: pkg.id },
-        data: { sendStartedAt: ago(61_000) },
-      });
-      await releaseSendLock(s.userA.id, pkg.id);
-      await unapprovePackage(s.userA.id, pkg.id);
+      await staleThen(pkg.id, releaseSendLock);
+      await leave(pkg);
       return { id: "gmail-msg-late", threadId: "gmail-thread-late" };
     });
     expect(await rejection(send(pkg.id, pkg.updatedAt))).toMatchObject({
       code: "SEND_OUTCOME_UNKNOWN",
     });
     const after = await row(pkg.id);
-    expect(after).toMatchObject({ status: "pending", sendStartedAt: null, sendOutcome: null });
-    expect(await sentEmails(pkg.id)).toBe(0);
-    expect((await jobOf(pkg.jobId)).applied).toBe(false);
+    expect(after).toMatchObject({ status, sendStartedAt: null, sendOutcome: null, sentAt: null });
+    const email = await prisma.sentEmail.findUniqueOrThrow({ where: { packageId: pkg.id } });
+    expect(email).toMatchObject({
+      userId: s.userA.id,
+      fromAddress: ADDRESS,
+      toAddress: "jobs@example.com",
+      gmailMessageId: "gmail-msg-late",
+      threadId: "gmail-thread-late",
+    });
+    const job = await jobOf(pkg.jobId);
+    expect(job).toMatchObject({ applied: true, statusId: s.applied.id });
+    expect(job.appliedDate).toEqual(email.sentAt);
+    expect(gmail.sendRaw).toHaveBeenCalledOnce();
   });
 
   it("CV data (cvJson) changed behind the lock gives CONFLICT, lock released, never sent", async () => {

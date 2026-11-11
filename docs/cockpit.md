@@ -132,7 +132,7 @@ Flow: approve → **Send** (when Gmail connected, valid `emailTo`, CV file prese
 - **Ambiguous failure** (timeout, 5xx, network): lock kept, `sendOutcome = "unknown"`. UI: check Gmail **Sent** folder, then **Mark as sent (manual)** or **Release lock**.
 - **Definitive failure** (token/decrypt/MIME/400/401/403): lock cleared; fix and retry.
 - Lock older than **60 s** without outcome is treated like unknown (crash recovery).
-- If a recovery action ran while Gmail was still answering, the late result records nothing (no sent-email row, no job update): the package shows **unknown** again, locked, so check Gmail **Sent** and pick the action again (D-022).
+- If a recovery action ran while Gmail was still answering, the late result records nothing (no sent-email row, no job update): the package shows **unknown** again, locked, so check Gmail **Sent** and pick the action again (D-022). If the package was meanwhile replaced by a newer version, un-approved or rejected, the late email is recorded (sent history, job applied) and you are told to check Gmail; take care not to send the newer version a second time.
 
 **Mark applied manually** (empty `emailTo` / link apply): overflow menu; no email sent.
 
