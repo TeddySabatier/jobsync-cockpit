@@ -51,6 +51,7 @@ class Stub:
         self.delay = 0
         self.raw_body = None
         self.fail = {}  # tool -> isError text
+        self.inject_on_fail = None
         self.fail_once = {}  # tool -> isError text, for the NEXT call only
         self.plain = {}  # tool -> plain-text answer (rate limit, scope, "Error: ...")
         self.change_requests = []
@@ -148,6 +149,8 @@ class Stub:
         if name in self.fail:
             return {"isError": True, "content": [{"type": "text", "text": self.fail[name]}]}
         if name in self.fail_once:
+            if self.inject_on_fail:
+                self.inject_on_fail(arguments)  # something else happens to the job meanwhile
             return {"isError": True, "content": [{"type": "text", "text": self.fail_once.pop(name)}]}
         invalid = self.invalid_input(name, arguments)
         if invalid:
@@ -1129,3 +1132,96 @@ class ReviewHardeningTests(FolderMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewRound2Tests(FolderMixin, unittest.TestCase):
+    def setUp(self):
+        self.stub = Stub()
+        self.addCleanup(self.stub.close)
+
+    def submit_args(self, folder, *extra):
+        return ["--endpoint", self.stub.url, "submit", "--folder", str(folder),
+                "--company", "Acme", "--role", "Backend Engineer", "--subject", "Application",
+                "--fit", "A", "--url", LINK, *extra]
+
+    # S1
+    def test_a_replay_never_supersedes_a_package_a_concurrent_run_wrote(self):
+        def other_run(arguments):
+            self.stub.packages[arguments["jobId"]].append(
+                {"id": "other-pkg", "version": 1, "status": "pending", "idempotencyKey": "other-key",
+                 "emailSubject": "x", "emailBody": "y", "letterMd": "z", "fitGrade": "A"})
+        self.stub.inject_on_fail = other_run
+        self.stub.fail_once["submit_application_package"] = "CONFLICT: busy"
+        code, result, _ = run(self.submit_args(self.make_folder()))
+        self.assertEqual((code, result["error"]), (1, "ALREADY_SUBMITTED"))
+        self.assertEqual(len(self.stub.names("submit_application_package")), 1)
+        (job,) = self.stub.packages.values()
+        self.assertEqual([p["status"] for p in job], ["pending"])
+
+    def test_a_conflict_after_the_submit_really_landed_is_recovered_not_replayed(self):
+        folder = self.make_folder()
+        holder = {}
+
+        def landed(arguments):
+            self.stub.packages[arguments["jobId"]].append(
+                {"id": "pkg-mine", "version": 1, "status": "pending", "idempotencyKey": arguments["idempotencyKey"],
+                 "emailSubject": arguments["emailSubject"], "emailBody": arguments["emailBody"],
+                 "letterMd": arguments["letterMd"], "fitGrade": arguments["fitGrade"]})
+        self.stub.inject_on_fail = landed
+        self.stub.fail_once["submit_application_package"] = "CONFLICT: busy"
+        code, result, _ = run(self.submit_args(folder))
+        self.assertEqual(code, 0, result)
+        self.assertEqual((result["packageId"], result["recovered"]), ("pkg-mine", True))
+        self.assertEqual(len(self.stub.names("submit_application_package")), 1)
+
+    def test_a_replay_reuses_the_uploaded_file(self):
+        self.stub.fail_once["submit_application_package"] = "CONFLICT: busy"
+        code, result, _ = run(self.submit_args(self.make_folder()))
+        self.assertEqual(code, 0, result)
+        self.assertEqual(len(self.stub.names("attach_file")), 1)
+        submits = [a for n, a in self.stub.calls if n == "submit_application_package"]
+        self.assertEqual(len(submits), 2)
+        self.assertEqual(submits[0]["cvFileId"], submits[1]["cvFileId"])
+
+    # S2
+    def requests(self, n):
+        self.stub.change_requests = [
+            {"packageId": "pkg-%d" % i, "jobId": JOB % i, "company": "C", "jobTitle": "T", "version": 1,
+             "changeRequest": "x", "sourceFolder": None} for i in range(n)]
+
+    def test_changes_flags_a_full_list(self):
+        self.requests(3)
+        full = run(["--endpoint", self.stub.url, "changes", "--limit", "3"])[1]
+        self.assertEqual((full["count"], full["truncated"]), (3, True))
+        part = run(["--endpoint", self.stub.url, "changes", "--limit", "5"])[1]
+        self.assertEqual(part["count"], 3)
+        self.assertNotIn("truncated", part)
+
+    def test_changes_package_looks_beyond_the_default_limit(self):
+        self.requests(25)
+        code, result, _ = run(["--endpoint", self.stub.url, "changes", "--package", "pkg-24"])
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["changeRequests"][0]["packageId"], "pkg-24")
+        self.assertEqual(self.stub.calls[-1][1]["limit"], cs.MAX_CHANGE_REQUESTS)
+
+    # N1
+    def test_a_lone_surrogate_in_the_key_inputs(self):
+        key = cs.idempotency_key("A" + chr(0xD800), "Dev", "https://x.example/1")
+        self.assertRegex(key, KEY_RE)
+
+    # N4
+    def test_the_marker_replace_is_retried_once(self):
+        folder = self.make_folder()
+        real = os.replace
+        calls = []
+
+        def flaky(src, dst):
+            calls.append(1)
+            if len(calls) == 1:
+                raise PermissionError("held by another process")
+            real(src, dst)
+        with mock.patch("cockpit_submit.os.replace", side_effect=flaky), mock.patch("cockpit_submit.time.sleep") as slept:
+            cs.write_marker(folder, "k", "d", {"packageId": "p"})
+        self.assertEqual(len(calls), 2)
+        slept.assert_called_once_with(0.2)
+        self.assertEqual(cs.read_marker(folder, "k")["digest"], "d")
