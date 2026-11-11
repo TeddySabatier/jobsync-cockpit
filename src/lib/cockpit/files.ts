@@ -28,7 +28,6 @@ export async function resolveCockpitFile(
   file: { filePath: string },
 ): Promise<string | null> {
   try {
-    // cockpitUserDir throws on an invalid userId; the catch maps it to null.
     const base = await fs.realpath(path.resolve(cockpitUserDir(userId)));
     const resolved = await fs.realpath(path.resolve(file.filePath));
     // `+ path.sep` so cockpit/u1 never matches cockpit/u10.

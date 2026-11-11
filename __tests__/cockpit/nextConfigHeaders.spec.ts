@@ -8,7 +8,7 @@ async function loadHeaders() {
 
 // AC-37 (config part): order and values of the headers() output.
 describe("next.config.mjs headers()", () => {
-  it("global DENY entry first, then the scoped SAMEORIGIN entries only (CV and letter PDF)", async () => {
+  it("global DENY entry first, then the scoped SAMEORIGIN entry only (CV and letter PDF)", async () => {
     const entries = await loadHeaders();
     expect(entries).toEqual([
       {
@@ -19,11 +19,7 @@ describe("next.config.mjs headers()", () => {
         ],
       },
       {
-        source: "/api/cockpit/files/:packageId",
-        headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
-      },
-      {
-        source: "/api/cockpit/letter/:packageId",
+        source: "/api/cockpit/:kind(files|letter)/:packageId",
         headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
       },
     ]);
