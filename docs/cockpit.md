@@ -73,7 +73,7 @@ Messages come from a fixed map (never raw Google/Prisma text). Common MCP codes:
 1. **`attach_file`** → `{ fileId }` → pass `cvFileId` in **`submit_application_package`**.
 2. **`idempotencyKey`** (optional): same user + same key returns the existing package with `idempotent: true`. Reusing a key on a **different job** is `CONFLICT` — use a fresh key.
 3. **Versioning**: each submit for a job gets the next version. Prior `pending` / `approved` / `changes_requested` packages (unlocked) become **`superseded`**.
-4. **`CONFLICT`** (the owner sees the same text in the UI: reload and try again): replay the **whole** submit (all checks, including idempotency and lock checks). Causes include concurrent writes, a send lock on the job, or version/idempotency races.
+4. **`CONFLICT`** (the owner sees the same text in the UI: fetch the current state and retry the whole request): replay the **whole** submit (all checks, including idempotency and lock checks). Causes include concurrent writes, a send lock on the job, or version/idempotency races.
 5. A job with **any** past **`sent`** package cannot accept new submits (`ALREADY_SENT`). A **rejected** active package blocks submit (`JOB_REJECTED`).
 6. While **`sendStartedAt`** is set on any package for the job, submit returns **`CONFLICT`** — resolve send in the UI first.
 
