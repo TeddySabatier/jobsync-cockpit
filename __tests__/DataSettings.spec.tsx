@@ -76,6 +76,62 @@ describe("DataSettings", () => {
     expect(await screen.findByText(/4 jobs/i)).toBeInTheDocument();
   });
 
+  // Issue #60 findings 3 and 5: cockpit data is named as replaced, and every
+  // model reads as words with a correct plural.
+  it("names cockpit data in the confirmation with readable labels", async () => {
+    mockFetch({
+      ...preflight,
+      targetCounts: {
+        ...preflight.targetCounts,
+        CoverLetter: 1,
+        Activity: 2,
+        ApplicationPackage: 2,
+        SentEmail: 1,
+        File: 3,
+      },
+    });
+    render(<DataSettings />);
+    await userEvent.upload(screen.getByLabelText(/backup file/i), pickFile());
+    await waitFor(() => screen.getByRole("button", { name: /replace my data/i }));
+    await userEvent.click(screen.getByRole("button", { name: /replace my data/i }));
+
+    expect(await screen.findByText("1 cover letter")).toBeInTheDocument();
+    expect(screen.getByText("2 activities")).toBeInTheDocument();
+    expect(screen.getByText("2 application packages")).toBeInTheDocument();
+    expect(screen.getByText("1 sent email record")).toBeInTheDocument();
+    expect(screen.getByText("3 uploaded files (resumes and CV PDFs)")).toBeInTheDocument();
+    expect(screen.getByText("1 profile")).toBeInTheDocument();
+  });
+
+  // Issue #60 finding 4: the copy matches what a backup carries (D-012).
+  it("says the export carries packages, sent emails and CV PDFs", () => {
+    render(<DataSettings />);
+    expect(screen.getByText(/application packages and sent-email records/i)).toBeInTheDocument();
+    expect(screen.getByText(/CV PDFs/i)).toBeInTheDocument();
+  });
+
+  it("tells the user to reconnect Gmail after an import", async () => {
+    const fetchMock = mockFetch(preflight);
+    render(<DataSettings />);
+    await userEvent.upload(screen.getByLabelText(/backup file/i), pickFile());
+    await waitFor(() => screen.getByRole("button", { name: /replace my data/i }));
+    await userEvent.click(screen.getByRole("button", { name: /replace my data/i }));
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ counts: { Job: 12 }, filesWritten: 2, snapshotPath: null }),
+    });
+    const { toastSuccess } = await import("@/lib/toast");
+    await userEvent.click(
+      screen.getByRole("button", { name: /delete everything and import/i }),
+    );
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith(
+        expect.stringMatching(/reconnect Gmail/),
+        "Import complete",
+      ),
+    );
+  });
+
   it("sends confirmWipe only after the confirmation is accepted", async () => {
     const fetchMock = mockFetch(preflight);
     render(<DataSettings />);

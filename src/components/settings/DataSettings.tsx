@@ -40,6 +40,29 @@ interface SnapshotInfo {
   sizeBytes: number;
 }
 
+// Model names as the user reads them in the confirmation list. Unknown models
+// fall back to the raw name rather than a guessed plural.
+const MODEL_LABELS: Record<string, [singular: string, plural: string]> = {
+  Profile: ["profile", "profiles"],
+  Resume: ["resume", "resumes"],
+  CoverLetter: ["cover letter", "cover letters"],
+  Job: ["job", "jobs"],
+  Note: ["note", "notes"],
+  Task: ["task", "tasks"],
+  Activity: ["activity", "activities"],
+  Question: ["question", "questions"],
+  Automation: ["automation", "automations"],
+  ApplicationPackage: ["application package", "application packages"],
+  SentEmail: ["sent email record", "sent email records"],
+  File: ["uploaded file (resumes and CV PDFs)", "uploaded files (resumes and CV PDFs)"],
+};
+
+function modelLabel(model: string, n: number): string {
+  const labels = MODEL_LABELS[model];
+  if (!labels) return `${n} ${model}`;
+  return `${n} ${n === 1 ? labels[0] : labels[1]}`;
+}
+
 function CountGrid({ counts }: { counts: Record<string, number> }) {
   const rows = Object.entries(counts).filter(([, n]) => n > 0);
   if (rows.length === 0) return <p className="text-sm text-muted-foreground">Nothing.</p>;
@@ -158,7 +181,7 @@ export default function DataSettings() {
           json.snapshotPath
             ? " Your previous data was saved as a snapshot you can restore below."
             : ""
-        } Re-enter your AI provider API keys, reissue MCP tokens, and reload the page.`,
+        } Re-enter your AI provider API keys, reissue MCP tokens, reconnect Gmail if this is a new instance, and reload the page.`,
         "Import complete",
       );
       setPreflight(null);
@@ -179,13 +202,14 @@ export default function DataSettings() {
           <CardTitle className="text-lg font-medium">Export your data</CardTitle>
           <CardDescription>
             Downloads one zip with every job, resume, task, activity and question on
-            this account, plus your uploaded resume files.
+            this account, your application packages and sent-email records, plus
+            your uploaded resume files and CV PDFs.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            The file contains <strong>no API keys</strong>, no MCP tokens and no
-            password, so it is safe to store anywhere. It does contain the
+            The file contains <strong>no API keys</strong>, no MCP tokens, no
+            Gmail connection and no password, so it is safe to store anywhere. It does contain the
             <strong> full text</strong> of every job description, note and resume.
           </p>
           <Button asChild>
@@ -202,8 +226,8 @@ export default function DataSettings() {
           <CardTitle className="text-lg font-medium">Import a backup</CardTitle>
           <CardDescription>
             Replaces everything on this account with the contents of the backup.
-            Your API keys and MCP tokens are left alone; the agent chat history is
-            cleared.
+            Your API keys, MCP tokens and Gmail connection are left alone; the
+            agent chat history is cleared.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -339,10 +363,7 @@ export default function DataSettings() {
                 </p>
                 <ul className="list-inside list-disc text-sm">
                   {destroyed.map(([model, n]) => (
-                    <li key={model}>
-                      {n} {model.toLowerCase()}
-                      {n === 1 ? "" : "s"}
-                    </li>
+                    <li key={model}>{modelLabel(model, n)}</li>
                   ))}
                   {destroyed.length === 0 && <li>nothing — this account is empty</li>}
                 </ul>

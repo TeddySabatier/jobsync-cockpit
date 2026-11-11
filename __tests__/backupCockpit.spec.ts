@@ -6,8 +6,10 @@ import JSZip from "jszip";
 import { PrismaClient } from "@prisma/client";
 import { APP_CONSTANTS } from "@/lib/constants";
 import { buildBackupZip } from "@/lib/backup/export";
-import { importBackup } from "@/lib/backup/import";
+import fsp from "fs/promises";
+import { importBackup, preflightBackup } from "@/lib/backup/import";
 import { cockpitUserDir, resolveCockpitFile } from "@/lib/cockpit/files";
+import { releaseSendLock } from "@/lib/cockpit/send";
 import { seedAccount } from "./helpers/backupTestDb";
 
 // D-012: cockpit packages, sent emails and their CV PDFs travel in backups;
@@ -408,6 +410,154 @@ describe("backup import with cockpit data", () => {
     expect(await prisma.applicationPackage.findUnique({ where: { id: a.pkgId } })).not.toBeNull();
     expect(await prisma.sentEmail.count({ where: { userId: a.userId } })).toBe(1);
   });
+
+  // Issue #60 finding 2. A package locked for sending (approved, sendStartedAt
+  // set) must not be wiped while the Gmail call may be in flight.
+  it("refuses to import while a package is being sent, and changes nothing", async () => {
+    const a = await seedCockpit("sending@example.com");
+    const { buffer } = await buildBackupZip(a.userId, "sending@example.com");
+    await prisma.applicationPackage.update({
+      where: { id: a.pkgId },
+      data: { status: "approved", sentAt: null, sendStartedAt: new Date() },
+    });
+
+    await expect(
+      importBackup(buffer, a.userId, "sending@example.com", true),
+    ).rejects.toThrow(/being sent/i);
+
+    const pkg = await prisma.applicationPackage.findUniqueOrThrow({ where: { id: a.pkgId } });
+    expect(pkg.sendStartedAt).not.toBeNull();
+    expect(await prisma.file.findUnique({ where: { id: a.fileId } })).not.toBeNull();
+    expect(fs.readdirSync(cockpitUserDir(a.userId))).toEqual([path.basename(a.filePath)]);
+    expect(await prisma.sentEmail.count({ where: { userId: a.userId } })).toBe(1);
+  }, 30_000);
+
+  // Issue #60 finding 9. A backup can carry a package that was locked at export
+  // time. It is restored still locked (the email may have gone out), and the
+  // cockpit's recovery actions can release it: the lock is older than the
+  // stale-lock window by the time anyone looks.
+  it("restores a locked package as locked, and the recovery action can release it", async () => {
+    const src = await seedCockpit("locked@example.com");
+    await prisma.applicationPackage.update({
+      where: { id: src.pkgId },
+      data: {
+        status: "approved",
+        sentAt: null,
+        sendStartedAt: new Date(Date.now() - 10 * 60_000),
+      },
+    });
+    const { buffer } = await buildBackupZip(src.userId, "locked@example.com");
+    const dst = await seedAccount(prisma, "lockeddst@example.com");
+    await importBackup(buffer, dst, "lockeddst@example.com", false);
+
+    const pkg = await prisma.applicationPackage.findFirstOrThrow({ where: { userId: dst } });
+    expect(pkg.status).toBe("approved");
+    expect(pkg.sendStartedAt).not.toBeNull();
+
+    // While it stays locked, a further import over it is refused (finding 2).
+    await expect(
+      importBackup(buffer, dst, "lockeddst@example.com", true),
+    ).rejects.toThrow(/being sent/i);
+
+    await releaseSendLock(dst, pkg.id);
+    const released = await prisma.applicationPackage.findUniqueOrThrow({ where: { id: pkg.id } });
+    expect(released.sendStartedAt).toBeNull();
+    expect(released.status).toBe("approved");
+  }, 30_000);
+
+  // Issue #60 finding 1. The restored name must not carry the previous
+  // name forward: it used to grow by "<uuid>-" on every export/import cycle
+  // until the write failed with ENAMETOOLONG.
+  it("keeps resume file names bounded across repeated export/import cycles", async () => {
+    const userId = await seedAccount(prisma, "cycles@example.com");
+    const profile = await prisma.profile.create({ data: { userId } });
+    const longName = `${"a-very-long-resume-name-".repeat(6)}final.pdf`;
+    const resumePath = path.join(uploadsDir, "files", "resumes", longName);
+    fs.writeFileSync(resumePath, PDF);
+    const file = await prisma.file.create({
+      data: { fileName: longName, filePath: resumePath, fileType: "application/pdf" },
+    });
+    await prisma.resume.create({
+      data: { profileId: profile.id, title: "CV", FileId: file.id },
+    });
+
+    for (let cycle = 0; cycle < 5; cycle++) {
+      const { buffer } = await buildBackupZip(userId, "cycles@example.com");
+      await importBackup(buffer, userId, "cycles@example.com", true);
+      const current = await prisma.file.findFirstOrThrow({
+        where: { Resume: { profile: { userId } } },
+      });
+      expect(path.basename(current.filePath)).toBe(`${current.id}.pdf`);
+      expect(fs.readFileSync(current.filePath)).toEqual(PDF);
+      // The display name is unchanged.
+      expect(current.fileName).toBe(longName);
+    }
+  }, 30_000);
+
+  // Issue #60 finding 1. A write that throws after other files were written
+  // must remove them, report the import as failed and leave the old data.
+  it("a failed file write removes the files already written and changes nothing", async () => {
+    const userId = await seedAccount(prisma, "writefail@example.com");
+    const profile = await prisma.profile.create({ data: { userId } });
+    for (const name of ["one.pdf", "two.pdf"]) {
+      const p = path.join(uploadsDir, "files", "resumes", `${randomUUID()}-${name}`);
+      fs.writeFileSync(p, PDF);
+      const f = await prisma.file.create({
+        data: { fileName: name, filePath: p, fileType: "application/pdf" },
+      });
+      await prisma.resume.create({ data: { profileId: profile.id, title: name, FileId: f.id } });
+    }
+    const { buffer } = await buildBackupZip(userId, "writefail@example.com");
+    const resumesDir = path.join(uploadsDir, "files", "resumes");
+    const before = fs.readdirSync(resumesDir).sort();
+    const oldFileIds = (
+      await prisma.file.findMany({ where: { Resume: { profile: { userId } } } })
+    ).map((f) => f.id);
+
+    // The second resume write fails; the snapshot write is let through.
+    const realWrite = fsp.writeFile;
+    let calls = 0;
+    const spy = vi.spyOn(fsp, "writeFile").mockImplementation((async (...args: unknown[]) => {
+      if (String(args[0]).startsWith(resumesDir + path.sep)) {
+        calls += 1;
+        if (calls === 2) throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+      }
+      return (realWrite as (...a: unknown[]) => Promise<void>)(...args);
+    }) as typeof fsp.writeFile);
+    try {
+      await expect(
+        importBackup(buffer, userId, "writefail@example.com", true),
+      ).rejects.toThrow(/nothing was changed/i);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(calls).toBe(2);
+    expect(fs.readdirSync(resumesDir).sort()).toEqual(before);
+    const after = await prisma.file.findMany({
+      where: { Resume: { profile: { userId } } },
+    });
+    expect(after.map((f) => f.id).sort()).toEqual([...oldFileIds].sort());
+  }, 30_000);
+
+  // Issue #60 finding 3. The confirmation lists what is replaced, cockpit
+  // data included; those rows do not change whether the account is empty.
+  it("preflight counts packages, sent emails and files on the target", async () => {
+    const a = await seedCockpit("counts@example.com");
+    const { buffer } = await buildBackupZip(a.userId, "counts@example.com");
+    const result = await preflightBackup(buffer, a.userId, "counts@example.com");
+    expect(result.targetCounts).toMatchObject({
+      Job: 1,
+      ApplicationPackage: 1,
+      SentEmail: 1,
+      File: 1,
+    });
+    expect(result.targetIsEmpty).toBe(false);
+
+    const empty = await seedAccount(prisma, "countsempty@example.com");
+    const fresh = await preflightBackup(buffer, empty, "countsempty@example.com");
+    expect(fresh.targetIsEmpty).toBe(true);
+  }, 30_000);
 
   it("restores a package whose CV file was missing at export time", async () => {
     const src = await seedCockpit("gone@example.com");

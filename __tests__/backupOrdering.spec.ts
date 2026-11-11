@@ -4,6 +4,7 @@ import {
   DELETE_ORDER,
   LOOKUP_MODELS,
   EMPTINESS_MODELS,
+  REPLACED_MODELS,
   type BackupModel,
 } from "@/lib/backup/ordering";
 
@@ -138,5 +139,13 @@ describe("emptiness models", () => {
 
   it("includes Profile, so an import cannot add a second one", () => {
     expect(EMPTINESS_MODELS).toContain("Profile");
+  });
+
+  // Issue #60 finding 3: the confirmation must name cockpit data as replaced.
+  it("lists cockpit packages, sent emails and files among what an import replaces", () => {
+    expect(REPLACED_MODELS).toEqual(
+      expect.arrayContaining([...EMPTINESS_MODELS, "ApplicationPackage", "SentEmail", "File"]),
+    );
+    expect(EMPTINESS_MODELS).not.toContain("ApplicationPackage");
   });
 });

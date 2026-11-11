@@ -18,6 +18,9 @@ vi.mock("@/lib/db", () => {
       activity: counted(),
       question: counted(),
       automation: counted(),
+      applicationPackage: counted(),
+      sentEmail: counted(),
+      file: counted(),
     },
   };
 });
@@ -72,6 +75,28 @@ describe("preflightBackup", () => {
     );
     expect(result.targetIsEmpty).toBe(false);
     expect(result.targetCounts.Profile).toBe(1);
+  });
+
+  // Issue #60 finding 8: a broken data.json is refused before the user is
+  // asked to confirm a wipe, not after.
+  it("refuses a backup whose data.json is not valid JSON", async () => {
+    const zip = new JSZip();
+    zip.file("manifest.json", JSON.stringify(manifest()));
+    zip.file("data.json", "{ not json");
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    await expect(
+      preflightBackup(bytes, "user-1", "owner@example.com"),
+    ).rejects.toThrow(/not valid JSON/i);
+  });
+
+  it("refuses a backup whose data.json fails validation", async () => {
+    const zip = new JSZip();
+    zip.file("manifest.json", JSON.stringify(manifest()));
+    zip.file("data.json", JSON.stringify({ Job: "not-an-array" }));
+    const bytes = await zip.generateAsync({ type: "nodebuffer" });
+    await expect(
+      preflightBackup(bytes, "user-1", "owner@example.com"),
+    ).rejects.toThrow(/failed validation/i);
   });
 
   it("refuses a backup with the wrong formatVersion", async () => {

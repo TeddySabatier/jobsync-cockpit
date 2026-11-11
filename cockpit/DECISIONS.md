@@ -186,3 +186,18 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/cockpit/{letterPdf.tsx,letterName.ts,send.ts,gmail/mime.ts}`, `src/app/api/cockpit/letter/[packageId]/route.ts`, `next.config.mjs` (frame header), `Panels.tsx`, `SendDialog.tsx`, `cockpit.actions.ts` (`letterAttachment`), tests (`letterPdf`, `letterRoute`, `send.integration`, e2e `09-letter-pdf`), docs.
 - **Not changed:** schema, backup, MCP tools, the bot script. SPEC stays frozen; this entry is the amendment of record.
+
+## D-016 Backup import hardening (review 08, issue #60)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | Restored resume files are named `<newFileId>.<sniffed kind>`; nothing from the carried name reaches the disk. `File.fileName` keeps the display name | **Accept.** | The old `<newId>-<old basename>` kept the previous id prefix, so the name grew by about 37 characters per export/import cycle (restore over existing, rollback) until the write failed with `ENAMETOOLONG`. |
+| (b) | A failed file write during import removes the files already written and reports "Import failed and nothing was changed" | **Accept.** | The writes ran outside the transaction's `try`, so a write error left orphaned bytes and surfaced as a generic 500. The single transaction and "old bytes unlinked only after commit" are unchanged. |
+| (c) | Import (and rollback) is **refused** while any of the user's packages is `approved` with `sendStartedAt` set: a send in flight, or a lock whose outcome is unknown. Checked before the snapshot and again inside the transaction | **Accept.** | Wiping a package mid-send lets the email go out while the `SentEmail`/status write finds no row. An unresolved lock blocks too: the owner checks Gmail and resolves it in the cockpit first. |
+| (d) | A backup can carry a locked package (exported mid-send). It is restored **as is**, still locked; the cockpit recovery actions (mark as sent, release lock) handle it, since its lock is already older than the stale-lock window | **Accept, known behaviour.** | Whether that email went out is unknown; clearing the lock on import could invite a duplicate send. |
+| (e) | Preflight validates `data.json` as well as the manifest | **Accept.** | A broken `data.json` used to pass preflight and the wipe confirmation and fail only at import (safe, but late). |
+| (f) | The wipe confirmation also counts application packages, sent-email records and uploaded files (resumes and CV PDFs), with readable labels; emptiness is still judged on the content models only | **Accept.** | The dialog did not say that cockpit data is replaced. Those rows cannot exist without a job or a resume, so emptiness does not change. |
+| (g) | Settings copy names what a backup carries (D-012) and tells the user to reconnect Gmail on a new instance | **Accept.** | The copy predated D-012. |
+
+- **Scope:** `src/lib/backup/{import,normalize,ordering}.ts`, `src/components/settings/DataSettings.tsx`, `__tests__/{backupCockpit,backupPreflight,backupOrdering,backupNormalize}.spec.ts`, `__tests__/DataSettings.spec.tsx`, `docs/cockpit.md`.
+- **Not changed (out of scope of #60):** manifest counts are still not cross-checked against `data.json`; the id map stays one flat map; the backup format version stays 1. The snapshot and the old-file capture still run before the transaction: the send guard closes the in-flight send case, not a bot submit landing in that window.
