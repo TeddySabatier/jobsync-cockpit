@@ -10,12 +10,8 @@ import { approve, expect, openDetail, openSendDialog, test } from "../support/co
 // The upstream app shell (header, sidebar) is excluded: not cockpit code.
 const OUT = ".cockpit-tmp/findings/l9-axe.json";
 
-// Known cockpit finding, reported in the review of #62 (no separate issue yet:
-// open one before removing this waiver); remove the entry when it is fixed.
-const KNOWN = new Set([
-  // Read-only Tiptap panels (Posting, Cover letter) are role=textbox with no name.
-  "aria-input-field-name",
-]);
+// Known cockpit findings; none at the moment.
+const KNOWN = new Set<string>([]);
 
 type Recorded = {
   id: string;
@@ -63,6 +59,9 @@ test.describe("axe", () => {
   test("detail", async ({ page, bot }) => {
     const pkg = await bot.seed();
     await openDetail(page, pkg.packageId);
+    // The read-only viewers mount after hydration: scan only once they exist,
+    // or the aria-input-field-name check passes without the accessible name.
+    await expect(page.locator(".ProseMirror").first()).toBeVisible();
     const bad = await scan(page, "detail");
     expect(bad.length, describeBad(bad)).toBe(0);
   });
@@ -72,6 +71,7 @@ test.describe("axe", () => {
     await openDetail(page, pkg.packageId);
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await expect(page.getByRole("form", { name: "Edit package" })).toBeVisible();
+    await expect(page.getByTestId("letter-preview").locator(".ProseMirror")).toBeVisible();
     const bad = await scan(page, "edit");
     expect(bad.length, describeBad(bad)).toBe(0);
   });

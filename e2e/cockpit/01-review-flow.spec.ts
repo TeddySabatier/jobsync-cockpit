@@ -11,7 +11,6 @@ test.describe("review flow", () => {
     await expect(row).toContainText("Pending");
     await expect(row).toContainText("v1");
     await expect(row).toContainText(pkg.to as string);
-    await expect(page.getByText("j / k: next / previous in To do")).toBeVisible();
 
     await row.click();
     await expect(page).toHaveURL(detailUrl(pkg.packageId));
@@ -81,7 +80,7 @@ test.describe("review flow", () => {
     await page.reload();
     const banner = page.getByTestId("version-banner");
     await expect(banner).toContainText("Viewing v1");
-    await expect(banner).toContainText("superseded");
+    await expect(banner).toContainText("a newer version replaced");
     await expect(page.getByRole("region", { name: "Actions" })).toHaveCount(0);
 
     await banner.getByRole("link", { name: "Open v2" }).click();

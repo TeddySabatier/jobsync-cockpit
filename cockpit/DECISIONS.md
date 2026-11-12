@@ -228,6 +228,18 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 - **Scope:** `scripts/bot/cockpit_submit.py`, its tests, `src/lib/mcp/tools/cockpit.ts` (one select field), `.gitignore`, docs.
 - **Not changed:** schema, Send, the other MCP tools.
 
+## D-021 Review UI read-side fixes (issue #58)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The "j / k: next / previous in To do" hint is shown on the **detail** page, only when a neighbour exists; the queue list no longer shows it | **Accept.** The keys are only bound on the detail page (SPEC §5.3). | The hint on the queue promised keys that did nothing there. |
+| (b) | One shared `STATUS_LABELS` / `statusLabel()` (`src/components/cockpit/statusLabels.ts`) for queue row, detail header, version selector, banner and the job page card. The "not the active version" banner is an informational Alert with its own sentence for superseded, sent and rejected | **Accept.** | Raw values such as `changes_requested` and a red error style for a normal state. |
+| (c) | The CV and cover-letter PDF iframes stay (the sandbox CSP is unchanged: owner decision 2026-11-11, they render in desktop Chrome). Both panels get an "Open in new tab" link next to Download | **Accept.** Iframes are not hidden on narrow viewports. | iOS Safari shows only page 1 of an inline PDF. |
+| (d) | Read-only TipTap viewers render as `role="document"` with a name only when a `label` prop is passed; the **default is neutral** (no role, no aria-label) so the other 12 call sites keep their accessibility tree. Cockpit Posting, Letter and the edit preview pass labels; scrollable boxes are focusable named regions | **Accept.** The axe waiver for `aria-input-field-name` is removed. | Unnamed textbox and keyboard-unreachable scroll areas. |
+
+- **Scope:** `src/components/cockpit/*`, `TipTapContentViewer.tsx`, the cockpit card in `JobDetails.tsx`, `__tests__/cockpit/*`, e2e 01/07/08.
+- **Not changed:** finding 2 (PDF sandbox) and finding 10 (tab counts, pagination, send-time column), which belong to the decisions issue.
+
 ## D-020 Server actions review fixes (issue #57)
 
 | # | Topic | Ruling | Reason |
