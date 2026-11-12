@@ -117,6 +117,48 @@ async function patchOwnLock(
   }
 }
 
+export type SendAttemptOutcome =
+  | "sent" // Gmail accepted the message (id known), written before the success transaction
+  | "failed" // definitive: nothing was sent
+  | "ambiguous" // the message may have gone out
+  | "record_failed" // Gmail accepted it, the database record failed
+  | "late_recorded" // lock lost, package no longer approved: recorded anyway (D-022 h)
+  | "lock_lost" // Gmail accepted it, lock lost, package approved or sent: nothing recorded
+  | "marked_sent" // owner: Mark as sent
+  | "lock_released"; // owner: Release lock
+
+// Append-only send history (issue #77, D-028). Insert only: nothing here or
+// anywhere else updates or deletes a row, and package edits never touch it.
+// Never throws, like the lock writes: the history must not turn an email that
+// went out into a different error, and a failed write is only logged. Stores
+// the CockpitError code, never an error message (no Gmail or Prisma text).
+async function recordAttempt(
+  client: Pick<typeof prisma, "sendAttempt">,
+  userId: string,
+  packageId: string,
+  outcome: SendAttemptOutcome,
+  extra: { error?: unknown; gmailMessageId?: string; threadId?: string } = {},
+): Promise<void> {
+  try {
+    await client.sendAttempt.create({
+      data: {
+        userId,
+        packageId,
+        outcome,
+        errorCode: extra.error instanceof CockpitError ? extra.error.code : null,
+        gmailMessageId: extra.gmailMessageId ?? null,
+        threadId: extra.threadId ?? null,
+      },
+    });
+  } catch {
+    log.error("cockpit: could not record a send attempt", {
+      packageId,
+      outcome,
+      gmailMessageId: extra.gmailMessageId,
+    });
+  }
+}
+
 // After a definitive failure: nothing was sent, the package is approved again.
 async function releaseQuietly(userId: string, id: string, lockedAt: Date): Promise<void> {
   await patchOwnLock(userId, id, lockedAt, { sendStartedAt: null, sendOutcome: null });
@@ -252,9 +294,11 @@ export async function sendApplicationPackage(
     accessToken = await gmail.getAccessToken(refreshToken);
   } catch (e) {
     await releaseQuietly(userId, packageId, lockedAt);
+    const err = e instanceof CockpitError ? e : new CockpitError("INTERNAL");
+    await recordAttempt(prisma, userId, packageId, "failed", { error: err });
     if (e instanceof CockpitError) throw e;
     log.error("cockpit: send failed before Gmail call", { packageId });
-    throw new CockpitError("INTERNAL");
+    throw err;
   }
 
   // ---- Step 5: the Gmail call --------------------------------------------
@@ -264,17 +308,28 @@ export async function sendApplicationPackage(
   } catch (e) {
     if (e instanceof CockpitError && e.definitive === true) {
       await releaseQuietly(userId, packageId, lockedAt); // 5a: nothing was sent
+      await recordAttempt(prisma, userId, packageId, "failed", { error: e });
       throw e;
     }
     // 5b: the message may have gone out. Keep the lock, flag the outcome.
     await holdAsUnknownQuietly(userId, packageId, lockedAt);
+    await recordAttempt(prisma, userId, packageId, "ambiguous", { error: e });
     log.warn("cockpit: send outcome unknown", { packageId });
     throw new CockpitError("SEND_OUTCOME_UNKNOWN");
   }
 
+  // ---- Step 5c: Gmail answered. The message id is written on its own, before
+  // the success transaction, so a failure of that transaction cannot lose it
+  // (issue #77, D-028). Never throws; a failed write is logged with the id.
+  await recordAttempt(prisma, userId, packageId, "sent", {
+    gmailMessageId: sent.id,
+    threadId: sent.threadId,
+  });
+
   // ---- Step 6: success, one transaction -----------------------------------
   const now = new Date();
   let recordedAfterLostLock = false;
+  let lockLost = false;
   try {
     await prisma.$transaction(async (tx) => {
       const recordSent = async () => {
@@ -330,21 +385,32 @@ export async function sendApplicationPackage(
       // sent ran): record nothing. Throwing rolls the whole transaction
       // back; the catch below locks an approved, unlocked package again
       // with an unknown outcome (D-022 a, c).
+      lockLost = true;
       throw new CockpitError("CONFLICT");
     });
   } catch {
     // The email is out but we could not record it. The lock stays (no second
     // send possible); the panel lets the user mark it as sent (SPEC §6.4).
-    // The Gmail message id is only logged: the package has no column for it
-    // and the SentEmail row is what failed (D-022 f).
+    // The Gmail message id is already in the send history (step 5c, D-028).
     log.error("cockpit: could not record a sent email", {
       packageId,
       gmailMessageId: sent.id,
     });
     await holdAsUnknownQuietly(userId, packageId, lockedAt);
+    await recordAttempt(
+      prisma,
+      userId,
+      packageId,
+      lockLost ? "lock_lost" : "record_failed",
+      { gmailMessageId: sent.id, threadId: sent.threadId },
+    );
     throw new CockpitError("SEND_OUTCOME_UNKNOWN");
   }
   if (recordedAfterLostLock) {
+    await recordAttempt(prisma, userId, packageId, "late_recorded", {
+      gmailMessageId: sent.id,
+      threadId: sent.threadId,
+    });
     // Recorded, but the package left the approved state before Gmail
     // answered: the owner should check Gmail and this package (D-022 h).
     log.warn("cockpit: late send recorded on a package no longer approved", {
@@ -401,6 +467,15 @@ export async function markSendUnknownAsSent(
     });
     if (!pkg) throw new CockpitError("NOT_FOUND");
     await markJobApplied(tx, userId, pkg.jobId, now);
+    // In the same transaction: the decision and its history stand or fall
+    // together. A failed history write rolls the recovery back, which is safe
+    // (the lock stays and the owner can retry).
+    await tx.sendAttempt
+      .create({ data: { userId, packageId: id, outcome: "marked_sent" } })
+      .catch(() => {
+        // Rolls the recovery back: nothing changed (D-028 d).
+        throw new CockpitError("HISTORY_NOT_RECORDED");
+      });
   });
   return { id, sentAt: now };
 }
@@ -410,10 +485,18 @@ export async function releaseSendLock(
   userId: string,
   id: string,
 ): Promise<{ id: string }> {
-  const res = await prisma.applicationPackage.updateMany({
-    where: recoverable(userId, id),
-    data: { sendStartedAt: null, sendOutcome: null },
+  await prisma.$transaction(async (tx) => {
+    const res = await tx.applicationPackage.updateMany({
+      where: recoverable(userId, id),
+      data: { sendStartedAt: null, sendOutcome: null },
+    });
+    if (res.count === 0) throw await notRecoverable(userId, id);
+    await tx.sendAttempt
+      .create({ data: { userId, packageId: id, outcome: "lock_released" } })
+      .catch(() => {
+        // Rolls the recovery back: nothing changed (D-028 d).
+        throw new CockpitError("HISTORY_NOT_RECORDED");
+      });
   });
-  if (res.count === 0) throw await notRecoverable(userId, id);
   return { id };
 }

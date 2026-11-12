@@ -15,6 +15,7 @@ import {
   LetterPanel,
   PostingPanel,
   PreviousReviewInfo,
+  SendHistoryPanel,
   type PackageDetail,
 } from "./Panels";
 import FitGradeBadge from "./FitGradeBadge";
@@ -177,6 +178,8 @@ export default function DetailView({
               j / k: next / previous in To do
             </p>
           )}
+
+          <SendHistoryPanel history={detail.sendHistory} />
 
           {isActive && (
             <ActionBar

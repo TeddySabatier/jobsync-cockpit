@@ -55,6 +55,7 @@ const MODEL_LABELS: Record<string, [singular: string, plural: string]> = {
   Automation: ["automation", "automations"],
   ApplicationPackage: ["application package", "application packages"],
   SentEmail: ["sent email record", "sent email records"],
+  SendAttempt: ["send attempt record", "send attempt records"],
   File: ["uploaded file (resume or CV PDF)", "uploaded files (resumes and CV PDFs)"],
 };
 

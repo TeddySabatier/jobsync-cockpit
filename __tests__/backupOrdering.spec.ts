@@ -109,6 +109,20 @@ describe("cockpit models", () => {
     expect(at("ApplicationPackage")).toBeLessThan(at("SentEmail"));
   });
 
+  // Issue #77 / D-028: the send history hangs off the package.
+  it("owns send attempts by the session user and wipes them before their package", () => {
+    expect(MODEL_SPECS.SendAttempt.owner).toBe("userId");
+    expect(MODEL_SPECS.SendAttempt.fks).toEqual({ packageId: "ApplicationPackage" });
+    expect(MODEL_SPECS.SendAttempt.scope("u1")).toEqual({ userId: "u1" });
+    expect(INSERT_ORDER.indexOf("ApplicationPackage")).toBeLessThan(
+      INSERT_ORDER.indexOf("SendAttempt"),
+    );
+    expect(DELETE_ORDER.indexOf("SendAttempt")).toBeLessThan(
+      DELETE_ORDER.indexOf("ApplicationPackage"),
+    );
+    expect(REPLACED_MODELS).toContain("SendAttempt");
+  });
+
   it("never lists a Gmail account model, so refresh tokens cannot be exported", () => {
     const names = INSERT_ORDER.map((m) => m.toLowerCase());
     expect(names.some((n) => n.includes("gmail"))).toBe(false);

@@ -244,6 +244,18 @@ const SentEmail = z.object({
   sentAt: dt,
 });
 
+// Append-only send history (D-028). Old backups have no such group: the
+// default below imports them with an empty history.
+const SendAttempt = z.object({
+  id,
+  packageId: id,
+  outcome: str,
+  errorCode: optStr,
+  gmailMessageId: optStr,
+  threadId: optStr,
+  createdAt: dt,
+});
+
 const Note = z.object({
   id,
   jobId: id,
@@ -349,6 +361,7 @@ export const BackupDataSchema = z.object({
   Job: group(Job),
   ApplicationPackage: group(ApplicationPackage),
   SentEmail: group(SentEmail),
+  SendAttempt: group(SendAttempt),
   Note: group(Note),
   Interview: group(Interview),
   Contact: group(Contact),
