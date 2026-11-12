@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-// The follow-up server actions (D-030): no session or flag off means a failure
+// The follow-up server actions (D-031): no session or flag off means a failure
 // result and zero database access; with a session they call the service with
 // that user's id and revalidate constant paths.
 const dbCalls = vi.hoisted(() => [] as string[]);

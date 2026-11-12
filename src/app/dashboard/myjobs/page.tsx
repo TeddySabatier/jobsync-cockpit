@@ -5,6 +5,7 @@ import JobsContainer from "@/components/myjobs/JobsContainer";
 import { getAllCompanies } from "@/actions/company.actions";
 import { getAllJobTitles } from "@/actions/jobtitle.actions";
 import { getAllJobLocations } from "@/actions/jobLocation.actions";
+import { isCockpitEnabled } from "@/lib/cockpit/config";
 import { getAllTags } from "@/actions/tag.actions";
 
 export const metadata: Metadata = {
@@ -30,6 +31,7 @@ async function MyJobs() {
         sources={sources}
         statuses={statuses}
         tags={tags ?? []}
+        cockpitEnabled={isCockpitEnabled()}
       />
     </div>
   );

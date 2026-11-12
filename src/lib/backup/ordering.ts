@@ -160,7 +160,7 @@ export const MODEL_SPECS: Record<BackupModel, ModelSpec> = {
   ApplicationPackage: {
     delegate: "applicationPackage",
     owner: "userId",
-    // replyToPackageId (D-030) points at another package of the same table:
+    // replyToPackageId (D-031) points at another package of the same table:
     // ids are all minted before the first insert, and the column has no DB FK.
     fks: { jobId: "Job", cvFileId: "File", replyToPackageId: "ApplicationPackage" },
     scope: byUser,
@@ -179,7 +179,7 @@ export const MODEL_SPECS: Record<BackupModel, ModelSpec> = {
     fks: { packageId: "ApplicationPackage" },
     scope: byUser,
   },
-  // Follow-up state (D-030): one row per job, inserted after the Job it hangs on.
+  // Follow-up state (D-031): one row per job, inserted after the Job it hangs on.
   JobFollowUp: {
     delegate: "jobFollowUp",
     owner: "userId",

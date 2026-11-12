@@ -70,7 +70,7 @@ describe("active package helper", () => {
       status: { not: "superseded" },
     });
   });
-  it("activePackageWhere is per kind and defaults to the application (D-030)", () => {
+  it("activePackageWhere is per kind and defaults to the application (D-031)", () => {
     expect(activePackageWhere({ jobId: "j" }, "follow_up")).toEqual({
       jobId: "j",
       kind: "follow_up",

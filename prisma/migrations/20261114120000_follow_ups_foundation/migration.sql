@@ -1,4 +1,4 @@
--- D-030 / follow-ups 1/4: data model for application follow-ups. Pure DDL, no
+-- D-031 / follow-ups 1/4: data model for application follow-ups. Pure DDL, no
 -- table is redefined or copied (ADD COLUMN, one new table, one index swapped),
 -- so every existing row stays as it is: kind = application for all of them.
 

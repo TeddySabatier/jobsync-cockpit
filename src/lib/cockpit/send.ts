@@ -208,7 +208,7 @@ export async function sendApplicationPackage(
     throw new CockpitError("CONFLICT");
   }
   // Only an application can be sent here. A follow-up package can only exist
-  // through a hand-made backup before F-4 (D-030); refuse it so the V0 path,
+  // through a hand-made backup before F-4 (D-031); refuse it so the V0 path,
   // which attaches a CV and marks the job applied, never sends one. F-4 replaces
   // this guard with the real follow-up send path.
   if (pkg.kind !== "application") throw new CockpitError("INVALID_STATE");
@@ -436,7 +436,7 @@ function recoverable(userId: string, id: string): Prisma.ApplicationPackageWhere
   return {
     id,
     userId,
-    // Applications only until F-4 (D-030): a follow-up never marks a job applied.
+    // Applications only until F-4 (D-031): a follow-up never marks a job applied.
     kind: "application",
     status: "approved",
     sendStartedAt: { not: null },

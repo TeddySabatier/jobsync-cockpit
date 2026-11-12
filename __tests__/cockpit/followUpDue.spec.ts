@@ -10,7 +10,7 @@ import {
   type FollowUpDue,
 } from "@/lib/cockpit/followUpDue";
 
-// D-030 / plan 3.1: the pure due calculation. The clock is frozen with fake
+// D-031 / plan 3.1: the pure due calculation. The clock is frozen with fake
 // timers; every case passes `new Date()` as `now`, so the tests read like the
 // owner's calendar.
 

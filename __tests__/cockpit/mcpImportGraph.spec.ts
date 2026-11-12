@@ -109,7 +109,7 @@ describe("MCP import graph (AC-35)", () => {
     expect(violations(entries, SRC)).toEqual([]);
   });
 
-  // D-030: the follow-up modules are meant to be used by MCP tools (F-3). They
+  // D-031: the follow-up modules are meant to be used by MCP tools (F-3). They
   // and the follow-up actions' services must not reach send or Gmail.
   it("the follow-up due module and service reach neither send nor Gmail", () => {
     const entries = [

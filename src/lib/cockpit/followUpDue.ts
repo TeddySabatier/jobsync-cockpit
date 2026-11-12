@@ -1,4 +1,4 @@
-// Follow-up due calculation (cockpit/V1-FOLLOWUPS-PLAN.md section 3.1, D-030).
+// Follow-up due calculation (cockpit/V1-FOLLOWUPS-PLAN.md section 3.1, D-031).
 // Pure: no Prisma, no clock, no environment. The caller passes `now`, the
 // timezone and the window, so every edge case is testable with a fixed date.
 //

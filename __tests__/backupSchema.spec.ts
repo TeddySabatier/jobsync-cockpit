@@ -15,7 +15,7 @@ const validManifest = {
 };
 
 describe("manifest schema", () => {
-  it("writes format version 2 and still reads 1 (D-030)", () => {
+  it("writes format version 2 and still reads 1 (D-031)", () => {
     expect(BACKUP_FORMAT_VERSION).toBe(2);
     expect([...SUPPORTED_BACKUP_FORMAT_VERSIONS]).toEqual([1, 2]);
     expect(ManifestSchema.safeParse({ ...validManifest, formatVersion: 1 }).success).toBe(true);

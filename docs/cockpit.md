@@ -91,6 +91,10 @@ The letterhead (name, title, contact line) comes from the package's CV data. The
 
 With the cockpit on, a job page has a **Claude prompt** button next to Match with AI. One click copies a ready-made prompt for Claude: the job (company, role, location, link, JobSync id), the posting text, and the instructions to run the bot's cockpit pipeline for this one job (see [cockpit-bot.md](cockpit-bot.md)). Paste it into Claude (a session that can read the bot folder); the package then appears in Review. If a package already exists for the job, the prompt says so and asks Claude not to resubmit. If the browser refuses to copy (plain http on a phone), the prompt opens in a box to copy by hand.
 
+The prompt also tells Claude how to find a contact when the posting has none: look on the posting, then the company's own site (careers, contact, team, about) for the recruiter name and a published HR address. It never guesses an address; if none is published the recipient stays empty (apply via link) and the report says where any contact came from (D-030).
+
+**Refresh jobs:** with the cockpit on, the jobs list has a **Refresh jobs** button. It copies a prompt that makes Claude run only the bot's refresh steps (newsletter fetch, watchlist, save new postings in JobSync), prepare nothing and send nothing, and report new jobs, duplicates skipped and which look worth preparing. Same copy-or-box behaviour as above.
+
 The built-in **Cover Letter** and **Match with AI** buttons are JobSync's own AI feature and use the model set in the agent panel; they do not create the cockpit package.
 
 ## Review UI
@@ -193,7 +197,7 @@ Further detail: `cockpit/SPEC.md` and `cockpit/DECISIONS.md` (e.g. D-010 reconne
 
 A job that has an application package cannot be deleted: the Delete action is hidden for it, a direct delete is refused with "Archive it instead", and the database itself refuses (`ApplicationPackage.job` is `ON DELETE RESTRICT`), so the history of what was sent is never lost. Use **Archive** (job page, jobs list menu, or "Change status" to Archived). Archived jobs are hidden from the default jobs list; pick **Archived** in the filter to see them. Their Review history is untouched, and changing the status back restores them. A job with no package can still be deleted. Archived jobs still count in the dashboard stats and charts and in MCP `list_jobs` (their history is real); only the jobs list hides them. The archive toast has an **Undo** that restores the previous status. Backup and restore are unaffected. Deleting a whole user account that owns jobs with packages is not supported until those packages are removed first.
 
-## Follow-ups: data model and due rules (D-030 to D-032, V1 part 1 of 4)
+## Follow-ups: data model and due rules (D-031 to D-033, V1 part 1 of 4)
 
 Only the foundation is in place: **no follow-up can be drafted, sent or seen yet** (MCP tools, send and UI come in the next parts, `cockpit/V1-FOLLOWUPS-PLAN.md`).
 

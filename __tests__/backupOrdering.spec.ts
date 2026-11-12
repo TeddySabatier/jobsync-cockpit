@@ -22,7 +22,7 @@ describe("backup ordering", () => {
     );
     for (const model of INSERT_ORDER) {
       for (const [field, target] of Object.entries(MODEL_SPECS[model].fks)) {
-        // The one self-reference (D-030): a column without a database foreign
+        // The one self-reference (D-031): a column without a database foreign
         // key, whose target id is minted before any insert, so row order inside
         // the model does not matter.
         if (model === "ApplicationPackage" && field === "replyToPackageId") continue;
@@ -131,7 +131,7 @@ describe("cockpit models", () => {
     expect(REPLACED_MODELS).toContain("SendAttempt");
   });
 
-  // D-030: follow-up state, one row per job.
+  // D-031: follow-up state, one row per job.
   it("owns follow-up state by the session user, inserts it after its job and replaces it on restore", () => {
     expect(MODEL_SPECS.JobFollowUp.owner).toBe("userId");
     expect(MODEL_SPECS.JobFollowUp.fks).toEqual({ jobId: "Job" });
