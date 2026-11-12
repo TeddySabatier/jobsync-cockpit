@@ -55,7 +55,21 @@ const FREE_MAIL = new Set([
 ]);
 
 // Second-level labels that are part of the public suffix: acme.co.uk.
-const SUFFIX_LABELS = new Set(["co", "com", "org", "net", "ac", "gov", "edu"]);
+// Only honoured under a two-letter country TLD: co.com, net.com, org.com are
+// ordinary registrable domains whose subdomains someone else can sell.
+const SUFFIX_LABELS = new Set([
+  "co", "com", "org", "net", "ac", "gov", "edu", "gouv", "asso", "nom", "mil",
+  "ne", "or", "go", "gob", "sch", "ltd", "plc",
+]);
+
+// Words of a company name that many companies share (Acme Technologies ->
+// technologies.com): never a match on their own, only inside the joined name.
+const WEAK_WORDS = new Set([
+  "technologies", "technology", "tech", "solutions", "systems", "software",
+  "consulting", "services", "global", "international", "digital", "labs",
+  "partners", "holdings", "industries", "studio", "studios", "media", "data",
+  "france", "europe", "groupe", "network", "networks", "online", "web",
+]);
 
 // Labels that say nothing about who owns the domain: never a match on their own.
 const GENERIC_LABELS = new Set([
@@ -70,7 +84,12 @@ const GENERIC_LABELS = new Set([
 function registrable(host: string): { label: string; domain: string } {
   const labels = host.toLowerCase().split(".").filter(Boolean);
   if (labels.length < 2) return { label: labels[0] ?? "", domain: labels[0] ?? "" };
-  const n = labels.length >= 3 && SUFFIX_LABELS.has(labels[labels.length - 2]) ? 3 : 2;
+  const n =
+    labels.length >= 3 &&
+    labels[labels.length - 1].length === 2 &&
+    SUFFIX_LABELS.has(labels[labels.length - 2])
+      ? 3
+      : 2;
   const tail = labels.slice(-n);
   return { label: tail[0], domain: tail.join(".") };
 }
@@ -98,16 +117,25 @@ export function recipientWarning(
   jobUrl: string | null,
 ): string | null {
   const domain = to.split("@").pop()?.trim().toLowerCase() ?? "";
-  if (!domain) return null;
+  if (!to.trim()) return null;
+  // "hr@" or "hr@.": not an address the server would accept; do not stay silent.
+  if (!domain.replace(/\./g, "")) {
+    return "The recipient address looks incomplete. Check that this is the right recipient.";
+  }
   const mine = registrable(domain);
   if (FREE_MAIL.has(domain) || FREE_MAIL.has(mine.domain)) {
     return `${domain} is a free-mail domain. Check that this is the right recipient.`;
   }
+  // Accents and apostrophes dropped: "Crédit Agricole", "L'Oréal" must still
+  // match credit-agricole.fr / loreal.com (a false warning is trained away).
   const words = company
+    .normalize("NFD")
+    .replace(/[̀-ͯ'’]/g, "")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((w) => w && !GENERIC_LABELS.has(w));
   const companyKey = words.join("");
+  const companyKeyDashed = words.join("-");
   const postingHost = hostOf(jobUrl);
   const posting = postingHost ? registrable(postingHost).label : null;
   const label = mine.label;
@@ -115,8 +143,9 @@ export function recipientWarning(
   const matches =
     usable &&
     (label === posting ||
-      words.includes(label) ||
-      label === companyKey);
+      (words.includes(label) && !WEAK_WORDS.has(label)) ||
+      label === companyKey ||
+      label === companyKeyDashed);
   return matches
     ? null
     : `The recipient domain (${domain}) does not match the company (${company}) or the job posting. Check that this is the right recipient.`;
