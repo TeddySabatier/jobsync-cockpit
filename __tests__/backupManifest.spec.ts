@@ -26,7 +26,7 @@ describe("buildManifest", () => {
       ],
     });
     const manifest = buildManifest(data, "me@example.com");
-    expect(manifest.formatVersion).toBe(1);
+    expect(manifest.formatVersion).toBe(2);
     expect(manifest.sourceEmail).toBe("me@example.com");
     expect(manifest.counts.Tag).toBe(2);
     expect(manifest.counts.Job).toBe(0);
@@ -97,10 +97,20 @@ describe("readManifest", () => {
   });
 
   it("names both versions when formatVersion does not match", async () => {
-    const manifest = { ...buildManifest(emptyData, "a@b.com"), formatVersion: 2 };
+    const manifest = { ...buildManifest(emptyData, "a@b.com"), formatVersion: 3 };
     const zip = await openBackupZip(
       await zipOf({ "manifest.json": JSON.stringify(manifest) }),
     );
-    await expect(readManifest(zip)).rejects.toThrow(/version 1.*found 2|found 2/i);
+    await expect(readManifest(zip)).rejects.toThrow(/version 1 or 2.*found 3/i);
+  });
+
+  it("accepts a version 1 and a version 2 manifest", async () => {
+    for (const v of [1, 2]) {
+      const manifest = { ...buildManifest(emptyData, "a@b.com"), formatVersion: v };
+      const zip = await openBackupZip(
+        await zipOf({ "manifest.json": JSON.stringify(manifest) }),
+      );
+      expect((await readManifest(zip)).formatVersion).toBe(v);
+    }
   });
 });

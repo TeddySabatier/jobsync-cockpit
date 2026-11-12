@@ -6,6 +6,7 @@ import { INSERT_ORDER } from "./ordering";
 import {
   BACKUP_FORMAT_VERSION,
   ManifestSchema,
+  SUPPORTED_BACKUP_FORMAT_VERSIONS,
   type BackupData,
   type BackupManifest,
 } from "./schema";
@@ -92,9 +93,9 @@ export async function readManifest(zip: JSZip): Promise<BackupManifest> {
   const found = (raw as { formatVersion?: unknown })?.formatVersion;
   const parsed = ManifestSchema.safeParse(raw);
   if (!parsed.success) {
-    if (found !== undefined && found !== BACKUP_FORMAT_VERSION) {
+    if (found !== undefined && !SUPPORTED_BACKUP_FORMAT_VERSIONS.some((v) => v === found)) {
       throw new BackupError(
-        `This backup was made by a different version of JobSync. Expected format version ${BACKUP_FORMAT_VERSION}, found ${String(found)}.`,
+        `This backup was made by a different version of JobSync. Expected format version ${SUPPORTED_BACKUP_FORMAT_VERSIONS.join(" or ")}, found ${String(found)}.`,
       );
     }
     throw new BackupError("manifest.json is missing required fields.");

@@ -21,6 +21,7 @@ vi.mock("@/lib/db", () => {
       applicationPackage: counted(),
       sentEmail: counted(),
       sendAttempt: counted(),
+      jobFollowUp: counted(),
       file: counted(),
     },
   };

@@ -19,6 +19,9 @@ const OPTIONAL_FKS = new Set<string>([
   // The schema FK is SetNull: a package whose CV row is not in the backup
   // restores without a CV instead of blocking the whole import (D-012).
   "ApplicationPackage.cvFileId",
+  // A follow-up whose application is not in the file restores without the link
+  // (the column has no foreign key; it is informational, D-031).
+  "ApplicationPackage.replyToPackageId",
   "Contact.interviewId",
   "Task.activityTypeId",
   "Activity.taskId",

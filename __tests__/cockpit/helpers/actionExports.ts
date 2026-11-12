@@ -14,6 +14,13 @@ export const ALLOWED: Record<string, string[]> = {
     "reopenPackage",
     "getTodoCount",
   ],
+  "cockpitFollowUps.actions.ts": [
+    "snoozeFollowUp",
+    "skipFollowUpStep",
+    "stopFollowUps",
+    "setFollowUpOutcome",
+    "undoFollowUpOutcome",
+  ],
   "cockpitGmail.actions.ts": ["getGmailSettings", "disconnectGmail"],
   "cockpitSend.actions.ts": [
     "sendPackage",

@@ -26,6 +26,7 @@ export type BackupModel =
   | "ApplicationPackage"
   | "SentEmail"
   | "SendAttempt"
+  | "JobFollowUp"
   | "Note"
   | "Interview"
   | "Contact"
@@ -159,7 +160,9 @@ export const MODEL_SPECS: Record<BackupModel, ModelSpec> = {
   ApplicationPackage: {
     delegate: "applicationPackage",
     owner: "userId",
-    fks: { jobId: "Job", cvFileId: "File" },
+    // replyToPackageId (D-031) points at another package of the same table:
+    // ids are all minted before the first insert, and the column has no DB FK.
+    fks: { jobId: "Job", cvFileId: "File", replyToPackageId: "ApplicationPackage" },
     scope: byUser,
   },
   SentEmail: {
@@ -174,6 +177,13 @@ export const MODEL_SPECS: Record<BackupModel, ModelSpec> = {
     delegate: "sendAttempt",
     owner: "userId",
     fks: { packageId: "ApplicationPackage" },
+    scope: byUser,
+  },
+  // Follow-up state (D-031): one row per job, inserted after the Job it hangs on.
+  JobFollowUp: {
+    delegate: "jobFollowUp",
+    owner: "userId",
+    fks: { jobId: "Job" },
     scope: byUser,
   },
   Note: { delegate: "note", owner: "userId", fks: { jobId: "Job" }, scope: byUser },
@@ -229,6 +239,7 @@ export const INSERT_ORDER: BackupModel[] = [
   "ApplicationPackage",
   "SentEmail",
   "SendAttempt",
+  "JobFollowUp",
   "Note",
   "Interview",
   "Contact",
@@ -270,5 +281,6 @@ export const REPLACED_MODELS: BackupModel[] = [
   "ApplicationPackage",
   "SentEmail",
   "SendAttempt",
+  "JobFollowUp",
   "File",
 ];

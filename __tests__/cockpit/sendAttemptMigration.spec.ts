@@ -57,9 +57,10 @@ describe(`migration ${NEW}: upgrade keeps existing rows`, () => {
       );
       await client.$disconnect();
 
-      // NEW and every later migration (the generated client expects them all).
+      // This migration and every later one: the generated client expects the
+      // latest schema.
       for (const name of fs.readdirSync(path.join(src, "migrations"))) {
-        if (name < NEW || !fs.statSync(path.join(src, "migrations", name)).isDirectory()) continue;
+        if (name < NEW || name === "migration_lock.toml") continue;
         fs.cpSync(
           path.join(src, "migrations", name),
           path.join(prismaDir, "migrations", name),
