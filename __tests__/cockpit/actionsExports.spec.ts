@@ -2,26 +2,7 @@
 import fs from "fs";
 import path from "path";
 
-// AC-44: a "use server" file may only export the intended async functions.
-const ALLOWED: Record<string, string[]> = {
-  "cockpit.actions.ts": [
-    "approvePackage",
-    "unapprovePackage",
-    "rejectPackage",
-    "requestPackageChanges",
-    "updatePackageContent",
-    "markPackageAppliedManually",
-    "getReviewQueue",
-    "getPackageDetail",
-    "getAdjacentPackageIds",
-  ],
-  "cockpitGmail.actions.ts": ["getGmailSettings", "disconnectGmail"],
-  "cockpitSend.actions.ts": [
-    "sendPackage",
-    "markSendUnknownAsSent",
-    "releaseSendLock",
-  ],
-};
+import { ALLOWED } from "./helpers/actionExports";
 
 const dir = path.join(process.cwd(), "src", "actions");
 const files = fs
@@ -63,4 +44,14 @@ describe("cockpit*.actions.ts exports (AC-44)", () => {
       expect(src).not.toMatch(/cockpit\/gmail/);
     }
   });
+});
+
+describe("cockpit helper modules are not server-action files", () => {
+  it.each(["src/lib/cockpit/actionRunner.ts", "src/lib/cockpit/packageView.ts", "src/lib/authError.ts"])(
+    "%s does not start with use server",
+    (rel) => {
+      const src = fs.readFileSync(path.join(process.cwd(), rel), "utf8");
+      expect(src.trimStart()).not.toMatch(/^["']use server["']/);
+    },
+  );
 });

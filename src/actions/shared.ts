@@ -1,3 +1,4 @@
+import { RequireUserError } from "@/lib/authError";
 import { getCurrentUser } from "@/utils/user.utils";
 
 // Not a "use server" module: shared across the action directories, so it must
@@ -6,7 +7,7 @@ import { getCurrentUser } from "@/utils/user.utils";
 export const requireUser = async () => {
   const user = await getCurrentUser();
   if (!user) {
-    throw new Error("Not authenticated");
+    throw new RequireUserError();
   }
   return user;
 };

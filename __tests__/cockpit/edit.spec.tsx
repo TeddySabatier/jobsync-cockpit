@@ -27,8 +27,8 @@ vi.mock("next/navigation", () => ({
 const toastError = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/toast", () => ({ toastSuccess: vi.fn(), toastError }));
 vi.mock("@/components/TipTapContentViewer", () => ({
-  TipTapContentViewer: ({ content }: { content: string }) => (
-    <div data-testid="tiptap" data-html={content} />
+  TipTapContentViewer: ({ content, label }: { content: string; label?: string }) => (
+    <div data-testid="tiptap" data-html={content} data-label={label} />
   ),
 }));
 
@@ -52,8 +52,6 @@ const fixture = (
 ): PackageDetail => ({
   package: {
     id: "p2",
-    userId: "u1",
-    jobId: "j1",
     version: 2,
     status: "pending",
     emailTo: "jobs@acme.example",
@@ -65,21 +63,12 @@ const fixture = (
     cvJson: JSON.stringify(CV),
     cvFileId: "f1",
     cvPdfStale: false,
-    sourceFolder: null,
-    idempotencyKey: null,
     rejectReason: null,
     changeRequest: null,
     changeRequestedAt: null,
-    changeRequestHandledAt: null,
     changeRequestResponse: null,
-    editedAt: null,
-    approvedAt: null,
-    rejectedAt: null,
     sendStartedAt: null,
     sendOutcome: null,
-    sentAt: null,
-    sentVia: null,
-    createdAt: new Date("2026-11-01T10:00:00Z"),
     updatedAt: new Date("2026-11-01T10:00:00Z"),
     job: {
       id: "j1",
@@ -99,6 +88,7 @@ const fixture = (
   attachment: { fileName: "0000-uuid.pdf", size: 12288 },
   letterAttachment: { fileName: "Cover_Letter.pdf" },
   gmail: { email: "you@example.com", scopes: "gmail.send" },
+  gmailSendAllowed: true,
   ...extra,
 });
 
@@ -304,6 +294,12 @@ describe("edit form: client validation mirrors the zod rules", () => {
     expect(e.emailBody).toBe("Required");
   });
 
+  it("says 'Must not be blank' for a whitespace-only subject and body (D-018 c)", () => {
+    const e = validateEditValues({ ...base, emailSubject: "  ", emailBody: " \n" });
+    expect(e.emailSubject).toBe("Must not be blank");
+    expect(e.emailBody).toBe("Must not be blank");
+  });
+
   it("blocks Save and shows the error", async () => {
     render(<EditForm detail={fixture()} onClose={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("To"), { target: { value: "not-an-email" } });
@@ -325,6 +321,17 @@ describe("edit form: letter preview", () => {
     expect(html).toContain("Hi");
     expect(html).not.toMatch(/<img/i);
     expect(html).not.toMatch(/<a[\s>]/i);
+  });
+});
+
+describe("edit form: letter preview a11y", () => {
+  it("is a named, focusable scroll group with a labelled viewer", () => {
+    render(<EditForm detail={fixture()} onClose={vi.fn()} />);
+    expect(screen.getByRole("group", { name: "Letter preview text" })).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
+    expect(screen.getByTestId("tiptap")).toHaveAttribute("data-label", "Letter preview");
   });
 });
 

@@ -1,6 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
-import fs from "fs";
-import path from "path";
+import { render, screen, within } from "@testing-library/react";
 
 const getReviewQueue = vi.hoisted(() => vi.fn());
 vi.mock("@/actions/cockpit.actions", () => ({ getReviewQueue }));
@@ -91,7 +89,8 @@ describe("review queue page", () => {
     const link = screen.getByRole("link", { name: /Acme Corp/ });
     expect(link).toHaveAttribute("href", "/dashboard/review/p1");
     expect(within(link).getByText("Staff Engineer")).toBeInTheDocument();
-    expect(within(link).getByLabelText("Fit grade A")).toBeInTheDocument();
+    expect(within(link).getByText("Fit grade")).toBeInTheDocument();
+    expect(link).toHaveTextContent("Fit grade A");
     expect(within(link).getByText("v2")).toBeInTheDocument();
     expect(within(link).getByText("Pending")).toBeInTheDocument();
     expect(within(link).getByText("jobs@acme.example")).toBeInTheDocument();
@@ -102,29 +101,39 @@ describe("review queue page", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows 'apply via link' and the Link apply chip without a recipient", async () => {
+  it("shows 'Apply via link' and the Link apply chip without a recipient", async () => {
     getReviewQueue.mockResolvedValue(
       ok([row({ emailTo: null })], { gmail: { email: "me@example.com" } }),
     );
     await renderPage();
-    expect(screen.getByText("apply via link")).toBeInTheDocument();
+    expect(screen.getByText("Apply via link")).toBeInTheDocument();
     expect(screen.getByText("Link apply")).toBeInTheDocument();
   });
 
-  it("shows an empty state per tab and the keys hint only on To do", async () => {
+  it.each([
+    ["todo", /Nothing to review/],
+    ["changes", /No packages are waiting/],
+    ["sent", /Nothing sent yet/],
+    ["rejected", /No rejected packages/],
+  ])("shows the %s empty state with no list and no j / k hint", async (tab, msg) => {
     getReviewQueue.mockResolvedValue(ok([]));
-    const { unmount } = await renderPage("changes");
-    expect(screen.getByText(/No packages are waiting/)).toBeInTheDocument();
-    expect(screen.queryByText("j / k: next / previous in To do")).toBeNull();
-    unmount();
-    await renderPage("todo");
-    expect(
-      screen.getByText("j / k: next / previous in To do"),
-    ).toBeInTheDocument();
-    cleanup();
-    await renderPage("sent");
-    expect(screen.queryByText("j / k: next / previous in To do")).toBeNull();
+    await renderPage(tab);
+    expect(screen.getByText(msg)).toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    // j / k only work on the detail page, so the queue must not advertise them.
+    expect(screen.queryByText(/j \/ k/)).toBeNull();
+  });
+
+  it("lists rows on the Sent tab and never shows the j / k hint on the queue", async () => {
+    getReviewQueue.mockResolvedValue(
+      ok([row({ status: "sent" }), row({ id: "p9", status: "changes_requested" })]),
+    );
+    await renderPage("sent");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    const list = within(screen.getByRole("list"));
+    expect(list.getByText("Sent")).toBeInTheDocument();
+    expect(list.getByText("Changes requested")).toBeInTheDocument();
+    expect(screen.queryByText(/j \/ k/)).toBeNull();
   });
 
   it("shows the Gmail callout only when the action says it is needed", async () => {
@@ -195,11 +204,6 @@ describe("review route files", () => {
     expect(
       screen.getByRole("status", { name: /loading review queue/i }),
     ).toBeInTheDocument();
-    expect(
-      fs.existsSync(
-        path.join(process.cwd(), "src/app/dashboard/review/loading.tsx"),
-      ),
-    ).toBe(true);
   });
 
   it("layout wraps children in a full-width col-span-3 box", () => {

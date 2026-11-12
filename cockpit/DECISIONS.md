@@ -6,7 +6,7 @@ Format: id, decision, why, cost if wrong.
 - **Status: superseded by D-003** (the real issue/PR flow is used; the stacked-branch idea is kept for ordering only).
 - **Decision:** `gh` was not authenticated for the repo owner at the time, so no issues or PRs are created and nothing is merged. Each ticket gets its own branch `cockpit/<n>-<slug>`, pushed to the `private` remote. Branches are **stacked**: ticket N branches from ticket N-1's branch, because later tickets need earlier code. The issue and PR bodies are written to files in `cockpit/pending-github/<n>-<slug>.md`, with the PR base noted. The reviewer verdict is written into that same file in place of a PR comment. Superseded by D-003.
 - **Why:** follows the prompt's fallback ("keep working on branches ... never merge locally into the default branch").
-- **Cost if wrong:** The owner has to open the PRs in order (or retarget each to `main` after its parent merges). If they are squash-merged them in order, the later PRs need a rebase. The handoff gives the exact sequence.
+- **Cost if wrong:** The owner has to open the PRs in order (or retarget each to `main` after its parent merges). If they are squash-merged in order, the later PRs need a rebase. The handoff gives the exact sequence.
 
 ## D-002 Work in a separate worktree
 - **Decision:** work in a separate git worktree branched from `private/main`; the primary checkout is left untouched.
@@ -26,7 +26,7 @@ All 15 items accepted, with the details below. Source of authority: the owner's 
 | S1 | Lock does not freeze the package | Accept. `sendStartedAt: null` in every transition, edit and supersede `where`. A submit on a locked package returns `CONFLICT`. Step 6 is conditional. `sendPackage(id, expectedUpdatedAt)` re-reads after the lock | §2.1, §2.2, §6.1, §6.4, AC-25, AC-34 |
 | S2 | Lock cleared on ambiguous Gmail failure | Accept. New field `sendOutcome String?` (`"unknown"`). Release the lock only on definitive failures (token error, Gmail 400/401/403). Timeout (20 s), 5xx or network error keep the lock and set `"unknown"`. The UI shows "Check your Gmail Sent folder" with **Mark as sent (manual)** and **Release lock**. The same path covers a crash (also UX #2) | §2, §5.3, §6.4, AC-33 |
 | S3 | PDF iframe blocked by global `X-Frame-Options: DENY` | Accept. Scoped `next.config.mjs` rule for the file route (`SAMEORIGIN` + `frame-ancestors 'self'`), plus `CSP: sandbox` on the PDF response. `next.config.mjs` added to §9, owned by C-05. Risk noted: some browsers' PDF viewers refuse a sandboxed PDF (AC-30 checks) | §4, §9, §11, AC-37 |
-| S4 | Unbounded MCP payload and storage | Accept. `contentBase64` max 7,000,000. Per-user quota 200 files / 500 MB (`TOO_LARGE`). Stricter `attach_file` rate bucket reusing `checkMcpRateLimit`. **sha256 dedupe skipped** (YAGNI). Early `Content-Length` reject was in the review but not in the ruling; not added (the schema cap bounds the payload) | §2.3, §3, AC-38 |
+| S4 | Unbounded MCP payload and storage | Accept. `contentBase64` max 7,000,000. Per-user quota 200 files / 500 MB (`TOO_LARGE`) **(quota superseded by D-013: removed)**. Stricter `attach_file` rate bucket reusing `checkMcpRateLimit`. **sha256 dedupe skipped** (YAGNI). Early `Content-Length` reject was in the review but not in the ruling; not added (the schema cap bounds the payload) | §2.3, §3, AC-38 |
 | S5 | Letter rendering | Accept. Markdown with links and images disabled (as in `src/lib/agent/markdown.ts`), passed through `TipTapContentViewer`. Test: no `<img>` or `<a>`. Email body and fit analysis as text / `<pre>` only | §5, §5.3, AC-41 |
 | S6, S7 | OAuth origin, cookie, state binding | Accept. Origin from `GOOGLE_REDIRECT_URI`. Cookie `Path=/api/cockpit/gmail`, `Max-Age=600`, `Secure` iff https, payload `{state, verifier, userId, nonce}`, deleted on every exit. State checked before `?error=`. `refresh_token` required. Old token revoked on reconnect. Error codes are an enum with a fixed message map | §6.2, AC-22, AC-23 |
 | S8 | Allow-list and `id_token` checks | Accept. `COCKPIT_GMAIL_ALLOWED_ADDRESS` is required for Send. Check `aud`, `iss`, `exp`. `email_verified` accepts `true` or `"true"`. Nonce | §6.2, §6.4, §7, AC-23, AC-25 |
@@ -215,3 +215,59 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 
 - **Scope:** `src/lib/backup/{import,normalize,ordering}.ts`, `src/lib/downloadName.ts`, `src/app/api/profile/resume/route.ts` (download name only), `src/components/profile/DownloadFileButton.tsx`, `src/components/settings/DataSettings.tsx`, `__tests__/{backupCockpit,backupPreflight,backupOrdering,backupNormalize,resumeDownloadName}.spec.ts`, `__tests__/{DataSettings,DownloadFileButton}.spec.tsx`, `docs/cockpit.md`.
 - **Not changed (out of scope of #60):** manifest counts are still not cross-checked against `data.json`; the id map stays one flat map; the backup format version stays 1. The snapshot and the old-file capture still run before the transaction: the send guard closes the in-flight send case, not a bot submit landing in that window.
+
+## D-018 Core library hardening (review 01, issue #53)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | A send (Gmail, **Mark as sent (manual)** or **Mark applied manually**) moves the job **status** to `applied` **only from `draft` or `new`**; a job already at `interview`, `offer` or any other status keeps its status. Whatever the status, the send **always sets `applied = true`** and sets `appliedDate` to the send time **only when it is empty** (an existing date is never overwritten). One shared helper (`markJobApplied` in `packages.ts`) serves every path and refuses an empty job id | **Accept (review finding; applied/appliedDate rule by maintainer decision on PR #68).** | The owner may have moved the job on by hand; a late send must not rewind the status. But the application did happen: the job card must not say "Not applied" after a real send. Prisma reads `id: undefined` as no filter, a mass-write risk. |
+| (b) | `submit_application_package` and the edit schema are **strict**: an unknown key (`emailTooo`) is refused, not dropped. The MCP tool registers the strict object, so the SDK error names the key | **Accept (review finding).** | A dropped `emailTo` typo silently turned a package into "apply via link". |
+| (c) | A whitespace-only subject or body is refused (over MCP as an SDK shape error, per D-016 (a); the edit form says "Must not be blank"). The stored text is not trimmed | **Accept (review finding).** | `" "` passed `min(1)`. |
+| (d) | A Prisma write conflict on submit is `CONFLICT` (replay), like a version race, not `INTERNAL`: `P2034`, and `P1008` / `P2028`, which is what SQLite busy under concurrent writers actually raises on Prisma (a test holding the write lock from a second connection gets `P1008`, never `P2034`) | **Accept (review finding).** | Same remedy for the bot: replay the whole submit. |
+| (e) | Letter markdown: the `reference` rule is off too, so a line like `[1]: https://...` stays visible text. The HTML preview and the letter PDF (D-015) share **one** parser instance (`letterMarkdown` in `markdown.ts`), so they never disagree | **Accept (review finding).** | With links off the definition line vanished from the letter. |
+| (f) | Request changes clears `approvedAt`; the next version needs a fresh approval | **Accept (review finding).** | Cosmetic stale timestamp. |
+| (g) | `cvPdfStale` stays set once a CV string changed, even if a later edit restores the original text | **Accept, documented.** | Conservative: only the bot re-render clears it. |
+
+- **Scope:** `src/lib/cockpit/{packages.ts,cvLeaves.ts,schemas.ts,markdown.ts,letterPdf.tsx,send.ts}`, `src/components/cockpit/EditForm.tsx`, `src/lib/mcp/tools/cockpit.ts` (submit registration), tests (`packages.integration`, `packages.contention.integration`, `send.integration`, `schemas`, `letterRender`, `mcpTools`, `botSubmitArgs`), docs.
+- **Not changed:** schema, Job delete cascade, error messages (owned by other issues). SPEC stays frozen; this entry is the amendment of record.
+
+## D-019 Bot hand-over: replaying a submit is safe; the script retries a CONFLICT once
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | Replaying the whole `attach_file` + `submit_application_package` with the same idempotency key and the same content is **safe** (the server answers with the existing package); consistent with D-016(b), whose `CONFLICT` text says to fetch the current state and retry the whole request | **Accept.** Documented in `docs/cockpit-bot.md`; the server tool description already said so. | The old doc line "do not retry blindly" contradicted it. |
+| (b) | The script retries a `CONFLICT` **once** (a second one is reported, no loop; it can mean the owner is sending). Before the replay it **re-reads the job**: another live package (a concurrent run) gives `ALREADY_SUBMITTED`, its own landed package gives the recovered result; only a clean job is replayed, reusing the first upload's file id (no second `attach_file`). `INVALID_STATE` and every other error are never retried | **Accept.** | A concurrent write clears on replay; a real clash (a key used for another job) must reach the operator. |
+| (c) | `changes` prints a **summary** by default (`count`, and `truncated` when the list is full; default limit 20); `--full` or `--package ID` prints the content, and `--package` always searches up to 100 requests | **Accept.** | Full items carry the CV, letter and email (up to megabytes) into the bot's context. |
+| (d) | `list_change_requests` also returns `fitGrade`, which `--revision` uses as the fit | **Accept.** | The analysis JSON of a package from another client may have no verdict. |
+| (e) | Two runs on the same link at once (daily task and the Claude prompt button) are **not** locked; the loser gets `CONFLICT` or `ALREADY_SUBMITTED` | **Accept, documented.** | Rare, and both outcomes are safe. |
+
+- **Scope:** `scripts/bot/cockpit_submit.py`, its tests, `src/lib/mcp/tools/cockpit.ts` (one select field), `.gitignore`, docs.
+- **Not changed:** schema, Send, the other MCP tools.
+
+## D-021 Review UI read-side fixes (issue #58)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The "j / k: next / previous in To do" hint is shown on the **detail** page, only when a neighbour exists; the queue list no longer shows it | **Accept.** The keys are only bound on the detail page (SPEC §5.3). | The hint on the queue promised keys that did nothing there. |
+| (b) | One shared `STATUS_LABELS` / `statusLabel()` (`src/components/cockpit/statusLabels.ts`) for queue row, detail header, version selector, banner and the job page card. The "not the active version" banner is an informational Alert with its own sentence for superseded, sent and rejected | **Accept.** | Raw values such as `changes_requested` and a red error style for a normal state. |
+| (c) | The CV and cover-letter PDF iframes stay (the sandbox CSP is unchanged: owner decision 2026-11-11, they render in desktop Chrome). Both panels get an "Open in new tab" link next to Download | **Accept.** Iframes are not hidden on narrow viewports. | iOS Safari shows only page 1 of an inline PDF. |
+| (d) | Read-only TipTap viewers render as `role="document"` with a name only when a `label` prop is passed; the **default is neutral** (no role, no aria-label) so the other 12 call sites keep their accessibility tree. Cockpit Posting, Letter and the edit preview pass labels; scrollable boxes are focusable named regions | **Accept.** The axe waiver for `aria-input-field-name` is removed. | Unnamed textbox and keyboard-unreachable scroll areas. |
+
+- **Scope:** `src/components/cockpit/*`, `TipTapContentViewer.tsx`, the cockpit card in `JobDetails.tsx`, `__tests__/cockpit/*`, e2e 01/07/08.
+- **Not changed:** finding 2 (PDF sandbox) and finding 10 (tab counts, pagination, send-time column), which belong to the decisions issue.
+
+## D-020 Server actions review fixes (issue #57)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The cockpit actions share **one** run/mutate wrapper, `src/lib/cockpit/actionRunner.ts` (not a `"use server"` module) | **Accept.** `cockpit.actions.ts`, `cockpitSend.actions.ts` and `cockpitGmail.actions.ts` all use it; the `actionsExports` allow-list test stays. | The three copies had already diverged. |
+| (b) | A mutation **revalidates after success and after a state failure** (`CONFLICT`, `INVALID_STATE`, `SEND_OUTCOME_UNKNOWN`, `GMAIL_*`, `INTERNAL`), but not after `UNAUTHENTICATED`, `COCKPIT_DISABLED` or `VALIDATION`; `NOT_FOUND` refreshes only the list page, never a path built from the client id | **Accept (was: success only for the review actions).** | A refused action (e.g. the bot superseded the package) means the page showed stale state and must refresh; an input error changes no state and a refresh would only flicker. |
+| (c) | An action that changes a job also revalidates `/dashboard/myjobs`: mark applied manually, send, mark unknown as sent, release lock | **Accept.** | The job list shows the job status. |
+| (d) | `requireUser()` throws a typed `RequireUserError` (`src/lib/authError.ts`); `toActionResult` matches the type (or, across duplicated modules, its name plus the message), not the text alone. Not named `AuthError`: next-auth has a class of that name | **Accept.** The message text is unchanged. | A reworded message must not turn an anonymous call into `INTERNAL`. |
+| (e) | `getPackageDetail` returns an **explicit view** of the package (`toPackageView`): no `idempotencyKey`, `sourceFolder`, `userId`, `jobId`, the file row, the approved, rejected, edited, sent and created timestamps, `sentVia`; it keeps `sendStartedAt`, `sendOutcome` and `updatedAt` for the UI and the Send dialog | **Accept.** | Same policy as the Gmail account select (AC-43). |
+| (f) | `getPackageDetail` also returns `gmailSendAllowed`: the connected Gmail address matches `COCKPIT_GMAIL_ALLOWED_ADDRESS` (same check as Send, `isGmailSendAllowed`) | **Accept.** No component reads it yet; it is kept for the edit/send UI change (#59), which shows a dedicated reason. | Send refuses with `GMAIL_RECONNECT_REQUIRED` otherwise; the owner should know before pressing it. |
+| (g) | `sendPackage` accepts only a `Date` or a string for `expectedUpdatedAt`; anything else is `VALIDATION` | **Accept.** | `null` became the epoch and failed as `CONFLICT`. |
+| (h) | `getReviewQueue` runs its three queries in parallel. `getAdjacentPackageIds` still loads the To do queue | **Accept.** Personal scale. | |
+
+- **Not changed:** `updatedAt` concurrency on the review actions (last write wins, owner decision, review finding 1).
+- **Scope:** `src/actions/cockpit*.actions.ts`, `src/actions/shared.ts`, `src/lib/{authError.ts,cockpit/{actionRunner,packageView,config,errors,send}.ts}`, `__tests__/cockpit/*`.

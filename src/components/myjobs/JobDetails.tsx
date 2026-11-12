@@ -72,6 +72,7 @@ import { AddJob } from "./AddJob";
 import { deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { ClaudePromptButton } from "@/components/cockpit/ClaudePromptButton";
+import { statusLabel } from "@/components/cockpit/statusLabels";
 
 type JobDetailsProps = {
   job: JobResponse;
@@ -413,7 +414,7 @@ function JobDetails({
                 className="underline"
                 data-testid="job-details-package-link"
               >
-                {`v${cockpitPackage.version} · ${cockpitPackage.status}`}
+                {`v${cockpitPackage.version} · ${statusLabel(cockpitPackage.status)}`}
               </Link>
             </div>
           )}

@@ -1,5 +1,7 @@
 import { Prisma, type ApplicationPackage } from "@prisma/client";
 import prisma from "@/lib/db";
+import { log } from "@/lib/telemetry";
+import { walkCvLeaves } from "./cvLeaves";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
 import {
@@ -58,6 +60,8 @@ function replay(existing: ApplicationPackage, jobId: string): SubmitResult {
   return { package: existing, supersededIds: [], idempotent: true };
 }
 
+const RETRYABLE_PRISMA_CODES = ["P2034", "P1008", "P2028"];
+
 export async function submitPackage(
   userId: string,
   input: SubmitApplicationPackageInput,
@@ -67,6 +71,20 @@ export async function submitPackage(
       submitInTransaction(tx, userId, input),
     );
   } catch (e) {
+    // Write conflict / deadlock (P2034), and what SQLite busy under concurrent
+    // writers really raises on Prisma: P1008 (gave up waiting for the write
+    // lock) or P2028 (transaction could not start / expired). The transaction
+    // rolled back, so the caller replays the submit, same as a version race.
+    if (
+      e instanceof Prisma.PrismaClientKnownRequestError &&
+      RETRYABLE_PRISMA_CODES.includes(e.code)
+    ) {
+      // Code only: a deterministic cause must leave a trace.
+      log.warn("cockpit: submit write conflict, CONFLICT returned", {
+        prismaCode: e.code,
+      });
+      throw new CockpitError("CONFLICT");
+    }
     const target = p2002Target(e);
     if (target === null) throw e;
     // Idempotency race: the loser returns the winner's package.
@@ -138,7 +156,10 @@ async function submitInTransaction(
   });
   const version = (max._max.version ?? 0) + 1;
 
-  // 8. Supersede the unlocked open packages.
+  // 8. Supersede the open packages. Step 5 already refused any lock on this
+  // job, so `sendStartedAt: null` below is defence in depth (the header rule:
+  // every supersede `where` carries it). Two passes because only a
+  // changes_requested package gets changeRequestHandledAt.
   const open = await tx.applicationPackage.findMany({
     where: {
       jobId: job.id,
@@ -286,6 +307,8 @@ export async function requestPackageChanges(
   });
   await transition(prisma, userId, id, ["pending", "approved"], {
     status: "changes_requested",
+    // The bot's next version needs a fresh approval.
+    approvedAt: null,
     changeRequest,
     changeRequestedAt: new Date(),
     changeRequestHandledAt: null,
@@ -315,6 +338,45 @@ export async function markChangeRequestDone(
   return reload(userId, id);
 }
 
+// Job statuses that a send (Gmail or manual) moves forward to "applied". A job
+// the owner already moved further (interview, offer, ...) keeps its status
+// (D-018 a); `applied` and a missing appliedDate are still set.
+const PRE_APPLY_JOB_STATUSES = ["draft", "new"];
+
+// Job -> applied (SPEC §6.4 step 6). Shared by send.ts and
+// markPackageAppliedManually. Runs inside the caller's transaction: a missing
+// "applied" status row is INTERNAL and rolls the whole send back.
+export async function markJobApplied(
+  tx: Db,
+  userId: string,
+  jobId: string,
+  now: Date,
+): Promise<void> {
+  // Prisma treats `id: undefined` as "no filter": never let it through.
+  if (!jobId) throw new CockpitError("INTERNAL");
+  const applied = await tx.jobStatus.findUnique({ where: { value: "applied" } });
+  if (!applied) throw new CockpitError("INTERNAL");
+  // The status only moves forward (draft/new -> applied).
+  await tx.job.updateMany({
+    where: {
+      id: jobId,
+      userId,
+      Status: { value: { in: PRE_APPLY_JOB_STATUSES } },
+    },
+    data: { statusId: applied.id },
+  });
+  // The application did happen: always flag it, whatever the status.
+  await tx.job.updateMany({
+    where: { id: jobId, userId },
+    data: { applied: true },
+  });
+  // First application date wins: never overwrite an existing one.
+  await tx.job.updateMany({
+    where: { id: jobId, userId, appliedDate: null },
+    data: { appliedDate: now },
+  });
+}
+
 // Only for packages without a recipient ("apply via link"). No SentEmail row.
 export async function markPackageAppliedManually(userId: string, id: string) {
   await prisma.$transaction(async (tx) => {
@@ -327,18 +389,11 @@ export async function markPackageAppliedManually(userId: string, id: string) {
       { status: "sent", sentVia: "manual", sentAt: now },
       { OR: [{ emailTo: null }, { emailTo: "" }] },
     );
-    const applied = await tx.jobStatus.findUnique({
-      where: { value: "applied" },
-    });
-    if (!applied) throw new CockpitError("INTERNAL");
-    const pkg = await tx.applicationPackage.findFirst({
+    const { jobId } = await tx.applicationPackage.findFirstOrThrow({
       where: { id, userId },
       select: { jobId: true },
     });
-    await tx.job.updateMany({
-      where: { id: pkg?.jobId, userId },
-      data: { statusId: applied.id, applied: true, appliedDate: now },
-    });
+    await markJobApplied(tx, userId, jobId, now);
   });
   return reload(userId, id);
 }
@@ -351,26 +406,33 @@ type Json = unknown;
 const isObject = (v: Json): v is Record<string, Json> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-// Same keys, same array lengths, same non-string values; string leaves may change.
-function compareCv(
-  a: Json,
-  b: Json,
-  out = { sameShape: true, stringChanged: false },
-) {
-  if (typeof a === "string" && typeof b === "string") {
-    if (a !== b) out.stringChanged = true;
-  } else if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) out.sameShape = false;
-    else a.forEach((v, i) => compareCv(v, b[i], out));
-  } else if (isObject(a) && isObject(b)) {
-    const keys = Object.keys(a);
-    if (keys.length !== Object.keys(b).length || keys.some((k) => !(k in b))) {
-      out.sameShape = false;
-    } else {
-      keys.forEach((k) => compareCv(a[k], b[k], out));
+const leafMap = (cv: Json) =>
+  new Map(
+    walkCvLeaves(cv).map(({ segments, value }) => [
+      JSON.stringify(segments),
+      value,
+    ]),
+  );
+
+// Same keys, same array lengths, same non-string values; string leaves may
+// change. Compares the leaves of the shared walker (own keys only).
+function compareCv(a: Json, b: Json) {
+  const out = { sameShape: true, stringChanged: false };
+  const la = leafMap(a);
+  const lb = leafMap(b);
+  if (la.size !== lb.size) return { ...out, sameShape: false };
+  for (const [path, va] of la) {
+    if (!lb.has(path)) return { ...out, sameShape: false };
+    const vb = lb.get(path);
+    if (typeof va === "string" && typeof vb === "string") {
+      if (va !== vb) out.stringChanged = true;
+    } else if (isObject(va) && isObject(vb)) {
+      // Both empty objects.
+    } else if (Array.isArray(va) && Array.isArray(vb)) {
+      // Both empty arrays.
+    } else if (va !== vb) {
+      return { ...out, sameShape: false };
     }
-  } else if (a !== b) {
-    out.sameShape = false;
   }
   return out;
 }

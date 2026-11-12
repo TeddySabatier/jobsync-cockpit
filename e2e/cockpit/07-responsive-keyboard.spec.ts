@@ -46,10 +46,7 @@ test.describe("375 px viewport", () => {
     await expectNoHorizontalScroll(page, "375-settings");
   });
 
-  // FINDING (low): the Email preview Subject / To rows do not wrap an unbroken
-  // string, so the page scrolls sideways at 375 px. Pathological input only.
-  // Tracked in #38.
-  test.fixme("an unbroken 120-character subject does not scroll horizontally", async ({ page, bot }) => {
+  test("an unbroken 120-character subject does not scroll horizontally", async ({ page, bot }) => {
     const pkg = await bot.seed({ subject: "S".repeat(120) });
     await openDetail(page, pkg.packageId);
     await expectNoHorizontalScroll(page, "375-detail-long-subject");

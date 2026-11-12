@@ -4,9 +4,11 @@ import type { ApplicationPackage } from "@prisma/client";
 import { DB_RUNS, fcParams, tag } from "./_fc";
 
 // Property 7 (SPEC §2, D-008): random walks over the package service on the
-// real migrated SQLite schema. The send lock / release / mark-sent steps are
-// the same conditional updates send.ts issues (sendStartedAt claim, release,
-// success), applied directly so no Gmail client is needed.
+// real migrated SQLite schema. The lock / release / mark-sent steps are a hand
+// written MODEL of the conditional updates send.ts issues (sendStartedAt claim,
+// release, success): they show how the package service reacts to a locked or
+// sent row, but they do not run send.ts. send.ts itself is covered by
+// send.integration.spec.ts.
 const db = await vi.hoisted(async () => {
   const { createCockpitTestDb } = await import("../../helpers/sqlite");
   return createCockpitTestDb();
@@ -24,39 +26,22 @@ import {
   updatePackageContent,
 } from "@/lib/cockpit/packages";
 import type { SubmitApplicationPackageInput } from "@/lib/cockpit/schemas";
+import { createJobFor, seedUserWithRefs, type SeededUser } from "../../helpers/seedUser";
 
 const prisma = db.prisma;
 let userId: string;
+let seeded: SeededUser;
 let draftId: string;
-let titleId: string;
-let companyId: string;
 let runNo = 0;
 
 beforeAll(async () => {
-  const user = await prisma.user.create({
-    data: { name: "Jane Doe", email: "jane@example.com", password: "x" },
-  });
-  userId = user.id;
-  titleId = (await prisma.jobTitle.create({ data: { label: "Engineer", value: "eng", createdBy: userId } })).id;
-  companyId = (await prisma.company.create({ data: { label: "Example Corp", value: "corp", createdBy: userId } })).id;
+  seeded = await seedUserWithRefs(prisma, "jane@example.com");
+  userId = seeded.id;
   draftId = (await prisma.jobStatus.create({ data: { label: "Draft", value: "draft" } })).id;
 }, 120_000);
 afterAll(() => db.cleanup());
 
-const newJob = async () =>
-  (
-    await prisma.job.create({
-      data: {
-        userId,
-        description: "A synthetic job",
-        jobType: "FT",
-        createdAt: new Date(),
-        statusId: draftId,
-        jobTitleId: titleId,
-        companyId,
-      },
-    })
-  ).id;
+const newJob = () => createJobFor(prisma, seeded, draftId);
 
 const submitInput = (jobId: string, key?: string): SubmitApplicationPackageInput => ({
   jobId,

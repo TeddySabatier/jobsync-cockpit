@@ -1,14 +1,14 @@
 "use client";
 import { useMemo } from "react";
 import { format } from "date-fns";
-import { Download } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 import { TipTapContentViewer } from "@/components/TipTapContentViewer";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Badge } from "@/components/ui/badge";
+import FitGradeBadge from "./FitGradeBadge";
 import { formatUrl } from "@/lib/utils";
 import { renderLetterMarkdown } from "@/lib/cockpit/markdown";
 import type { getPackageDetail } from "@/actions/cockpit.actions";
@@ -37,23 +37,100 @@ function Panel({
   children: React.ReactNode;
   testId: string;
 }) {
+  const headingId = `${testId}-heading`;
   return (
     <section
-      aria-label={title}
+      aria-labelledby={headingId}
       data-testid={testId}
       className="min-w-0 rounded-lg border bg-card p-4"
     >
-      <h2 className="mb-3 text-sm font-semibold">{title}</h2>
+      <h2 id={headingId} className="mb-3 text-sm font-semibold">
+        {title}
+      </h2>
       {children}
     </section>
   );
 }
 
-const Pre = ({ children }: { children: React.ReactNode }) => (
-  <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs">
+// A scrollable box a keyboard user can focus and scroll. role=group, not
+// region: these are not landmarks. Names must be unique on the page.
+export function ScrollRegion({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      tabIndex={0}
+      className="max-h-96 overflow-auto"
+    >
+      {children}
+    </div>
+  );
+}
+
+const Pre = ({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) => (
+  <pre
+    role="group"
+    aria-label={label}
+    tabIndex={0}
+    className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-xs"
+  >
     {children}
   </pre>
 );
+
+// Open in a new tab helps where an inline PDF is poor (iOS Safari shows only
+// page 1); Download keeps the file name.
+function PdfLinks({
+  href,
+  download,
+}: {
+  href: string;
+  download: string | true;
+}) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 underline"
+      >
+        <ExternalLink className="h-3.5 w-3.5" />
+        Open in new tab
+      </a>
+      <a
+        href={href}
+        download={download}
+        className="inline-flex items-center gap-1 underline"
+      >
+        <Download className="h-3.5 w-3.5" />
+        Download PDF
+      </a>
+    </div>
+  );
+}
+
+// "must_haves" and "mustHaves" -> "Must haves".
+export function humanizeKey(key: string): string {
+  const text = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .toLowerCase();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : key;
+}
 
 export function PostingPanel({ pkg }: { pkg: PackageDetail["package"] }) {
   const { jobUrl, description } = pkg.job;
@@ -71,9 +148,9 @@ export function PostingPanel({ pkg }: { pkg: PackageDetail["package"] }) {
           </a>
         </p>
       )}
-      <div className="max-h-96 overflow-auto">
-        <TipTapContentViewer content={description} />
-      </div>
+      <ScrollRegion label="Posting text">
+        <TipTapContentViewer content={description} label="Job posting" />
+      </ScrollRegion>
     </Panel>
   );
 }
@@ -103,14 +180,7 @@ export function CvPanel({ detail }: { detail: PackageDetail }) {
             title="CV PDF"
             className="h-[480px] w-full rounded border"
           />
-          <a
-            href={fileUrl}
-            download
-            className="mt-2 inline-flex items-center gap-1 text-sm underline"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Download PDF
-          </a>
+          <PdfLinks href={fileUrl} download />
         </>
       ) : (
         <p className="text-sm text-muted-foreground">No CV file attached.</p>
@@ -121,7 +191,7 @@ export function CvPanel({ detail }: { detail: PackageDetail }) {
             CV data
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-2">
-            <Pre>{prettyJson(pkg.cvJson)}</Pre>
+            <Pre label="CV data">{prettyJson(pkg.cvJson)}</Pre>
           </CollapsibleContent>
         </Collapsible>
       )}
@@ -129,7 +199,7 @@ export function CvPanel({ detail }: { detail: PackageDetail }) {
   );
 }
 
-function FitValue({ value }: { value: unknown }) {
+function FitValue({ value, label }: { value: unknown; label: string }) {
   if (typeof value === "string" || typeof value === "number") {
     return <span className="whitespace-pre-wrap break-words">{String(value)}</span>;
   }
@@ -144,7 +214,7 @@ function FitValue({ value }: { value: unknown }) {
       </ul>
     );
   }
-  return <Pre>{JSON.stringify(value, null, 2)}</Pre>;
+  return <Pre label={label}>{JSON.stringify(value, null, 2)}</Pre>;
 }
 
 export function FitPanel({ pkg }: { pkg: PackageDetail["package"] }) {
@@ -161,7 +231,7 @@ export function FitPanel({ pkg }: { pkg: PackageDetail["package"] }) {
     <Panel title="Fit analysis" testId="panel-fit">
       {pkg.fitGrade && (
         <p className="mb-2 text-sm">
-          Grade: <Badge variant="outline">{pkg.fitGrade}</Badge>
+          Grade: <FitGradeBadge grade={pkg.fitGrade} />
         </p>
       )}
       {!pkg.fitAnalysis ? (
@@ -170,15 +240,15 @@ export function FitPanel({ pkg }: { pkg: PackageDetail["package"] }) {
         <dl className="flex flex-col gap-2 text-sm">
           {Object.entries(parsed as Record<string, unknown>).map(([k, v]) => (
             <div key={k}>
-              <dt className="font-medium">{k}</dt>
+              <dt className="font-medium">{humanizeKey(k)}</dt>
               <dd className="mt-0.5">
-                <FitValue value={v} />
+                <FitValue value={v} label={`Fit analysis: ${humanizeKey(k)}`} />
               </dd>
             </div>
           ))}
         </dl>
       ) : (
-        <Pre>{prettyJson(pkg.fitAnalysis)}</Pre>
+        <Pre label="Fit analysis">{prettyJson(pkg.fitAnalysis)}</Pre>
       )}
     </Panel>
   );
@@ -188,13 +258,13 @@ export function EmailPanel({ detail }: { detail: PackageDetail }) {
   const pkg = detail.package;
   return (
     <Panel title="Email preview" testId="panel-email">
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
         <dt className="text-muted-foreground">From</dt>
-        <dd className="break-all">{detail.gmail?.email ?? "not connected"}</dd>
+        <dd className="break-all">{detail.gmail?.email ?? "Not connected"}</dd>
         <dt className="text-muted-foreground">To</dt>
         <dd className="break-all">{pkg.emailTo?.trim() || "Apply via link"}</dd>
         <dt className="text-muted-foreground">Subject</dt>
-        <dd className="break-words">{pkg.emailSubject}</dd>
+        <dd className="[overflow-wrap:anywhere]">{pkg.emailSubject}</dd>
         <dt className="text-muted-foreground">Attachment</dt>
         <dd className="break-all">
           {detail.attachment
@@ -203,7 +273,7 @@ export function EmailPanel({ detail }: { detail: PackageDetail }) {
         </dd>
       </dl>
       <div className="mt-3">
-        <Pre>{pkg.emailBody}</Pre>
+        <Pre label="Email body">{pkg.emailBody}</Pre>
       </div>
     </Panel>
   );
@@ -236,18 +306,11 @@ export function LetterPanel({
             data-testid="letter-pdf-preview"
             className="h-[560px] w-full rounded border"
           />
-          <a
-            href={pdfUrl}
-            download={fileName ?? true}
-            className="mt-2 inline-flex items-center gap-1 text-sm underline"
-          >
-            <Download className="h-3.5 w-3.5" />
-            Download PDF
-          </a>
+          <PdfLinks href={pdfUrl} download={fileName ?? true} />
           <p className="mb-1 mt-4 text-xs text-muted-foreground">Letter text:</p>
-          <div className="max-h-96 overflow-auto">
-            <TipTapContentViewer content={html} />
-          </div>
+          <ScrollRegion label="Letter text">
+            <TipTapContentViewer content={html} label="Cover letter" />
+          </ScrollRegion>
         </>
       ) : (
         <p className="text-sm text-muted-foreground">No cover letter.</p>

@@ -6,8 +6,10 @@ import { decrypt } from "@/lib/encryption";
 import { log } from "@/lib/telemetry";
 import { letterAttachmentName, sanitizePdfName } from "./attachments";
 import { renderLetterPdf } from "./letterPdf";
+import { isGmailSendAllowed } from "./config";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
+import { markJobApplied } from "./packages";
 import type { GmailClient } from "./gmail/client";
 import { buildMimeMessage, encodeRaw } from "./gmail/mime";
 import { UpdatePackageContentSchema } from "./schemas";
@@ -19,8 +21,6 @@ import { UpdatePackageContentSchema } from "./schemas";
 
 // 20 s Gmail timeout + margin (SPEC §6.4 "Stale lock").
 export const STALE_LOCK_MS = 60_000;
-
-type Db = Prisma.TransactionClient;
 
 export type SendResult = { id: string; sentAt: Date };
 
@@ -91,21 +91,6 @@ const withFile = (userId: string, id: string) =>
     include: { cvFile: { select: { filePath: true, fileName: true } } },
   });
 
-// Job -> applied, same update as markPackageAppliedManually (SPEC §6.4 step 6).
-async function markJobApplied(
-  tx: Db,
-  userId: string,
-  jobId: string,
-  now: Date,
-): Promise<void> {
-  const applied = await tx.jobStatus.findUnique({ where: { value: "applied" } });
-  if (!applied) throw new CockpitError("INTERNAL");
-  await tx.job.updateMany({
-    where: { id: jobId, userId },
-    data: { statusId: applied.id, applied: true, appliedDate: now },
-  });
-}
-
 // Clears the lock after a definitive failure. If this write itself fails the
 // lock stays and the stale-lock rule (60 s) opens the recovery panel.
 async function releaseQuietly(userId: string, id: string): Promise<void> {
@@ -163,9 +148,8 @@ export async function sendApplicationPackage(
     where: { userId },
     select: { email: true, encryptedRefreshToken: true, iv: true },
   });
-  const allowed = process.env.COCKPIT_GMAIL_ALLOWED_ADDRESS?.trim().toLowerCase();
   // Not connected, allow-list unset or different address: nothing is sent.
-  if (!account || !allowed || account.email.trim().toLowerCase() !== allowed) {
+  if (!account || !isGmailSendAllowed(account.email)) {
     throw new CockpitError("GMAIL_RECONNECT_REQUIRED");
   }
 

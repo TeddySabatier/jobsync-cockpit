@@ -3,7 +3,16 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect } from "react";
 
-export const TipTapContentViewer = ({ content }: { content: string }) => {
+// The editor renders an unnamed role=textbox. Pass `label` to render a named
+// document instead (axe aria-input-field-name). Without it the output is the
+// stock editor markup, so other screens keep their accessibility tree.
+export const TipTapContentViewer = ({
+  content,
+  label,
+}: {
+  content: string;
+  label?: string;
+}) => {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -26,6 +35,9 @@ export const TipTapContentViewer = ({ content }: { content: string }) => {
     ],
     content: "",
     editable: false,
+    editorProps: label
+      ? { attributes: { role: "document", "aria-label": label } }
+      : undefined,
     immediatelyRender: false,
   });
   useEffect(() => {

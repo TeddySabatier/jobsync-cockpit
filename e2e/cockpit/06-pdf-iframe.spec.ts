@@ -4,7 +4,8 @@ import { attachPdf } from "../support/cockpit-api";
 import { makePdf } from "../support/pdf";
 import { detailUrl, expect, test } from "../support/cockpit-fixtures";
 
-// AC-30 / SPEC §11: does Chromium's PDF viewer render a PDF served with
+// AC-30 / SPEC §11 (a RECORDER, opt-in, not a pass/fail check of the viewer):
+// does Chromium's PDF viewer render a PDF served with
 // `Content-Security-Policy: sandbox; frame-ancestors 'self'` inside our
 // <iframe>? The result is recorded either way (the CSP is NOT changed). A
 // control run strips the CSP from the response inside the test's own browser
@@ -12,6 +13,7 @@ import { detailUrl, expect, test } from "../support/cockpit-fixtures";
 const MARKER = "PDF-IFRAME-MARKER-42";
 const SHOT_DIR = ".cockpit-tmp/shots";
 const OUT = ".cockpit-tmp/findings/l9-pdf-iframe.json";
+const IFRAME = 'iframe[title="CV PDF"]';
 
 // Not "load": the PDF frame may never finish loading under the sandbox CSP.
 async function openDetail(page: Page, id: string) {
@@ -26,7 +28,7 @@ const orDefault = <T>(p: Promise<T>, fallback: T, ms = 5000) =>
 async function inspect(page: Page) {
   // Give the viewer time to boot.
   await page.waitForTimeout(4000);
-  const iframe = page.locator('iframe[title="CV PDF"]');
+  const iframe = page.locator(IFRAME);
   await expect(iframe).toBeVisible();
   const frames = page.frames().filter((f) => f !== page.mainFrame());
   const info = await Promise.all(
@@ -39,7 +41,7 @@ async function inspect(page: Page) {
   return info;
 }
 
-test("PDF inside the review iframe under the sandbox CSP (result recorded)", async ({ bot, baseURL }) => {
+test("records how the PDF viewer behaves in the review iframe under the sandbox CSP", async ({ bot, baseURL }) => {
   test.skip(
     !process.env.COCKPIT_E2E_PDF,
     "AC-30 probe: needs full Chromium with the PDF viewer; run with COCKPIT_E2E_PDF=1. Manual check in HANDOFF §4.",
@@ -54,7 +56,7 @@ test("PDF inside the review iframe under the sandbox CSP (result recorded)", asy
   // headless shell does not. Full Chromium fails to start when TMPDIR is a long
   // path (profile socket path limit), so keep TMPDIR short. Falls back to the
   // shell and records launchError in the findings file.
-  const state = JSON.parse(fs.readFileSync(".cockpit-tmp/e2e-auth-3738.json", "utf8"));
+  const state = JSON.parse(fs.readFileSync(test.info().project.use.storageState as string, "utf8"));
   const profile = ".cockpit-tmp/pw-profile"; // persistent context: cookies are added below
   fs.rmSync(profile, { recursive: true, force: true });
   let build = "chromium (full, new headless)";
@@ -88,7 +90,7 @@ test("PDF inside the review iframe under the sandbox CSP (result recorded)", asy
       xfo: fileHeaders["x-frame-options"],
       frames: await inspect(page),
     };
-    await page.locator('iframe[title="CV PDF"]').screenshot({ path: `${SHOT_DIR}/pdf-iframe.png` });
+    await page.locator(IFRAME).screenshot({ path: `${SHOT_DIR}/pdf-iframe.png` });
 
     // Control: same page, CSP removed from the response by the test browser.
     const page2 = await ctx.newPage();
@@ -100,7 +102,7 @@ test("PDF inside the review iframe under the sandbox CSP (result recorded)", asy
     });
     await openDetail(page2, pkg.packageId);
     result.cspStrippedControl = { frames: await inspect(page2) };
-    await page2.locator('iframe[title="CV PDF"]').screenshot({ path: `${SHOT_DIR}/pdf-iframe-control-no-csp.png` });
+    await page2.locator(IFRAME).screenshot({ path: `${SHOT_DIR}/pdf-iframe-control-no-csp.png` });
   } finally {
     await ctx.browser()?.close();
     await ctx.close().catch(() => {});
@@ -110,4 +112,10 @@ test("PDF inside the review iframe under the sandbox CSP (result recorded)", asy
   const asServed = result.asServed as { csp?: string; xfo?: string };
   expect(asServed.csp).toContain("sandbox");
   expect(asServed.xfo).toBe("SAMEORIGIN");
+  // The recorded result is what HANDOFF section 4 reads: it must exist and
+  // carry both runs.
+  const written = JSON.parse(fs.readFileSync(OUT, "utf8"));
+  expect(written.marker).toBe(MARKER);
+  expect(written.asServed.frames).toBeInstanceOf(Array);
+  expect(written.cspStrippedControl.frames).toBeInstanceOf(Array);
 });
