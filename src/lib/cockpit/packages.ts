@@ -44,6 +44,12 @@ export const QUEUE_TAB_STATUSES: Record<QueueTab, PackageStatus[]> = {
 
 type Db = Prisma.TransactionClient;
 
+// What a package is created from. The application input (the MCP schema) with
+// the fit grade optional: a follow-up has no fit grade (D-034).
+export type SubmitPackageInput = Omit<SubmitApplicationPackageInput, "fitGrade"> & {
+  fitGrade?: "A" | "B";
+};
+
 export type SubmitResult = {
   package: ApplicationPackage;
   supersededIds: string[];
@@ -83,22 +89,34 @@ const RETRYABLE_PRISMA_CODES = ["P2034", "P1008", "P2028"];
 // application rule; the two-step cap and every other follow-up rule is
 // followUpDue.ts), and a rejected follow-up does not block a later one (a
 // rejected draft counts as a skipped step). Whether the job may get a follow-up
-// at all (eligibility, outcome, stopped) is the caller's check, not this one's.
+// at all (eligibility, outcome, stopped) is the caller's check, not this one's:
+// pass it as `assertAllowed`, so it runs in the insert's transaction.
 export type SubmitOptions = {
   kind?: PackageKind;
   // follow_up only: the application it replies to.
   replyToPackageId?: string | null;
+  // The caller's own precondition, run inside the transaction after the job
+  // check and the idempotent replay (a replay skips it) and before any write.
+  // Throw a CockpitError to refuse: nothing is superseded or created.
+  assertAllowed?: (tx: Db) => Promise<void>;
 };
 
 export async function submitPackage(
   userId: string,
-  input: SubmitApplicationPackageInput,
+  input: SubmitPackageInput,
   opts: SubmitOptions = {},
 ): Promise<SubmitResult> {
   const kind: PackageKind = opts.kind ?? "application";
   try {
     return await prisma.$transaction((tx) =>
-      submitInTransaction(tx, userId, input, kind, opts.replyToPackageId ?? null),
+      submitInTransaction(
+        tx,
+        userId,
+        input,
+        kind,
+        opts.replyToPackageId ?? null,
+        opts.assertAllowed,
+      ),
     );
   } catch (e) {
     // Write conflict / deadlock (P2034), and what SQLite busy under concurrent
@@ -132,9 +150,10 @@ export async function submitPackage(
 async function submitInTransaction(
   tx: Db,
   userId: string,
-  input: SubmitApplicationPackageInput,
+  input: SubmitPackageInput,
   kind: PackageKind,
   replyToPackageId: string | null,
+  assertAllowed?: (tx: Db) => Promise<void>,
 ): Promise<SubmitResult> {
   // 1. The job must belong to the user.
   const job = await tx.job.findFirst({
@@ -150,6 +169,10 @@ async function submitInTransaction(
     });
     if (existing) return replay(existing, job.id, kind);
   }
+
+  // 2b. The caller's precondition (submit_follow_up: the step is due), in this
+  // transaction so an outcome, skip or stop committed meanwhile is seen.
+  if (assertAllowed) await assertAllowed(tx);
 
   // 3. A sent application blocks every later application (no double apply).
   // Per kind: a sent follow-up is not an application, and does not block the

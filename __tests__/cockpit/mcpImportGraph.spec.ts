@@ -96,6 +96,10 @@ describe("MCP import graph (AC-35)", () => {
         "lib/cockpit/packages.ts",
         "lib/cockpit/files.ts",
         "lib/cockpit/attachments.ts",
+        // F-3 (D-034): the follow-up tools and what they use.
+        "lib/cockpit/followUpMcp.ts",
+        "lib/cockpit/followUps.ts",
+        "lib/cockpit/followUpDue.ts",
       ]),
     );
   });
@@ -115,6 +119,7 @@ describe("MCP import graph (AC-35)", () => {
     const entries = [
       path.join(SRC, "lib/cockpit/followUpDue.ts"),
       path.join(SRC, "lib/cockpit/followUps.ts"),
+      path.join(SRC, "lib/cockpit/followUpMcp.ts"),
       path.join(SRC, "lib/cockpit/activePackage.ts"),
       path.join(SRC, "actions/cockpitFollowUps.actions.ts"),
     ];
@@ -124,6 +129,25 @@ describe("MCP import graph (AC-35)", () => {
     );
     expect(seen).toContain("lib/cockpit/followUps.ts");
     expect(violations(entries, SRC)).toEqual([]);
+  });
+
+  // D-034: the two follow-up tools are registered in the MCP tool file; it and
+  // the follow-up service behind it reach neither send nor Gmail, and the
+  // source calls no send / approve / outcome / status function.
+  it("the follow-up MCP tools and their service reach neither send nor Gmail and call no send/approve/outcome/status function", () => {
+    const entries = [
+      path.join(SRC, "lib/mcp/tools/cockpit.ts"),
+      path.join(SRC, "lib/cockpit/followUpMcp.ts"),
+    ];
+    expect(violations(entries, SRC)).toEqual([]);
+    const forbidden =
+      /\b(sendApplicationPackage|sendRaw|buildMimeMessage|approvePackage|setFollowUpOutcome|undoFollowUpOutcome|stopFollowUps|skipFollowUpStep|snoozeFollowUp|markJobApplied|markPackageAppliedManually)\b|status:\s*"approved"/;
+    for (const e of entries) {
+      expect(fs.readFileSync(e, "utf8").replace(/\/\/.*$/gm, ""), e).not.toMatch(forbidden);
+    }
+    const tools = fs.readFileSync(entries[0], "utf8");
+    expect(tools).toMatch(/"list_due_follow_ups"/);
+    expect(tools).toMatch(/"submit_follow_up"/);
   });
 
   it("send.ts, mime.ts and gmail/client.ts start with import \"server-only\"", () => {
