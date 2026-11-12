@@ -1,0 +1,16 @@
+{
+  "_comment": "The server limits the bot script and its test stub must respect. scripts/bot/cockpit_submit.py reads this file; __tests__/cockpit/botLimits.spec.ts checks every value against the real Zod schemas in src/lib/cockpit/schemas.ts, so a change there fails the test until this table follows.",
+  "base64Max": 7000000,
+  "fileNameMin": 1,
+  "fileNameMax": 120,
+  "emailAddressMax": 254,
+  "subjectMax": 300,
+  "emailBodyMax": 20000,
+  "letterMdMax": 20000,
+  "fitAnalysisMax": 20000,
+  "cvJsonMax": 200000,
+  "sourceFolderMax": 300,
+  "idempotencyKeyPattern": "^[A-Za-z0-9._:-]{1,100}$",
+  "listLimitMin": 1,
+  "listLimitMax": 100
+}

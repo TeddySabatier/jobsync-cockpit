@@ -1,7 +1,6 @@
 import "server-only";
 import { CockpitError, type CockpitErrorCode } from "@/lib/cockpit/errors";
 import { getGoogleConfig, type GoogleConfig } from "@/lib/cockpit/gmail/oauth";
-import { decrypt } from "@/lib/encryption";
 import { log } from "@/lib/telemetry";
 
 // Every Google call goes through googleRequest(): any failure becomes a typed
@@ -37,11 +36,12 @@ function fail(
 // `send` is the only call where a failure can mean "the message went out";
 // token and revoke failures are always definitive. For send, only 400/401/403
 // are (SPEC §6.4 5a); timeouts, network errors, 429 and 5xx are ambiguous.
+// Returns the parsed JSON body (empty object when the body is not JSON).
 async function googleRequest(
   kind: Kind,
   url: string,
   init: RequestInit,
-): Promise<{ status: number; json: Record<string, unknown> }> {
+): Promise<Record<string, unknown>> {
   let res: Response;
   try {
     res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -67,6 +67,12 @@ async function googleRequest(
 
   if (!res.ok) {
     if (kind === "send") {
+      // Definitive only when Google says the request itself was refused
+      // (malformed, unauthenticated, forbidden): then nothing was sent. Any
+      // other status, 4xx included (404, 413, 429...), is not documented as
+      // "not sent", so it is treated as ambiguous and the lock is kept: a
+      // false "unknown" costs a manual check, a false "definitive" could
+      // cause a second send.
       throw fail(
         "send",
         "GMAIL_SEND",
@@ -80,7 +86,7 @@ async function googleRequest(
     }
     throw fail(kind, "GMAIL_TOKEN", true, res.status);
   }
-  return { status: res.status, json };
+  return json;
 }
 
 const str = (v: unknown): string | undefined =>
@@ -99,7 +105,7 @@ export async function exchangeAuthCode(
   code: string,
   verifier: string,
 ): Promise<{ refreshToken?: string; idToken?: string; scope?: string }> {
-  const { json } = await googleRequest(
+  const json = await googleRequest(
     "token",
     TOKEN_URL,
     form({
@@ -121,7 +127,7 @@ export async function exchangeAuthCode(
 export async function getAccessToken(refreshToken: string): Promise<string> {
   const cfg = getGoogleConfig();
   if (!cfg) throw fail("token", "GMAIL_TOKEN", true);
-  const { json } = await googleRequest(
+  const json = await googleRequest(
     "token",
     TOKEN_URL,
     form({
@@ -136,32 +142,17 @@ export async function getAccessToken(refreshToken: string): Promise<string> {
   return token;
 }
 
-// decrypt() throws when ENCRYPTION_KEY is missing or changed: the stored token
-// is unusable, so the user must reconnect (never a 500; SPEC §6.2).
-export async function getAccessTokenFromStored(
-  encryptedRefreshToken: string,
-  iv: string,
-): Promise<string> {
-  let refreshToken: string;
-  try {
-    refreshToken = decrypt(encryptedRefreshToken, iv);
-  } catch {
-    throw fail("token", "GMAIL_RECONNECT_REQUIRED", true);
-  }
-  return getAccessToken(refreshToken);
-}
-
 export async function revokeToken(token: string): Promise<void> {
   await googleRequest("revoke", REVOKE_URL, form({ token }));
 }
 
-// Primitive only: nothing in the connect/disconnect flow calls it. The send
-// service (C-10) is its only intended caller.
+// Called only by the send service (send.ts), through the GmailClient interface.
+// The stored refresh token is decrypted there, after the send lock is taken.
 export async function sendRaw(
   accessToken: string,
   raw: string,
 ): Promise<{ id: string; threadId: string }> {
-  const { json } = await googleRequest("send", SEND_URL, {
+  const json = await googleRequest("send", SEND_URL, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,

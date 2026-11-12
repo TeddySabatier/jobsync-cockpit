@@ -52,7 +52,8 @@ describe("buildMimeMessage (AC-24)", () => {
       opts,
     );
     expect(mime.replace(/\r\n/g, "")).not.toMatch(/[\r\n]/);
-    for (const line of mime.split("\r\n")) expect(line.length).toBeLessThanOrEqual(76 + 40);
+    // RFC 5322 2.1.1: lines SHOULD be at most 78 characters.
+    for (const line of mime.split("\r\n")) expect(line.length).toBeLessThanOrEqual(78);
     const b64Lines = mime
       .split("\r\n")
       .filter((l) => /^[A-Za-z0-9+/=]{20,}$/.test(l));

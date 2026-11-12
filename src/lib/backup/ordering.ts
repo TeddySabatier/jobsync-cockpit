@@ -250,3 +250,14 @@ export const EMPTINESS_MODELS: BackupModel[] = [
   "Question",
   "Automation",
 ];
+
+// What the destructive confirmation lists as replaced. Wider than emptiness:
+// cockpit packages, their sent-email history and uploaded files (resumes and CV
+// PDFs) are wiped too (D-012). None of them can exist without a Job or a Resume,
+// so they never change whether an account counts as empty.
+export const REPLACED_MODELS: BackupModel[] = [
+  ...EMPTINESS_MODELS,
+  "ApplicationPackage",
+  "SentEmail",
+  "File",
+];

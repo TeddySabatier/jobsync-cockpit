@@ -1,6 +1,7 @@
 // @vitest-environment node
 import fs from "fs";
 import { extractText, getDocumentProxy } from "unpdf";
+import { Font } from "@react-pdf/renderer";
 import { renderLetterPdf, toWinAnsi } from "@/lib/cockpit/letterPdf";
 import { letterPdfName } from "@/lib/cockpit/letterName";
 import { buildMimeMessage } from "@/lib/cockpit/gmail/mime";
@@ -63,10 +64,14 @@ describe("renderLetterPdf", () => {
   });
 
   it("never turns letter markup into links or images", async () => {
-    const text = await textOf(
-      await renderLetterPdf({ letterMd: "See [click](https://evil.example/x) and ![img](https://evil.example/i.png)" }),
-    );
-    expect(text).toContain("https://evil.example/x");
+    const pdf = await renderLetterPdf({
+      letterMd: "See [click](https://evil.example/x) and ![img](https://evil.example/i.png) and https://evil.example/bare",
+    });
+    expect(await textOf(pdf)).toContain("https://evil.example/x");
+    // The URL is plain text, not a link: the page carries no link annotation.
+    const doc = await getDocumentProxy(new Uint8Array(pdf));
+    const annotations = await (await doc.getPage(1)).getAnnotations();
+    expect(annotations.filter((a: { subtype?: string }) => a.subtype === "Link")).toEqual([]);
   });
 
   it("keeps a reference-definition line in the PDF, like the HTML preview (D-018 e)", async () => {
@@ -96,6 +101,15 @@ describe("renderLetterPdf: nothing is lost silently (review findings)", () => {
       expect(flat).toContain(url.replace(/-/g, ""));
     }
     const huge = "x".repeat(5000);
+    const flat = (await textOf(await renderLetterPdf({ letterMd: huge }))).replace(/[-\s]+/g, "");
+    expect(flat.length).toBe(5000);
+  });
+
+  it("still breaks long words when another callback was registered in the same process (D-022 g)", async () => {
+    // react-pdf keeps one process-wide callback. Any code in the same process
+    // (another test, future server code) may register its own, e.g. (w) => [w].
+    Font.registerHyphenationCallback((word) => [word]);
+    const huge = "y".repeat(5000);
     const flat = (await textOf(await renderLetterPdf({ letterMd: huge }))).replace(/[-\s]+/g, "");
     expect(flat.length).toBe(5000);
   });

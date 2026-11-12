@@ -48,7 +48,10 @@ async function checkContent(
     emailSubject: pkg.emailSubject,
     emailBody: pkg.emailBody,
   });
-  if (!parsed.success || !parsed.data.emailTo) {
+  if (!parsed.success) throw new CockpitError("VALIDATION");
+  // The MIME is built from the validated values, never from the raw row.
+  const { emailTo, emailSubject, emailBody } = parsed.data;
+  if (!emailTo || emailSubject === undefined || emailBody === undefined) {
     throw new CockpitError("VALIDATION");
   }
   if (pkg.cvPdfStale) throw new CockpitError("VALIDATION");
@@ -57,9 +60,9 @@ async function checkContent(
     : null;
   if (!filePath) throw new CockpitError("FILE_NOT_FOUND");
   return {
-    to: parsed.data.emailTo,
-    subject: pkg.emailSubject,
-    body: pkg.emailBody,
+    to: emailTo,
+    subject: emailSubject,
+    body: emailBody,
     filePath,
     fileName: sanitizePdfName(pkg.cvFile?.fileName ?? ""),
   };
@@ -91,27 +94,58 @@ const withFile = (userId: string, id: string) =>
     include: { cvFile: { select: { filePath: true, fileName: true } } },
   });
 
-// Clears the lock after a definitive failure. If this write itself fails the
-// lock stays and the stale-lock rule (60 s) opens the recovery panel.
-async function releaseQuietly(userId: string, id: string): Promise<void> {
+// Writes to the lock this send took, and only to that one: the row is matched
+// on the exact lock timestamp, so if a recovery action cleared our lock and a
+// new send locked the row again, the other send's lock is never touched
+// (D-022 b). Never throws. If the write fails the lock stays and the
+// stale-lock rule (60 s) opens the recovery panel. True when the row matched.
+async function patchOwnLock(
+  userId: string,
+  id: string,
+  lockedAt: Date,
+  data: { sendStartedAt?: null; sendOutcome: "unknown" | null },
+): Promise<boolean> {
   try {
-    await prisma.applicationPackage.updateMany({
-      where: { id, userId, status: "approved", sendStartedAt: { not: null } },
-      data: { sendStartedAt: null, sendOutcome: null },
+    const res = await prisma.applicationPackage.updateMany({
+      where: { id, userId, status: "approved", sendStartedAt: lockedAt },
+      data,
     });
+    return res.count > 0;
   } catch {
-    log.error("cockpit: could not release send lock", { packageId: id });
+    log.error("cockpit: could not update the send lock", { packageId: id });
+    return false;
   }
 }
 
-async function markUnknownQuietly(userId: string, id: string): Promise<void> {
+// After a definitive failure: nothing was sent, the package is approved again.
+async function releaseQuietly(userId: string, id: string, lockedAt: Date): Promise<void> {
+  await patchOwnLock(userId, id, lockedAt, { sendStartedAt: null, sendOutcome: null });
+}
+
+// The email may have gone out (or did, but could not be recorded): the lock
+// stays and the outcome is flagged, so the panel offers the recovery actions.
+// If our lock is already gone (a recovery action ran while Gmail was
+// answering) and the row is unlocked and approved, it is locked again, so it
+// cannot be sent a second time before the owner checks Gmail (D-022 c).
+// A row another send has locked, or one already sent, is left alone.
+async function holdAsUnknownQuietly(
+  userId: string,
+  id: string,
+  lockedAt: Date,
+): Promise<void> {
+  if (await patchOwnLock(userId, id, lockedAt, { sendOutcome: "unknown" })) return;
   try {
-    await prisma.applicationPackage.updateMany({
-      where: { id, userId, status: "approved", sendStartedAt: { not: null } },
-      data: { sendOutcome: "unknown" },
+    const res = await prisma.applicationPackage.updateMany({
+      where: { id, userId, status: "approved", sendStartedAt: null },
+      data: { sendStartedAt: new Date(), sendOutcome: "unknown" },
     });
+    if (res.count > 0) {
+      log.warn("cockpit: send lock was lost after the Gmail call; locked again", {
+        packageId: id,
+      });
+    }
   } catch {
-    log.error("cockpit: could not set sendOutcome", { packageId: id });
+    log.error("cockpit: could not lock the package again", { packageId: id });
   }
 }
 
@@ -139,10 +173,6 @@ export async function sendApplicationPackage(
   });
   if (active?.id !== pkg.id) throw new CockpitError("CONFLICT");
   await checkContent(userId, pkg);
-  // Rendered here, before the lock: a long letter takes seconds, and the lock
-  // window (STALE_LOCK_MS) is sized for the Gmail calls. The lock is tied to
-  // updatedAt and edits are refused while it is held, so the text cannot change.
-  const letterReady = await buildLetterAttachment(pkg, pkg.cvFile?.fileName ?? "");
 
   const account = await prisma.gmailAccount.findUnique({
     where: { userId },
@@ -153,7 +183,15 @@ export async function sendApplicationPackage(
     throw new CockpitError("GMAIL_RECONNECT_REQUIRED");
   }
 
+  // Rendered here, after the cheap checks and before the lock: a long letter
+  // takes seconds, and the lock window (STALE_LOCK_MS) is sized for the Gmail
+  // calls. Edits are refused while the lock is held, and an edit before the
+  // lock fails the updatedAt condition, so the text cannot change.
+  const letterReady = await buildLetterAttachment(pkg, pkg.cvFile?.fileName ?? "");
+
   // ---- Step 2: lock (conditional, includes the updatedAt the user saw) ---
+  // lockedAt identifies this send's lock in every later write (D-022 b).
+  const lockedAt = new Date();
   const lock = await prisma.applicationPackage.updateMany({
     where: {
       id: packageId,
@@ -162,7 +200,7 @@ export async function sendApplicationPackage(
       sendStartedAt: null,
       updatedAt: expectedUpdatedAt,
     },
-    data: { sendStartedAt: new Date() },
+    data: { sendStartedAt: lockedAt },
   });
   if (lock.count === 0) throw new CockpitError("CONFLICT");
 
@@ -173,7 +211,11 @@ export async function sendApplicationPackage(
   let accessToken: string;
   try {
     const fresh = await withFile(userId, packageId);
-    if (!fresh || fresh.status !== "approved" || fresh.sendStartedAt === null) {
+    if (
+      !fresh ||
+      fresh.status !== "approved" ||
+      fresh.sendStartedAt?.getTime() !== lockedAt.getTime()
+    ) {
       throw new CockpitError("CONFLICT");
     }
     content = await checkContent(userId, fresh);
@@ -181,13 +223,14 @@ export async function sendApplicationPackage(
       fileName: content.fileName,
       content: await fs.readFile(content.filePath),
     };
-    // The cover letter PDF made before the lock; made again only if the row
-    // changed in between (it cannot, by the updatedAt condition: defensive).
-    const letter =
-      fresh.letterMd === pkg.letterMd && fresh.cvJson === pkg.cvJson
-        ? letterReady
-        : await buildLetterAttachment(fresh, fresh.cvFile?.fileName ?? "");
-    const extraAttachments = letter ? [letter] : [];
+    // The cover letter PDF was made before the lock from the text the lock
+    // condition (updatedAt) pinned. A letter that differs now was changed
+    // behind the lock: refuse rather than render inside the lock window or
+    // send a letter the owner never saw (D-022 d).
+    if (fresh.letterMd !== pkg.letterMd || fresh.cvJson !== pkg.cvJson) {
+      throw new CockpitError("CONFLICT");
+    }
+    const extraAttachments = letterReady ? [letterReady] : [];
     raw = encodeRaw(
       buildMimeMessage({
         from: account.email,
@@ -198,6 +241,8 @@ export async function sendApplicationPackage(
         extraAttachments,
       }),
     );
+    // The only decrypt of the stored token (D-022 e). It fails when
+    // ENCRYPTION_KEY is missing or changed: the user must reconnect.
     let refreshToken: string;
     try {
       refreshToken = decrypt(account.encryptedRefreshToken, account.iv);
@@ -206,7 +251,7 @@ export async function sendApplicationPackage(
     }
     accessToken = await gmail.getAccessToken(refreshToken);
   } catch (e) {
-    await releaseQuietly(userId, packageId);
+    await releaseQuietly(userId, packageId, lockedAt);
     if (e instanceof CockpitError) throw e;
     log.error("cockpit: send failed before Gmail call", { packageId });
     throw new CockpitError("INTERNAL");
@@ -218,25 +263,40 @@ export async function sendApplicationPackage(
     sent = await gmail.sendRaw(accessToken, raw);
   } catch (e) {
     if (e instanceof CockpitError && e.definitive === true) {
-      await releaseQuietly(userId, packageId); // 5a: nothing was sent
+      await releaseQuietly(userId, packageId, lockedAt); // 5a: nothing was sent
       throw e;
     }
     // 5b: the message may have gone out. Keep the lock, flag the outcome.
-    await markUnknownQuietly(userId, packageId);
+    await holdAsUnknownQuietly(userId, packageId, lockedAt);
     log.warn("cockpit: send outcome unknown", { packageId });
     throw new CockpitError("SEND_OUTCOME_UNKNOWN");
   }
 
   // ---- Step 6: success, one transaction -----------------------------------
   const now = new Date();
+  let recordedAfterLostLock = false;
   try {
     await prisma.$transaction(async (tx) => {
+      const recordSent = async () => {
+        await tx.sentEmail.create({
+          data: {
+            userId,
+            packageId,
+            fromAddress: account.email,
+            toAddress: content.to,
+            gmailMessageId: sent.id,
+            threadId: sent.threadId,
+            sentAt: now,
+          },
+        });
+        await markJobApplied(tx, userId, pkg.jobId, now);
+      };
       const res = await tx.applicationPackage.updateMany({
         where: {
           id: packageId,
           userId,
           status: "approved",
-          sendStartedAt: { not: null },
+          sendStartedAt: lockedAt,
         },
         data: {
           status: "sent",
@@ -245,32 +305,52 @@ export async function sendApplicationPackage(
           sendOutcome: null,
         },
       });
-      if (res.count === 0) {
-        log.error("cockpit: package not in the locked approved state after send", {
-          packageId,
-        });
+      if (res.count > 0) {
+        await recordSent();
+        return;
       }
-      await tx.sentEmail.create({
-        data: {
-          userId,
-          packageId,
-          fromAddress: account.email,
-          toAddress: content.to,
-          gmailMessageId: sent.id,
-          threadId: sent.threadId,
-          sentAt: now,
-        },
+      // Our lock is gone (a recovery action ran while Gmail was answering).
+      log.error("cockpit: package not in the locked approved state after send", {
+        packageId,
       });
-      await markJobApplied(tx, userId, pkg.jobId, now);
+      const current = await tx.applicationPackage.findFirst({
+        where: { id: packageId, userId },
+        select: { status: true },
+      });
+      // Released then superseded, un-approved, rejected...: no panel can
+      // reach this package any more, so record the fact that the email went
+      // out (SentEmail row, job applied) without touching the package
+      // (D-022 h). A repeat fails on the unique packageId: rolled back below.
+      if (current && current.status !== "approved" && current.status !== "sent") {
+        await recordSent();
+        recordedAfterLostLock = true;
+        return;
+      }
+      // Approved (released, maybe locked again) or already sent (Mark as
+      // sent ran): record nothing. Throwing rolls the whole transaction
+      // back; the catch below locks an approved, unlocked package again
+      // with an unknown outcome (D-022 a, c).
+      throw new CockpitError("CONFLICT");
     });
   } catch {
     // The email is out but we could not record it. The lock stays (no second
     // send possible); the panel lets the user mark it as sent (SPEC §6.4).
+    // The Gmail message id is only logged: the package has no column for it
+    // and the SentEmail row is what failed (D-022 f).
     log.error("cockpit: could not record a sent email", {
       packageId,
       gmailMessageId: sent.id,
     });
-    await markUnknownQuietly(userId, packageId);
+    await holdAsUnknownQuietly(userId, packageId, lockedAt);
+    throw new CockpitError("SEND_OUTCOME_UNKNOWN");
+  }
+  if (recordedAfterLostLock) {
+    // Recorded, but the package left the approved state before Gmail
+    // answered: the owner should check Gmail and this package (D-022 h).
+    log.warn("cockpit: late send recorded on a package no longer approved", {
+      packageId,
+      gmailMessageId: sent.id,
+    });
     throw new CockpitError("SEND_OUTCOME_UNKNOWN");
   }
   return { id: packageId, sentAt: now };

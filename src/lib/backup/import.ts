@@ -18,6 +18,7 @@ import {
   INSERT_ORDER,
   LOOKUP_MODELS,
   MODEL_SPECS,
+  REPLACED_MODELS,
   type BackupModel,
 } from "./ordering";
 import { writeSnapshot } from "./snapshot";
@@ -34,11 +35,13 @@ export interface PreflightResult {
 
 // Counts read from the target database, not from the file — the manifest is
 // self-reported and cannot be allowed to size the destructive confirmation.
+// Covers everything the confirmation lists (REPLACED_MODELS); emptiness is
+// judged on EMPTINESS_MODELS only, see isEmptyTarget.
 export async function countTargetContent(
   userId: string,
 ): Promise<Record<string, number>> {
   const entries = await Promise.all(
-    EMPTINESS_MODELS.map(async (model) => {
+    REPLACED_MODELS.map(async (model) => {
       const spec = MODEL_SPECS[model];
       const delegate = (db as unknown as Record<string, { count: (a: unknown) => Promise<number> }>)[
         spec.delegate
@@ -49,7 +52,14 @@ export async function countTargetContent(
   return Object.fromEntries(entries);
 }
 
-// Reads manifest.json only, writes nothing to the database and nothing to disk.
+function isEmptyTarget(counts: Record<string, number>): boolean {
+  return EMPTINESS_MODELS.every((model) => (counts[model] ?? 0) === 0);
+}
+
+// Reads and validates manifest.json and data.json, writes nothing to the
+// database and nothing to disk. data.json is validated here too so that a
+// broken file is refused before the user is asked to confirm a wipe, not
+// after.
 export async function preflightBackup(
   bytes: Buffer,
   userId: string,
@@ -57,13 +67,10 @@ export async function preflightBackup(
 ): Promise<PreflightResult> {
   const zip = await openBackupZip(bytes);
   const manifest = await readManifest(zip);
-
-  if (!zip.file("data.json")) {
-    throw new BackupError("Backup is missing data.json.");
-  }
+  await readData(zip);
 
   const targetCounts = await countTargetContent(userId);
-  const targetIsEmpty = Object.values(targetCounts).every((n) => n === 0);
+  const targetIsEmpty = isEmptyTarget(targetCounts);
 
   return {
     manifest,
@@ -117,6 +124,39 @@ async function assertNoActiveRun(userId: string): Promise<void> {
     );
   }
 }
+
+// A package locked for sending must not be wiped: see D-017 (c).
+async function assertNoSendInFlight(
+  client: Pick<typeof db, "applicationPackage">,
+  userId: string,
+): Promise<void> {
+  const locked = await client.applicationPackage.findFirst({
+    where: { userId, status: "approved", sendStartedAt: { not: null } },
+    select: {
+      id: true,
+      job: { select: { JobTitle: { select: { label: true } }, Company: { select: { label: true } } } },
+    },
+  });
+  if (locked) {
+    const role = locked.job?.JobTitle?.label;
+    const company = locked.job?.Company?.label;
+    const which =
+      role && company ? `"${role} at ${company}" (package ${locked.id})` : `package ${locked.id}`;
+    throw new BackupError(
+      `An application email is being sent, or its send outcome is unknown, for ${which}. Wait for it to finish, or resolve it on that job's review page in the cockpit, then retry the import or rollback.`,
+    );
+  }
+}
+
+// ENOSPC from a file write, SQLITE_FULL from the database.
+function isDiskFull(error: unknown): boolean {
+  if ((error as NodeJS.ErrnoException | null)?.code === "ENOSPC") return true;
+  const message = error instanceof Error ? error.message : "";
+  return /ENOSPC|SQLITE_FULL|database or disk is full/i.test(message);
+}
+
+const DISK_FULL_MESSAGE =
+  "The server's disk is full. Import failed and nothing was changed; free some space, then try again.";
 
 // Resolved against the target's global JobStatus table, creating any the target
 // lacks from the carried label/value. Runs before the transaction: it is the
@@ -208,7 +248,7 @@ export async function importBackup(
   const data = await readData(zip);
 
   const targetCounts = await countTargetContent(userId);
-  const targetIsEmpty = Object.values(targetCounts).every((n) => n === 0);
+  const targetIsEmpty = isEmptyTarget(targetCounts);
   if (!targetIsEmpty && !confirmWipe) {
     throw new BackupError(
       "This account already holds data. Confirm that you want it replaced before importing.",
@@ -216,6 +256,7 @@ export async function importBackup(
   }
 
   await assertNoActiveRun(userId);
+  await assertNoSendInFlight(db, userId);
 
   // The safety net, and the last thing that happens before this function is
   // able to destroy anything. The transaction below protects against a crash;
@@ -236,8 +277,24 @@ export async function importBackup(
     for (const row of rowsFor(data, model)) idMap.mint(row.id as string);
   }
 
+  // Captured before the wipe so the old bytes can be unlinked after it commits,
+  // and so the rows can be deleted by id: by the time wipe() reaches File, the
+  // Resume and package rows are already deleted (DELETE_ORDER), so neither
+  // branch of the File scope matches any more and the scoped delete there is a
+  // no-op. Without this explicit delete the File rows would be left behind.
+  // Read before any new file is written, so nothing between the first write
+  // and the transaction's catch can throw and strand those files.
+  const oldFiles = await db.file.findMany({
+    where: MODEL_SPECS.File.scope(userId),
+    select: { id: true, filePath: true },
+  });
+  const oldFilePaths = oldFiles.map((f) => f.filePath);
+  const oldFileIds = oldFiles.map((f) => f.id);
+
   // Files are written before the transaction: a failed import leaves orphaned
-  // bytes (unlinked below) rather than committed rows pointing at nothing.
+  // bytes (unlinked by discardWritten) rather than committed rows pointing at
+  // nothing. That covers a failed write too (disk full, a bad path), not only a
+  // failed transaction: the files already written are removed either way.
   const writtenPaths: string[] = [];
   const uploadDir = path.join(APP_CONSTANTS.UPLOADS_DIR, "files", "resumes");
   await fs.mkdir(uploadDir, { recursive: true });
@@ -262,44 +319,60 @@ export async function importBackup(
   const cockpitDir = cockpitFileIds.size > 0 ? cockpitUserDir(userId) : null;
   if (cockpitDir) await fs.mkdir(cockpitDir, { recursive: true });
 
-  for (const file of data.File) {
-    const newId = idMap.get(file.id)!;
-    const isCockpit = cockpitDir !== null && cockpitFileIds.has(file.id);
-    const targetFor = (entryName: string, kind: "pdf" | "docx") =>
-      isCockpit
-        ? path.join(cockpitDir!, `${newId}.pdf`)
-        : importedFilePath(newId, entryName, kind);
-    const prefix = `files/${file.id}/`;
-    // A prefix scan, not `new RegExp(prefix)`: file.id comes out of the
-    // payload, and interpolating it into a pattern hands an untrusted string
-    // to the regex engine for no gain over startsWith.
-    const entry =
-      zip.file(`${prefix}${safeEntryName(file.filePath)}`) ??
-      Object.keys(zip.files)
-        .filter((name) => name.startsWith(prefix) && !zip.files[name].dir)
-        .map((name) => zip.files[name])[0] ??
-      null;
+  const discardWritten = () =>
+    Promise.all(writtenPaths.map((p) => fs.unlink(p).catch(() => undefined)));
 
-    if (!entry || file.fileMissing) {
-      newFilePaths.set(file.id, targetFor(file.filePath, "pdf"));
-      continue;
+  try {
+    for (const file of data.File) {
+      const newId = idMap.get(file.id)!;
+      const isCockpit = cockpitDir !== null && cockpitFileIds.has(file.id);
+      const targetFor = (kind: "pdf" | "docx") =>
+        isCockpit ? path.join(cockpitDir!, `${newId}.pdf`) : importedFilePath(newId, kind);
+      const prefix = `files/${file.id}/`;
+      // A prefix scan, not `new RegExp(prefix)`: file.id comes out of the
+      // payload, and interpolating it into a pattern hands an untrusted string
+      // to the regex engine for no gain over startsWith.
+      const entry =
+        zip.file(`${prefix}${safeEntryName(file.filePath)}`) ??
+        Object.keys(zip.files)
+          .filter((name) => name.startsWith(prefix) && !zip.files[name].dir)
+          .map((name) => zip.files[name])[0] ??
+        null;
+
+      if (!entry || file.fileMissing) {
+        newFilePaths.set(file.id, targetFor("pdf"));
+        continue;
+      }
+
+      const bytes = await entry.async("nodebuffer");
+      const checked = checkImportedFile(bytes);
+      // A cockpit CV is always a PDF (attach_file enforces it); anything else
+      // under that id is dropped like any other non-resume entry.
+      if (!checked || (isCockpit && checked.kind !== "pdf")) {
+        rejectedFiles.push(file.fileName);
+        newFilePaths.set(file.id, targetFor("pdf"));
+        continue;
+      }
+
+      const target = targetFor(checked.kind);
+      newFilePaths.set(file.id, target);
+      newFileTypes.set(file.id, checked.mimeType);
+      // Recorded before the write: a write that fails part-way leaves a
+      // truncated file that the discard must remove. "wx" refuses to replace a
+      // file already there; that file is not ours, so it is never discarded.
+      writtenPaths.push(target);
+      try {
+        await fs.writeFile(target, bytes, { flag: "wx" });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") writtenPaths.pop();
+        throw error;
+      }
     }
-
-    const bytes = await entry.async("nodebuffer");
-    const checked = checkImportedFile(bytes);
-    // A cockpit CV is always a PDF (attach_file enforces it); anything else
-    // under that id is dropped like any other non-resume entry.
-    if (!checked || (isCockpit && checked.kind !== "pdf")) {
-      rejectedFiles.push(file.fileName);
-      newFilePaths.set(file.id, targetFor(file.filePath, "pdf"));
-      continue;
-    }
-
-    const target = targetFor(entry.name, checked.kind);
-    newFilePaths.set(file.id, target);
-    newFileTypes.set(file.id, checked.mimeType);
-    await fs.writeFile(target, bytes);
-    writtenPaths.push(target);
+  } catch (error) {
+    await discardWritten();
+    log.error("[Backup] Import failed while writing files", { error: String(error) });
+    if (isDiskFull(error)) throw new BackupError(DISK_FULL_MESSAGE);
+    throw new BackupError("Import failed and nothing was changed.");
   }
 
   if (rejectedFiles.length > 0) {
@@ -309,18 +382,6 @@ export async function importBackup(
     });
   }
 
-  // Captured before the wipe so the old bytes can be unlinked after it commits,
-  // and so the rows can be deleted by id: by the time wipe() reaches File, the
-  // Resume and package rows are already deleted (DELETE_ORDER), so neither
-  // branch of the File scope matches any more and the scoped delete there is a
-  // no-op. Without this explicit delete the File rows would be left behind.
-  const oldFiles = await db.file.findMany({
-    where: MODEL_SPECS.File.scope(userId),
-    select: { id: true, filePath: true },
-  });
-  const oldFilePaths = oldFiles.map((f) => f.filePath);
-  const oldFileIds = oldFiles.map((f) => f.id);
-
   const counts: Record<string, number> = {};
 
   try {
@@ -328,6 +389,9 @@ export async function importBackup(
       async (transaction) => {
         const tx = transaction as unknown as Tx;
 
+        // Again here: a send that took its lock after the check above must
+        // not be wiped mid-flight either.
+        await assertNoSendInFlight(transaction, userId);
         await wipe(tx, userId);
         // By id, after the packages are gone: see oldFiles above. Rows already
         // removed by the scoped loop are simply not matched.
@@ -396,15 +460,14 @@ export async function importBackup(
       { timeout: 120_000, maxWait: 15_000 },
     );
   } catch (error) {
-    await Promise.all(
-      writtenPaths.map((p) => fs.unlink(p).catch(() => undefined)),
-    );
+    await discardWritten();
     if (error instanceof BackupError) throw error;
     const message = error instanceof Error ? error.message : "";
     if (/database is locked|SQLITE_BUSY/i.test(message)) {
       throw new BackupError("The database is busy. Please try the import again.");
     }
     log.error("[Backup] Import transaction failed", { error: String(error) });
+    if (isDiskFull(error)) throw new BackupError(DISK_FULL_MESSAGE);
     throw new BackupError("Import failed and nothing was changed.");
   }
 

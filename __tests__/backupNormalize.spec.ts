@@ -36,31 +36,21 @@ describe("importedFilePath", () => {
   const uploads = APP_CONSTANTS.UPLOADS_DIR;
 
   it("writes inside the resumes subdirectory, never UPLOADS_DIR itself", () => {
-    const p = importedFilePath("new-id", "resume.pdf", "pdf");
-    expect(p).toBe(path.join(uploads, "files", "resumes", "new-id-resume.pdf"));
+    const p = importedFilePath("new-id", "pdf");
+    expect(p).toBe(path.join(uploads, "files", "resumes", "new-id.pdf"));
   });
 
-  it("never persists a path carried in the backup", () => {
-    const p = importedFilePath("new-id", "/data/dev.db", "pdf");
-    expect(p).toBe(path.join(uploads, "files", "resumes", "new-id-dev.pdf"));
-    expect(p.startsWith(path.join(uploads, "files", "resumes"))).toBe(true);
-  });
-
-  // The extension follows the sniffed bytes, not the name in the backup, so a
-  // payload cannot choose what the file on disk is called.
-  it("overrides the carried extension with the sniffed one", () => {
-    expect(importedFilePath("new-id", "resume.pdf.exe", "docx")).toBe(
-      path.join(uploads, "files", "resumes", "new-id-resume.pdf.docx"),
-    );
-    expect(importedFilePath("new-id", "payload.sh", "pdf")).toBe(
-      path.join(uploads, "files", "resumes", "new-id-payload.pdf"),
+  // The name is the new id and the sniffed extension only: nothing carried in
+  // the backup (path, name, extension) reaches the disk, and the name cannot
+  // grow from one export/import cycle to the next.
+  it("takes nothing from the backup: id plus sniffed extension", () => {
+    expect(importedFilePath("new-id", "docx")).toBe(
+      path.join(uploads, "files", "resumes", "new-id.docx"),
     );
   });
 
-  it("cannot collide for two files sharing an original name", () => {
-    expect(importedFilePath("id-a", "resume.pdf", "pdf")).not.toBe(
-      importedFilePath("id-b", "resume.pdf", "pdf"),
-    );
+  it("cannot collide for two files", () => {
+    expect(importedFilePath("id-a", "pdf")).not.toBe(importedFilePath("id-b", "pdf"));
   });
 });
 

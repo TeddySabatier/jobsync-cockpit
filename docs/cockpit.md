@@ -134,6 +134,7 @@ The **domain warning** compares the recipient's registrable domain (`acme.co.uk`
 - **Ambiguous failure** (timeout, 5xx, network): lock kept, `sendOutcome = "unknown"`. UI: check Gmail **Sent** folder, then **Mark as sent (manual)** or **Release lock**.
 - **Definitive failure** (token/decrypt/MIME/400/401/403): lock cleared; the Send dialog stays open with the reason ("Not sent: ...") so you can fix it and retry. If the request itself fails (network drop), the dialog closes and the page refreshes, so a second click cannot send twice.
 - Lock older than **60 s** without outcome is treated like unknown (crash recovery).
+- If a recovery action ran while Gmail was still answering, the late result records nothing (no sent-email row, no job update): the package shows **unknown** again, locked, so check Gmail **Sent** and pick the action again (D-022). If the package was meanwhile replaced by a newer version, un-approved or rejected, the late email is recorded (sent history, job applied) and you are told to check Gmail; take care not to send the newer version a second time.
 
 **Mark applied manually** (empty `emailTo` / link apply): overflow menu; no email sent.
 
@@ -143,7 +144,7 @@ A send (Gmail or manual) moves the job status to **Applied** only when it is sti
 
 - **PDF in iframe:** file route sets `Content-Security-Policy: sandbox; frame-ancestors 'self'` and scoped `X-Frame-Options: SAMEORIGIN` in Next config. Some browsers may not render sandboxed PDFs in an iframe — use download if preview fails.
 - **Gmail tokens:** refresh tokens encrypted with `ENCRYPTION_KEY` (same key as other stored secrets). Must be set **before** OAuth callback stores a token. Changing the key requires reconnecting Gmail.
-- **Backup (D-012):** the standard backup includes review packages, sent-email records and the CV PDFs they point at, so a restore brings them back. It never includes the Gmail connection (`GmailAccount`): its refresh token stays on the server, so after restoring onto a fresh instance you reconnect Gmail. Restoring over an existing account replaces its packages and sent history with the backup contents (the automatic pre-restore snapshot contains them too). Backups made before D-012 simply have no packages.
+- **Backup (D-012):** the standard backup includes review packages, sent-email records and the CV PDFs they point at, so a restore brings them back. It never includes the Gmail connection (`GmailAccount`): its refresh token stays on the server, so after restoring onto a fresh instance you reconnect Gmail. Restoring over an existing account replaces its packages and sent history with the backup contents (the automatic pre-restore snapshot contains them too). Backups made before D-012 simply have no packages. An import or rollback is refused while a package is being sent or has an unresolved send lock: resolve it in the cockpit first. A package exported while locked is restored still locked, and the recovery panel releases it (D-017).
 - **Upload path:** CV PDFs live under `<UPLOADS_DIR>/files/cockpit/<userId>/` (`UPLOADS_DIR` is `data` in dev, `/data` in production — not a separate env var).
 
 ## Troubleshooting by code

@@ -11,7 +11,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { collectCvLeaves, setCvLeaf } from "@/lib/cockpit/cvLeaves";
 import { renderLetterMarkdown } from "@/lib/cockpit/markdown";
-import { UpdatePackageContentInputShape as Shape } from "@/lib/cockpit/schemas";
+import {
+  isBlankText,
+  UpdatePackageContentInputShape as Shape,
+} from "@/lib/cockpit/schemas";
 import type { UpdatePackageContentInput } from "@/lib/cockpit/schemas";
 import { toastError, toastSuccess } from "@/lib/toast";
 import type { PackageDetail } from "./Panels";
@@ -54,14 +57,14 @@ export function validateEditValues(v: EditValues): EditErrors {
       ? "Required"
       : /[\r\n]/.test(v.emailSubject)
         ? "No line break allowed"
-        : !v.emailSubject.trim()
+        : isBlankText(v.emailSubject)
           ? "Must not be blank"
           : "At most 300 characters";
   }
   if (!Shape.emailBody.safeParse(v.emailBody).success) {
     errors.emailBody = !v.emailBody
       ? "Required"
-      : !v.emailBody.trim()
+      : isBlankText(v.emailBody)
         ? "Must not be blank"
         : "At most 20,000 characters";
   }

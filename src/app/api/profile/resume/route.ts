@@ -12,6 +12,8 @@ import { getTimestampedFileName } from "@/lib/utils";
 import { APP_CONSTANTS } from "@/lib/constants";
 import { PDF_MAGIC, ZIP_MAGIC } from "@/lib/ai/import/extract-text";
 import { log } from "@/lib/telemetry";
+import db from "@/lib/db";
+import { contentDisposition, safeDownloadName } from "@/lib/downloadName";
 
 const ALLOWED_MIME = new Set<string>(APP_CONSTANTS.RESUME_ALLOWED_MIME_TYPES);
 
@@ -152,12 +154,17 @@ export const GET = async (req: NextRequest) => {
 
     const fileContent = fs.readFileSync(fullFilePath);
 
-    // Strip CR/LF from filename to prevent header injection
-    const safeFileName = fileName.replace(/[\r\n"]/g, "_");
+    // The display name of the user's own row when there is one: a restored
+    // backup names files <id>.<ext> on disk (D-017). Sanitized for the header.
+    const row = await db.file.findFirst({
+      where: { filePath, Resume: { profile: { userId } } },
+      select: { fileName: true },
+    });
+    const safeFileName = safeDownloadName(row?.fileName, fileName.replace(/[\r\n"]/g, "_"));
     const response = new NextResponse(fileContent, {
       headers: {
         "Content-Type": contentType,
-        "Content-Disposition": `attachment; filename="${safeFileName}"`,
+        "Content-Disposition": contentDisposition(safeFileName),
       },
     });
 
