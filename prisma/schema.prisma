@@ -551,7 +551,7 @@ model ApplicationPackage {
   userId           String
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobId            String
-  job              Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job              Job       @relation(fields: [jobId], references: [id], onDelete: Restrict)
   version          Int                       // 1, 2, 3 ... per job
   status           String    @default("pending") // pending|approved|rejected|changes_requested|sent|superseded
   emailTo          String?                   // null/empty = "apply via link"

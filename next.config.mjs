@@ -3,7 +3,7 @@ const nextConfig = {
   output: "standalone",
   devIndicators: false,
   // The cover-letter PDF reads its Noto Sans files from disk at render time
-  // (letterPdf.tsx, D-026); file tracing cannot see a computed path, so name
+  // (letterPdf.tsx, D-027); file tracing cannot see a computed path, so name
   // them. Send runs as a server action inside page routes, hence the wide key.
   outputFileTracingIncludes: {
     "/**/*": ["./assets/fonts/noto-sans/**/*"],

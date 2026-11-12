@@ -129,7 +129,7 @@ describe("renderLetterPdf: nothing is lost silently (review findings)", () => {
     for (const s of ["INDENTED-CODE", "FENCED-CODE", "second line", "Outro"]) expect(text).toContain(s);
   });
 
-  it("draws Polish, Czech, Greek and Cyrillic letters; shows CJK as ? (D-026)", async () => {
+  it("draws Polish, Czech, Greek and Cyrillic letters; shows CJK as ? (D-027)", async () => {
     expect(toPdfText("Łukasz Wałęsa, Dvořák, Őry, Pań")).toBe("Łukasz Wałęsa, Dvořák, Őry, Pań");
     expect(toPdfText("Ελληνικά Москва")).toBe("Ελληνικά Москва");
     expect(toPdfText("日本語 한국어 ア")).toBe("??? ??? ?");
@@ -154,7 +154,7 @@ describe("renderLetterPdf: nothing is lost silently (review findings)", () => {
   });
 });
 
-describe("renderLetterPdf: embedded Noto Sans (D-026)", () => {
+describe("renderLetterPdf: embedded Noto Sans (D-027)", () => {
   const POLISH = "Zażółć gęślą jaźń, Łukasz Wałęsa, Dąbrowski";
   const CZECH = "Příliš žluťoučký kůň úpěl ďábelské ódy, Dvořák";
   const GREEK = "Αγαπητοί κύριοι, Ελληνικά ΩΏΊ ά έ ή ί ό ύ ώ";

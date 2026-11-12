@@ -599,14 +599,29 @@ export const clearMockJobsAction = async (): Promise<any> => {
       where: {
         userId: user.id,
         description: { contains: MOCK_DATA_IDENTIFIER },
+        // Jobs with packages are never deleted (D-026), so their notes,
+        // interviews and tags are left alone too.
+        applicationPackages: { none: {} },
       },
       select: { id: true },
     });
 
     const jobIds = mockJobs.map((j) => j.id);
+    const skipped = await prisma.job.count({
+      where: {
+        userId: user.id,
+        description: { contains: MOCK_DATA_IDENTIFIER },
+        applicationPackages: { some: {} },
+      },
+    });
+    const skippedNote =
+      skipped > 0 ? ` Skipped ${skipped} with application packages.` : "";
 
     if (jobIds.length === 0) {
-      return { success: true, message: "No mock jobs found to delete." };
+      return {
+        success: true,
+        message: `No mock jobs found to delete.${skippedNote}`,
+      };
     }
 
     // Delete related records first (FK constraints)
@@ -624,12 +639,12 @@ export const clearMockJobsAction = async (): Promise<any> => {
     );
 
     const deleteResult = await prisma.job.deleteMany({
-      where: { id: { in: jobIds } },
+      where: { id: { in: jobIds }, applicationPackages: { none: {} } },
     });
 
     return {
       success: true,
-      message: `Deleted ${deleteResult.count} mock jobs.`,
+      message: `Deleted ${deleteResult.count} mock jobs.${skippedNote}`,
     };
   } catch (error) {
     return handleError(error, "Failed to clear mock jobs");

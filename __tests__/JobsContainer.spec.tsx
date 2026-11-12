@@ -535,7 +535,7 @@ describe("JobsContainer Search Functionality", () => {
       });
 
       const noneOption = screen.getByRole("option", {
-        name: "All (Except Dismissed)",
+        name: "All (Except Dismissed, Archived)",
       });
       await act(async () => {
         await user.click(noneOption);

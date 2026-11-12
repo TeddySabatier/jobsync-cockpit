@@ -24,6 +24,7 @@ import {
 import { writeSnapshot } from "./snapshot";
 import { cockpitUserDir } from "@/lib/cockpit/files";
 import { log } from "@/lib/telemetry";
+import { FILE_OUTSIDE_UPLOADS, removeStoredFile } from "@/lib/uploadedFile";
 import { BackupDataSchema, type BackupData, type BackupManifest } from "./schema";
 
 export interface PreflightResult {
@@ -286,9 +287,17 @@ export async function importBackup(
   // and the transaction's catch can throw and strand those files.
   const oldFiles = await db.file.findMany({
     where: MODEL_SPECS.File.scope(userId),
-    select: { id: true, filePath: true },
+    select: {
+      id: true,
+      filePath: true,
+      applicationPackages: { select: { id: true }, take: 1 },
+    },
   });
-  const oldFilePaths = oldFiles.map((f) => f.filePath);
+  // The kind decides the folder an old file may be removed from (D-024).
+  const oldFilePaths = oldFiles.map((f) => ({
+    filePath: f.filePath,
+    isCockpitCv: f.applicationPackages.length > 0,
+  }));
   const oldFileIds = oldFiles.map((f) => f.id);
 
   // Files are written before the transaction: a failed import leaves orphaned
@@ -473,14 +482,24 @@ export async function importBackup(
 
   // Without this every restore-over-existing leaves the previous account's
   // resume files in UPLOADS_DIR forever with no row pointing at them.
-  for (const filePath of oldFilePaths) {
+  // Still only after the commit (D-017). Each old file is removed only from
+  // the folder its kind lives in (issue #78, D-024): a stored path elsewhere
+  // (a legacy row, a symlink) keeps its file and logs a code, never the path.
+  for (const { filePath, isCockpitCv } of oldFilePaths) {
     if (writtenPaths.includes(filePath)) continue;
-    await fs.unlink(filePath).catch((error) => {
+    try {
+      const outcome = await removeStoredFile(userId, filePath, isCockpitCv);
+      if (outcome === "kept") {
+        log.warn("[Backup] Replaced file outside its folder kept", {
+          code: FILE_OUTSIDE_UPLOADS,
+        });
+      }
+    } catch (error) {
       log.warn("[Backup] Could not remove replaced file", {
-        "file.path": filePath,
-        error: String(error),
+        code: "FILE_REMOVE_FAILED",
+        errno: String((error as NodeJS.ErrnoException)?.code ?? "none"),
       });
-    });
+    }
   }
 
   // Nothing else would: syncSchedulerState runs at boot and in the automation

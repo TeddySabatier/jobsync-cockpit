@@ -25,6 +25,7 @@ import {
 } from "../ui/card";
 import { Button } from "../ui/button";
 import {
+  Archive,
   ArrowLeft,
   FileText,
   MoreVertical,
@@ -69,7 +70,8 @@ import {
 } from "../ui/dropdown-menu";
 import { DeleteAlertDialog } from "../DeleteAlertDialog";
 import { AddJob } from "./AddJob";
-import { deleteJobById, updateJobStatus } from "@/actions/job.actions";
+import { toastArchived } from "./archiveUndo";
+import { archiveJobById, deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { ClaudePromptButton } from "@/components/cockpit/ClaudePromptButton";
 import { statusLabel } from "@/components/cockpit/statusLabels";
@@ -174,6 +176,19 @@ function JobDetails({
     if (success) {
       setCurrentStatus(status);
       toastSuccess(`Job has been updated successfully`);
+    } else {
+      toastError(message);
+    }
+  };
+
+  const hasPackages = (job._count?.applicationPackages ?? 0) > 0;
+  const isArchived = currentStatus?.value === "archived";
+
+  const onArchiveJob = async () => {
+    const { success, message, previousStatus } = await archiveJobById(job.id);
+    if (success) {
+      toastArchived(previousStatus, job.id, () => router.refresh());
+      router.push("/dashboard/myjobs");
     } else {
       toastError(message);
     }
@@ -292,13 +307,25 @@ function JobDetails({
                   </DropdownMenuPortal>
                 </DropdownMenuSub>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-red-600 cursor-pointer"
-                  onClick={() => setDeleteAlertOpen(true)}
-                >
-                  <Trash className="mr-2 h-4 w-4" />
-                  Delete
-                </DropdownMenuItem>
+                {!isArchived && (
+                  <DropdownMenuItem
+                    className="cursor-pointer"
+                    onClick={onArchiveJob}
+                    data-testid="job-details-archive-menu-item"
+                  >
+                    <Archive className="mr-2 h-4 w-4" />
+                    Archive
+                  </DropdownMenuItem>
+                )}
+                {!hasPackages && (
+                  <DropdownMenuItem
+                    className="text-red-600 cursor-pointer"
+                    onClick={() => setDeleteAlertOpen(true)}
+                  >
+                    <Trash className="mr-2 h-4 w-4" />
+                    Delete
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -324,21 +351,38 @@ function JobDetails({
                   size="sm"
                   className="h-8 px-2"
                   onClick={onEditJob}
+                  aria-label="Edit job"
                   data-testid="job-details-edit-btn"
                 >
                   <Pencil className="h-4 w-4 sm:mr-1" />
                   <span className="hidden sm:inline">Edit</span>
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2 text-destructive hover:text-destructive"
-                  onClick={() => setDeleteAlertOpen(true)}
-                  data-testid="job-details-delete-btn"
-                >
-                  <Trash2 className="h-4 w-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Delete</span>
-                </Button>
+                {!isArchived && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2"
+                    onClick={onArchiveJob}
+                    aria-label="Archive job"
+                    data-testid="job-details-archive-btn"
+                  >
+                    <Archive className="h-4 w-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Archive</span>
+                  </Button>
+                )}
+                {!hasPackages && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-destructive hover:text-destructive"
+                    onClick={() => setDeleteAlertOpen(true)}
+                    aria-label="Delete job"
+                    data-testid="job-details-delete-btn"
+                  >
+                    <Trash2 className="h-4 w-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Delete</span>
+                  </Button>
+                )}
               </div>
               {job.matchScore != null && (
                 <div className="flex flex-col items-center gap-1">
@@ -352,9 +396,9 @@ function JobDetails({
                   )}
                 </div>
               )}
-              {job?.Resume && job?.Resume?.File && job.Resume?.File?.filePath
+              {job?.Resume?.FileId && job.Resume.File
                 ? DownloadFileButton(
-                    job?.Resume?.File?.filePath,
+                    job.Resume.FileId,
                     job?.Resume?.title,
                     job?.Resume?.File?.fileName,
                   )

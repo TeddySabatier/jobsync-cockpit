@@ -148,8 +148,9 @@ export function useResumeImport(resume: Resume) {
   }, [pendingCards.length]);
 
   // Load AI settings for "Structure with AI" button
+  const hasFile = !!resume.File;
   useEffect(() => {
-    if (resume.File?.filePath && !importMode) {
+    if (hasFile && !importMode) {
       getUserSettings().then((result) => {
         if (result.success && result.data?.settings?.ai) {
           const ai = result.data.settings.ai;
@@ -174,7 +175,7 @@ export function useResumeImport(resume: Resume) {
         }
       });
     }
-  }, [resume.File?.filePath, importMode]);
+  }, [hasFile, importMode]);
 
   const handleAcceptCard = useCallback(
     async (cardId: string) => {

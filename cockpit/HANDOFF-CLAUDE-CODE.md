@@ -73,7 +73,6 @@ An overnight QA run covered the code after the handoff: free-model review lanes,
 
 - PR **#4**'s first commit `817a1d9` remains visible on the PR page (mentions an SSH alias name, a second GitHub account, and local paths; no secrets; **not in main**).
 - Commits may show the owner's personal email as author (public repo; consider a GitHub `noreply` address).
-- Upstream **`/api/profile/resume`** has no path confinement (upstream code; not changed in V0).
 - ~~`attach_file` quota check is not atomic~~ the quota was removed (D-013); unreferenced uploads are cleaned up instead.
 - **`File` rows have no `userId` column** — ownership is path-based via `cockpitUserDir`.
 - **Edits have no optimistic-concurrency check** (two tabs can overwrite; Send re-checks `updatedAt`).

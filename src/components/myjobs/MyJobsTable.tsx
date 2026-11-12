@@ -23,6 +23,7 @@ type MyJobsTableProps = {
   jobs: JobResponse[];
   jobStatuses: JobStatus[];
   deleteJob: (id: string) => void;
+  archiveJob?: (id: string) => void;
   editJob: (id: string) => void;
   onChangeJobStatus: (id: string, status: JobStatus) => void;
   onAddNote: (jobId: string) => void;
@@ -32,6 +33,7 @@ function MyJobsTable({
   jobs,
   jobStatuses,
   deleteJob,
+  archiveJob,
   editJob,
   onChangeJobStatus,
   onAddNote,
@@ -130,6 +132,7 @@ function MyJobsTable({
                     onChangeJobStatus={onChangeJobStatus}
                     onAddNote={onAddNote}
                     onDeleteJob={onDeleteJob}
+                    onArchiveJob={archiveJob}
                   />
                 </TableCell>
               </TableRow>

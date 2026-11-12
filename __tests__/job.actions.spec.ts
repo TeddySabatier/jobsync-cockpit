@@ -30,6 +30,7 @@ vi.mock("@prisma/client", () => {
       findFirst: vi.fn(),
       create: vi.fn(),
     },
+    applicationPackage: { count: vi.fn() },
     job: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -760,10 +761,14 @@ describe("jobActions", () => {
         Location: true,
         Resume: {
           include: {
-            File: true,
+            // Issue #78: the stored path is not sent to the client.
+            File: {
+              select: { id: true, fileName: true, fileType: true, uploadedAt: true },
+            },
           },
         },
         tags: true,
+        _count: { select: { applicationPackages: true } },
       },
     });
   });
@@ -1110,6 +1115,9 @@ describe("jobActions", () => {
     });
   });
   describe("deleteJobById", () => {
+    beforeEach(() => {
+      (prisma.applicationPackage.count as any).mockResolvedValue(0);
+    });
     it("should return error when user is not authenticated", async () => {
       (getCurrentUser as any).mockResolvedValue(null);
 

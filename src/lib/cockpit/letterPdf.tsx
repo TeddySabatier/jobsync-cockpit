@@ -19,7 +19,7 @@ const PAGE_MARGIN = 54;
 const INDENT = 14;
 
 // Noto Sans (SIL OFL, assets/fonts/noto-sans/OFL.txt), subset to Latin, Latin
-// Extended, Greek, Cyrillic and common punctuation (D-026). Loaded from disk at
+// Extended, Greek, Cyrillic and common punctuation (D-027). Loaded from disk at
 // render time (no network); next.config.mjs traces the folder into the
 // standalone output. The family is registered once per process.
 export const FONT_DIR = path.join(process.cwd(), "assets", "fonts", "noto-sans");
@@ -27,7 +27,7 @@ export const FONT_DIR = path.join(process.cwd(), "assets", "fonts", "noto-sans")
 // react-pdf caches parsed fonts and glyphs process-wide, and the text-layer map
 // of a glyph (ToUnicode) comes from the first run that used it. Sharing one
 // parsed font between letters made a later letter extract "Lukas<U+0006>" for
-// "Lukasz" (seen in tests, D-026; the page looks right, the copied text does
+// "Lukasz" (seen in tests, D-027; the page looks right, the copied text does
 // not). So every render registers its own family under a fresh name, which
 // parses the files anew (a few ms), and removes it afterwards.
 function registerFonts(): string {
@@ -70,14 +70,14 @@ const styles = StyleSheet.create({
   boldItalic: { fontWeight: 700, fontStyle: "italic" as const },
 });
 
-// Code points the bundled Noto Sans subset can draw (D-026). The same ranges
+// Code points the bundled Noto Sans subset can draw (D-027). The same ranges
 // were given to the subsetter; a test checks every one against the font file.
 // Nothing is dropped silently when it is a letter: a letter outside the font
 // (CJK, Arabic, ...) shows as "?" so the owner sees it in the preview. Symbols
 // and emoji are dropped.
 export const FONT_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x20, 0x7e], // ASCII
-  [0xa0, 0x1f7], // Latin-1, Latin Extended-A and B (U+01F8/9 left out: see D-026)
+  [0xa0, 0x1f7], // Latin-1, Latin Extended-A and B (U+01F8/9 left out: see D-027)
   [0x1fa, 0x24f],
   [0x370, 0x377], // Greek (unassigned code points left out)
   [0x37a, 0x37f],
