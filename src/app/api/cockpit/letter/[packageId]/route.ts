@@ -3,7 +3,7 @@ import prisma from "@/lib/db";
 import { notFound, pdfHeaders, requireCockpitUser } from "@/lib/cockpit/route";
 import { log } from "@/lib/telemetry";
 import { renderLetterPdf } from "@/lib/cockpit/letterPdf";
-import { letterAttachmentName } from "@/lib/cockpit/attachments";
+import { letterPdfName } from "@/lib/cockpit/letterName";
 
 // Cover-letter PDF of one of the user's packages, made from the current letter
 // text (D-015). The same function builds the attachment at Send, so this is the
@@ -36,6 +36,6 @@ export async function GET(
   return new NextResponse(new Uint8Array(pdf), {
     status: 200,
     // The name the recipient gets, so a saved copy matches the email.
-    headers: pdfHeaders(letterAttachmentName(pkg.cvFile?.fileName), pdf.length),
+    headers: pdfHeaders(letterPdfName(pkg.cvFile?.fileName), pdf.length),
   });
 }

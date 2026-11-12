@@ -1,7 +1,7 @@
 # Rejected, unclear and known findings
 
 The ids come from a retired findings ledger that is no longer in the repo; the file:line and the reason are the record.
-Format: ids — file:line — reason. Ids are not unique across lanes (many lanes reused F1, SEC-001...), so use file:line.
+Format: ids — file:line — reason. Ids are not unique across lanes (many lanes reused F1, SEC-001...), so use file:line. The line numbers are those of the code when it was reviewed and have since moved; read them as a pointer to the file, not to the line (D-029).
 
 ## Known (matches HANDOFF §7 or a DECISIONS ruling): 9
 - F1 — src/lib/cockpit/attachments.ts:65 — HANDOFF §7 + SPEC §2 notes: File has no userId column, ownership is path-based (cockpitUserDir, files.ts:8; resolveCockpitFile). No endpoint serves a File by id: the file route looks up by packageId with userId in the where (api/cockpit/files/[packageId]/route.ts:37-44)

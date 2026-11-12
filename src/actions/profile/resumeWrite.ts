@@ -24,12 +24,23 @@ class FileAccessError extends Error {
     super(ACCESS_DENIED);
   }
 }
+// Thrown when another edit of the same resume changed its file between this
+// edit reading it and writing it (the write is conditional on the file it saw).
+class ResumeChangedError extends Error {
+  constructor() {
+    super("The resume was changed by another request. Reload and try again.");
+  }
+}
 
 // The client-facing result of a failure. Only messages this module makes
 // itself go out; anything else (a Prisma error can quote the stored path) is
 // the caller's fixed message, logged with a code only.
 function failure(error: unknown, msg: string) {
-  if (error instanceof RequireUserError || error instanceof FileAccessError) {
+  if (
+    error instanceof RequireUserError ||
+    error instanceof FileAccessError ||
+    error instanceof ResumeChangedError
+  ) {
     return { success: false, message: error.message };
   }
   log.error("[Resume] Write failed", {
@@ -80,6 +91,7 @@ export const createResumeProfileWith = async (
   upload?: StoredUpload,
 ): Promise<any | undefined> => {
   let createdFileId: string | null = null;
+  let createdResumeId: string | null = null;
   try {
     const user = await requireUser();
 
@@ -112,7 +124,6 @@ export const createResumeProfileWith = async (
       : null;
 
     let res: any;
-    let createdResumeId: string;
     if (profile && profile.id) {
       res = await prisma.resume.create({
         data: {
@@ -158,14 +169,25 @@ export const createResumeProfileWith = async (
         .deleteMany({ where: { id: createdFileId, Resume: { is: null } } })
         .catch(() => undefined);
     }
-    return failure(error, "Failed to create resume.");
+    // The resume exists when only the default flag failed: say so (the upload
+    // stays, it is linked).
+    return failure(
+      error,
+      createdResumeId
+        ? "Resume created, but it could not be set as your default resume."
+        : "Failed to create resume.",
+    );
   }
 };
 
-// Edits a resume of the signed-in user. `fileId`, when given, must already be
-// this resume's own file (D-024 i). With an `upload`, the new File row and the
-// resume link are written in one transaction, and the old file (`fileId`) is
-// removed only AFTER that succeeded, so a failed edit loses nothing.
+// Edits a resume of the signed-in user. `fileId`, when given, must be this
+// resume's own current file (D-024 i). The old file is read from the resume
+// itself, inside the transaction, and the resume is updated only while it
+// still has that file (D-029): of two parallel edits one wins and the other
+// rolls back with its new File row, so no row is orphaned. With an `upload`,
+// the new File row and the link are written in that one transaction, and the
+// old file is removed only AFTER it succeeded, so a failed edit loses nothing.
+// Without an upload the resume keeps its file.
 export const editResumeWith = async (
   id: string,
   title: string,
@@ -175,40 +197,44 @@ export const editResumeWith = async (
   try {
     const user = await requireUser();
 
-    let old: { id: string; filePath: string } | null = null;
-    if (fileId) {
+    let replaced: { id: string; filePath: string } | null = null;
+    const res = await prisma.$transaction(async (tx) => {
+      const current = await tx.resume.findFirst({
+        where: { id, profile: { userId: user.id } },
+        select: { FileId: true, File: { select: { id: true, filePath: true } } },
+      });
       // The download route, the AI import, deleteFile and the backup export
       // all trust the Resume -> File link, so a caller must not be able to
-      // link its resume to another user's File by id.
-      old = await prisma.file.findFirst({
-        where: { id: fileId, Resume: { id, profile: { userId: user.id } } },
-        select: { id: true, filePath: true },
-      });
-      if (!old) throw new FileAccessError();
-    }
+      // link its resume to another user's File by id. One message for a
+      // missing id, someone else's file and someone else's resume.
+      if (fileId && (!current || current.FileId !== fileId)) {
+        throw new FileAccessError();
+      }
+      if (!current) throw new Error("Resume not found");
 
-    const res = await prisma.$transaction(async (tx) => {
-      const newFileId = upload
-        ? (
-            await tx.file.create({
-              data: {
-                fileName: upload.fileName,
-                filePath: upload.filePath,
-                fileType: "resume",
-              },
-            })
-          ).id
-        : null;
-      return tx.resume.update({
-        where: { id, profile: { userId: user.id } },
-        data: {
-          title,
-          FileId: newFileId ?? fileId ?? null,
-        },
+      let newFileId = current.FileId;
+      if (upload) {
+        newFileId = (
+          await tx.file.create({
+            data: {
+              fileName: upload.fileName,
+              filePath: upload.filePath,
+              fileType: "resume",
+            },
+          })
+        ).id;
+      }
+      const updated = await tx.resume.updateMany({
+        where: { id, profile: { userId: user.id }, FileId: current.FileId },
+        data: { title, FileId: newFileId },
       });
+      if (updated.count === 0) throw new ResumeChangedError();
+      replaced = upload ? current.File : null;
+      return tx.resume.findUniqueOrThrow({ where: { id } });
     });
 
-    if (upload && old) {
+    const old = replaced as { id: string; filePath: string } | null;
+    if (old) {
       const outcome = await removeStoredFile(user.id, old.filePath, false).catch(
         () => "kept" as const,
       );

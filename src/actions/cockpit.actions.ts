@@ -6,8 +6,10 @@ import { isGmailSendAllowed } from "@/lib/cockpit/config";
 import { mutate, reviewPaths, run } from "@/lib/cockpit/actionRunner";
 import { CockpitError } from "@/lib/cockpit/errors";
 import { toPackageView } from "@/lib/cockpit/packageView";
-import { letterAttachmentName, sanitizePdfName } from "@/lib/cockpit/attachments";
+import { letterPdfName, sanitizePdfName } from "@/lib/cockpit/letterName";
 import { resolveCockpitFile } from "@/lib/cockpit/files";
+import { pickActive } from "@/lib/cockpit/activePackage";
+import { findGmailPublic } from "@/lib/cockpit/connectedAccount";
 import {
   QUEUE_TAB_STATUSES,
   approvePackage as approvePackageSvc,
@@ -36,14 +38,6 @@ function parseTab(tab: unknown): QueueTab {
     throw new CockpitError("VALIDATION");
   }
   return tab as QueueTab;
-}
-
-// Explicit select: the refresh token and iv never leave the server (AC-43).
-function findGmailAccount(userId: string) {
-  return prisma.gmailAccount.findUnique({
-    where: { userId },
-    select: { email: true, scopes: true },
-  });
 }
 
 export async function approvePackage(id: string) {
@@ -83,7 +77,7 @@ export async function getReviewQueue(tab: QueueTab) {
     const parsedTab = parseTab(tab);
     const [rows, gmail, approvedWithEmail] = await Promise.all([
       listPackagesByTab(userId, parsedTab),
-      findGmailAccount(userId),
+      findGmailPublic(userId),
       prisma.applicationPackage.count({
         where: {
           userId,
@@ -105,7 +99,7 @@ export async function getPackageDetail(id: string) {
     const { cvFile, ...row } = await getPackageWithJob(userId, id);
     const [versions, gmail] = await Promise.all([
       listJobVersions(userId, row.jobId),
-      findGmailAccount(userId),
+      findGmailPublic(userId),
     ]);
     // Attachment name and size come from disk, through the confinement helper.
     // The stored filePath itself is not sent to the client.
@@ -123,8 +117,7 @@ export async function getPackageDetail(id: string) {
         }
       }
     }
-    // versions are newest first: the first non-superseded one is the active one.
-    const activeId = versions.find((v) => v.status !== "superseded")?.id ?? null;
+    const activeId = pickActive(versions)?.id ?? null;
     return {
       package: toPackageView(row),
       versions,
@@ -133,7 +126,7 @@ export async function getPackageDetail(id: string) {
       attachment,
       // The cover letter is attached as a PDF made from the letter text (D-015).
       letterAttachment: row.letterMd?.trim()
-        ? { fileName: letterAttachmentName(cvFile?.fileName) }
+        ? { fileName: letterPdfName(cvFile?.fileName) }
         : null,
       gmail: gmail ? { email: gmail.email, scopes: gmail.scopes } : null,
       // The connected address matches the send allow-list (Send is possible).

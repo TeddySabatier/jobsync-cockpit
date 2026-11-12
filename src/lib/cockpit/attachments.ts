@@ -7,7 +7,6 @@ import { PDF_MAGIC } from "@/lib/ai/import/extract-text";
 import { log } from "@/lib/telemetry";
 import { CockpitError } from "./errors";
 import { cockpitUserDir } from "./files";
-import { letterPdfName } from "./letterName";
 
 // attach_file storage (cockpit/SPEC.md §3). The stored path is generated here
 // (`<cockpitUserDir>/<uuid>.pdf`), never taken from input.
@@ -16,23 +15,11 @@ import { letterPdfName } from "./letterName";
 // never became part of a package (see cleanupOrphanUploads).
 export const COCKPIT_ORPHAN_DAYS_DEFAULT = 7;
 
-// Shown to the user; never used as a path.
-export function sanitizePdfName(fileName: string): string {
-  const base = fileName
-    .replace(/\.pdf$/i, "")
-    .replace(/[^A-Za-z0-9._-]/g, "_")
-    .replace(/^\.+/, "")
-    .slice(0, 100);
-  return `${base || "attachment"}.pdf`;
-}
-
-// Display name of the cover-letter PDF. Dialog, preview download and Send all
-// use this one function, so the owner sees the name the recipient gets.
-// The inner sanitize turns the CV name into plain [A-Za-z0-9._-] so the "CV"
-// token is found between underscores; the outer one guards the final name.
-export function letterAttachmentName(cvFileName: string | null | undefined): string {
-  return sanitizePdfName(letterPdfName(sanitizePdfName(cvFileName ?? "")));
-}
+// The display names live in letterName.ts (client-safe). send.ts still imports
+// them from here, and letterAttachmentName is letterPdfName under its older name
+// (D-029): one function, two import names until send.ts moves.
+import { sanitizePdfName } from "./letterName";
+export { sanitizePdfName, letterPdfName as letterAttachmentName } from "./letterName";
 
 let orphanDaysWarned = false;
 

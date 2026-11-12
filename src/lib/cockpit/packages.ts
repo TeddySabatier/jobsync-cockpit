@@ -1,6 +1,7 @@
 import { Prisma, type ApplicationPackage } from "@prisma/client";
 import prisma from "@/lib/db";
 import { log } from "@/lib/telemetry";
+import { ACTIVE_PACKAGE_ORDER, activePackageWhere } from "./activePackage";
 import { walkCvLeaves } from "./cvLeaves";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
@@ -128,8 +129,8 @@ async function submitInTransaction(
 
   // 4. The user said no to this job.
   const active = await tx.applicationPackage.findFirst({
-    where: { jobId: job.id, status: { not: "superseded" } },
-    orderBy: { version: "desc" },
+    where: activePackageWhere({ jobId: job.id }),
+    orderBy: ACTIVE_PACKAGE_ORDER,
     select: { status: true },
   });
   if (active?.status === "rejected") throw new CockpitError("JOB_REJECTED");

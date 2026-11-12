@@ -1,6 +1,7 @@
 "use server";
 
 import prisma from "@/lib/db";
+import { findGmailPublic, findGmailTokens } from "@/lib/cockpit/connectedAccount";
 import { mutate, run } from "@/lib/cockpit/actionRunner";
 import type { CockpitResult } from "@/lib/cockpit/errors";
 import { revokeToken } from "@/lib/cockpit/gmail/client";
@@ -18,10 +19,7 @@ export async function getGmailSettings(): Promise<
 > {
   return run(async (userId) => {
     // Explicit select: the token and iv never reach a page prop (AC-43).
-    const account = await prisma.gmailAccount.findUnique({
-      where: { userId },
-      select: { email: true, scopes: true },
-    });
+    const account = await findGmailPublic(userId);
     return { missingEnv: missingGmailEnv(), account };
   });
 }
@@ -32,10 +30,7 @@ export async function disconnectGmail(): Promise<
   return mutate(
     ["/dashboard/review", "/dashboard/review/settings"],
     async (userId) => {
-      const account = await prisma.gmailAccount.findUnique({
-        where: { userId },
-        select: { encryptedRefreshToken: true, iv: true },
-      });
+      const account = await findGmailTokens(userId);
       if (account) {
         try {
           await revokeToken(decrypt(account.encryptedRefreshToken, account.iv));

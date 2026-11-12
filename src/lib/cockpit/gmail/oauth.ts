@@ -1,5 +1,6 @@
 import "server-only";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { isGmailSendAllowed } from "../config";
 
 // Gmail OAuth helpers (cockpit/SPEC.md §6.2): config, PKCE, state cookie,
 // id_token checks and the fixed error enum. No network here; Google calls live
@@ -229,7 +230,7 @@ export function assertScopeAndAddress(
   if (!(grantedScope ?? "").split(/\s+/).includes(GMAIL_SEND_SCOPE)) {
     throw new OAuthError("missing_scope");
   }
-  if (email.toLowerCase() !== cfg.allowedAddress.trim().toLowerCase()) {
+  if (!isGmailSendAllowed(email, cfg.allowedAddress)) {
     throw new OAuthError("address_not_allowed");
   }
 }

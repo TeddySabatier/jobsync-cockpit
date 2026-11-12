@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { exchangeAuthCode, revokeToken } from "@/lib/cockpit/gmail/client";
+import { findGmailPublic, findGmailTokens } from "@/lib/cockpit/connectedAccount";
 import {
   COOKIE_NAME,
   OAuthError,
@@ -87,15 +88,9 @@ export async function GET(req: NextRequest) {
     // revokes the grant, so a same-email reconnect must not revoke (D-010).
     // Only a different account is a different grant: revoke its old token,
     // read with an explicit select.
-    const existing = await prisma.gmailAccount.findUnique({
-      where: { userId },
-      select: { email: true },
-    });
+    const existing = await findGmailPublic(userId);
     if (existing && existing.email.toLowerCase() !== email.toLowerCase()) {
-      const old = await prisma.gmailAccount.findUnique({
-        where: { userId },
-        select: { encryptedRefreshToken: true, iv: true },
-      });
+      const old = await findGmailTokens(userId);
       if (old) {
         await quietly(() =>
           revokeToken(decrypt(old.encryptedRefreshToken, old.iv)),
@@ -125,10 +120,7 @@ export async function GET(req: NextRequest) {
       // revoking it would kill the working connection (D-010). If the lookup
       // itself fails, do not revoke.
       await quietly(async () => {
-        const stored = await prisma.gmailAccount.findUnique({
-          where: { userId },
-          select: { id: true },
-        });
+        const stored = await findGmailPublic(userId);
         if (!stored) await revokeToken(token);
       });
     }

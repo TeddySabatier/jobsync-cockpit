@@ -268,8 +268,8 @@ describe("letterPdfName", () => {
     expect(letterPdfName("Jane_Doe_CV_Acme.pdf")).toBe("Jane_Doe_Cover_Letter_Acme.pdf");
     expect(letterPdfName("Jane-CV.pdf")).toBe("Jane-Cover_Letter.pdf");
     expect(letterPdfName("resume.pdf")).toBe("resume_Cover_Letter.pdf");
-    expect(letterPdfName(null)).toBe("Cover_Letter.pdf");
-    expect(letterPdfName("")).toBe("Cover_Letter.pdf");
+    expect(letterPdfName(null)).toBe("attachment_Cover_Letter.pdf");
+    expect(letterPdfName("")).toBe("attachment_Cover_Letter.pdf");
   });
 });
 

@@ -12,6 +12,7 @@ import { notFound } from "next/navigation";
 import { isCockpitEnabled } from "@/lib/cockpit/config";
 import { getCurrentUser } from "@/utils/user.utils";
 import { listJobVersions } from "@/lib/cockpit/packages";
+import { pickActive } from "@/lib/cockpit/activePackage";
 
 // Active package of the job (highest non-superseded version), only with the
 // cockpit flag on and a session; null otherwise.
@@ -20,7 +21,7 @@ async function getActivePackageCard(jobId: string) {
   const user = await getCurrentUser();
   if (!user) return null;
   const versions = await listJobVersions(user.id, jobId);
-  return versions.find((v) => v.status !== "superseded") ?? null;
+  return pickActive(versions);
 }
 
 async function JobDetailsPage({ params }: { params: Promise<{ id: string }> }) {
