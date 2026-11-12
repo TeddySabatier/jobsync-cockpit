@@ -123,11 +123,26 @@ export const updateJob = async (
   }
 };
 
+const JOB_HAS_PACKAGES_MESSAGE =
+  "This job has application packages and sent-email history, so it cannot be deleted. Archive it instead.";
+
+// Deleting a job must never delete the history of what was sent (issue #75,
+// D-026): a job with any application package is refused here with a message
+// pointing to Archive. The schema backs this up (ApplicationPackage.job is
+// ON DELETE RESTRICT), so a race or a code path that skips this check fails
+// loudly instead of cascading.
 export const deleteJobById = async (
   jobId: string,
 ): Promise<any | undefined> => {
   try {
     const user = await requireUser();
+
+    const packages = await prisma.applicationPackage.count({
+      where: { jobId, job: { userId: user.id } },
+    });
+    if (packages > 0) {
+      return { success: false, message: JOB_HAS_PACKAGES_MESSAGE };
+    }
 
     const res = await prisma.job.delete({
       where: {
@@ -138,7 +153,44 @@ export const deleteJobById = async (
     revalidatePath("/dashboard");
     return { res, success: true };
   } catch (error) {
+    // A package created between the check and the delete trips the RESTRICT.
+    if ((error as { code?: string } | null)?.code === "P2003") {
+      return { success: false, message: JOB_HAS_PACKAGES_MESSAGE };
+    }
     const msg = "Failed to delete job.";
+    return handleError(error, msg);
+  }
+};
+
+// Archive = status "archived". Reversible (change the status back) and keeps
+// the job's packages, Review history and sent emails untouched.
+export const archiveJobById = async (
+  jobId: string,
+): Promise<any | undefined> => {
+  try {
+    const user = await requireUser();
+
+    const owned = await prisma.job.findFirst({
+      where: { id: jobId, userId: user.id },
+      select: { id: true },
+    });
+    if (!owned) {
+      return { success: false, message: "Job not found." };
+    }
+
+    const status = await prisma.jobStatus.upsert({
+      where: { value: "archived" },
+      update: {},
+      create: { label: "Archived", value: "archived" },
+    });
+    const job = await prisma.job.update({
+      where: { id: jobId },
+      data: { statusId: status.id },
+    });
+    revalidatePath("/dashboard");
+    return { job, success: true };
+  } catch (error) {
+    const msg = "Failed to archive job.";
     return handleError(error, msg);
   }
 };

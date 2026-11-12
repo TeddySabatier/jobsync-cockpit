@@ -164,7 +164,7 @@ export function JobsToolbar({
             <SelectGroup>
               <SelectLabel>Filter by</SelectLabel>
               <SelectSeparator />
-              <SelectItem value="none">All (Except Dismissed)</SelectItem>
+              <SelectItem value="none">All (Except Dismissed, Archived)</SelectItem>
               <SelectItem value="applied">Applied</SelectItem>
               <SelectItem value="interview">Interview</SelectItem>
               <SelectItem value="draft">Draft</SelectItem>
@@ -172,6 +172,7 @@ export function JobsToolbar({
               <SelectItem value="PT">Part-time</SelectItem>
               <SelectItem value="accepted">Accepted (discovered)</SelectItem>
               <SelectItem value="dismissed">Dismissed (discovered)</SelectItem>
+              <SelectItem value="archived">Archived</SelectItem>
             </SelectGroup>
           </SelectContent>
         </Select>

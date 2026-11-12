@@ -25,6 +25,7 @@ import {
 } from "../ui/card";
 import { Button } from "../ui/button";
 import {
+  Archive,
   ArrowLeft,
   FileText,
   MoreVertical,
@@ -69,7 +70,7 @@ import {
 } from "../ui/dropdown-menu";
 import { DeleteAlertDialog } from "../DeleteAlertDialog";
 import { AddJob } from "./AddJob";
-import { deleteJobById, updateJobStatus } from "@/actions/job.actions";
+import { archiveJobById, deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { ClaudePromptButton } from "@/components/cockpit/ClaudePromptButton";
 import { statusLabel } from "@/components/cockpit/statusLabels";
@@ -174,6 +175,19 @@ function JobDetails({
     if (success) {
       setCurrentStatus(status);
       toastSuccess(`Job has been updated successfully`);
+    } else {
+      toastError(message);
+    }
+  };
+
+  const hasPackages = (job._count?.applicationPackages ?? 0) > 0;
+  const isArchived = currentStatus?.value === "archived";
+
+  const onArchiveJob = async () => {
+    const { success, message } = await archiveJobById(job.id);
+    if (success) {
+      toastSuccess("Job has been archived");
+      router.push("/dashboard/myjobs");
     } else {
       toastError(message);
     }
@@ -292,6 +306,17 @@ function JobDetails({
                   </DropdownMenuPortal>
                 </DropdownMenuSub>
                 <DropdownMenuSeparator />
+                {!isArchived && (
+                  <DropdownMenuItem
+                    className="cursor-pointer"
+                    onClick={onArchiveJob}
+                    data-testid="job-details-archive-menu-item"
+                  >
+                    <Archive className="mr-2 h-4 w-4" />
+                    Archive
+                  </DropdownMenuItem>
+                )}
+                {!hasPackages && (
                 <DropdownMenuItem
                   className="text-red-600 cursor-pointer"
                   onClick={() => setDeleteAlertOpen(true)}
@@ -299,6 +324,7 @@ function JobDetails({
                   <Trash className="mr-2 h-4 w-4" />
                   Delete
                 </DropdownMenuItem>
+                )}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -329,6 +355,19 @@ function JobDetails({
                   <Pencil className="h-4 w-4 sm:mr-1" />
                   <span className="hidden sm:inline">Edit</span>
                 </Button>
+                {!isArchived && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2"
+                    onClick={onArchiveJob}
+                    data-testid="job-details-archive-btn"
+                  >
+                    <Archive className="h-4 w-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Archive</span>
+                  </Button>
+                )}
+                {!hasPackages && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -339,6 +378,7 @@ function JobDetails({
                   <Trash2 className="h-4 w-4 sm:mr-1" />
                   <span className="hidden sm:inline">Delete</span>
                 </Button>
+                )}
               </div>
               {job.matchScore != null && (
                 <div className="flex flex-col items-center gap-1">

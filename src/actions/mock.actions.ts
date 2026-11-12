@@ -624,7 +624,7 @@ export const clearMockJobsAction = async (): Promise<any> => {
     );
 
     const deleteResult = await prisma.job.deleteMany({
-      where: { id: { in: jobIds } },
+      where: { id: { in: jobIds }, applicationPackages: { none: {} } },
     });
 
     return {

@@ -8,6 +8,7 @@ type MyJobsGridProps = {
   jobs: JobResponse[];
   jobStatuses: JobStatus[];
   deleteJob: (id: string) => void;
+  archiveJob?: (id: string) => void;
   editJob: (id: string) => void;
   onChangeJobStatus: (id: string, status: JobStatus) => void;
   onAddNote: (jobId: string) => void;
@@ -17,6 +18,7 @@ function MyJobsGrid({
   jobs,
   jobStatuses,
   deleteJob,
+  archiveJob,
   editJob,
   onChangeJobStatus,
   onAddNote,
@@ -41,6 +43,7 @@ function MyJobsGrid({
             onChangeJobStatus={onChangeJobStatus}
             onAddNote={onAddNote}
             onDeleteJob={onDeleteJob}
+            onArchiveJob={archiveJob}
           />
         ))}
       </div>

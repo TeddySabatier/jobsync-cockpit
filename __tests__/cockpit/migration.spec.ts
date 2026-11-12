@@ -183,15 +183,18 @@ describe("migration 20261104120000_cockpit_v0", () => {
     expect(after.cvFileId).toBeNull();
   });
 
-  it("cascades Job delete to its packages and their SentEmail", async () => {
+  it("restricts Job delete while it has packages (D-026: history is kept)", async () => {
     expect(
       await prisma.applicationPackage.count({ where: { jobId } }),
     ).toBeGreaterThan(0);
     expect(await prisma.sentEmail.count()).toBe(1);
-    await prisma.job.delete({ where: { id: jobId } });
-    expect(await prisma.applicationPackage.count({ where: { jobId } })).toBe(0);
-    expect(await prisma.sentEmail.count()).toBe(0);
-    // the user and the Gmail connection are not affected by a job delete
+    await expect(prisma.job.delete({ where: { id: jobId } })).rejects.toMatchObject(
+      { code: "P2003" },
+    );
+    expect(
+      await prisma.applicationPackage.count({ where: { jobId } }),
+    ).toBeGreaterThan(0);
+    expect(await prisma.sentEmail.count()).toBe(1);
     expect(await prisma.gmailAccount.count({ where: { userId } })).toBe(1);
   });
 

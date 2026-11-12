@@ -21,7 +21,7 @@ const JOB_LIST_SELECT = {
   CoverLetter: true,
   matchScore: true,
   discoveryStatus: true,
-  _count: { select: { Notes: true } },
+  _count: { select: { Notes: true, applicationPackages: true } },
 };
 
 const JOB_EXPORT_SELECT = {
@@ -52,6 +52,7 @@ const JOB_DETAILS_INCLUDE = {
   },
   CoverLetter: true,
   tags: true,
+  _count: { select: { applicationPackages: true } },
 };
 
 type JobsListFilters = {
@@ -95,6 +96,12 @@ const buildJobsWhereClause = (userId: string, filters: JobsListFilters) => {
     userId,
     ...filterBy,
   };
+
+  // Archived jobs (issue #75) are out of the way unless a status filter
+  // (including the explicit Archived one) picks the status.
+  if (!("Status" in filterBy)) {
+    whereClause.Status = { value: { not: "archived" } };
+  }
 
   // Dismissed discovered jobs are kept only for dedup and shouldn't
   // clutter the tracked jobs list unless explicitly filtered for.

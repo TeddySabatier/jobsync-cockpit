@@ -57,7 +57,7 @@ export interface JobResponse {
   createdVia?: string | null;
   discoveryStatus?: string | null;
   descriptionCompleteness?: DescriptionCompleteness | null;
-  _count?: { Notes?: number };
+  _count?: { Notes?: number; applicationPackages?: number };
 }
 
 export type JobsViewMode = "table" | "cards";

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Card, CardContent, CardFooter } from "../ui/card";
 import { Loader } from "lucide-react";
 import {
+  archiveJobById,
   deleteJobById,
   getJobDetails,
   updateJobStatus,
@@ -97,6 +98,16 @@ function JobsContainer({
     reloadJobs();
   };
 
+  const onArchiveJob = async (jobId: string) => {
+    const { success, message } = await archiveJobById(jobId);
+    if (success) {
+      toastSuccess("Job has been archived");
+    } else {
+      toastError(message);
+    }
+    reloadJobs();
+  };
+
   const onEditJob = async (jobId: string) => {
     const { job, success, message } = await getJobDetails(jobId);
     if (!success) {
@@ -167,6 +178,7 @@ function JobsContainer({
                 jobs={jobs}
                 jobStatuses={statuses}
                 deleteJob={onDeleteJob}
+                archiveJob={onArchiveJob}
                 editJob={onEditJob}
                 onChangeJobStatus={onChangeJobStatus}
                 onAddNote={onAddNote}
@@ -176,6 +188,7 @@ function JobsContainer({
                 jobs={jobs}
                 jobStatuses={statuses}
                 deleteJob={onDeleteJob}
+                archiveJob={onArchiveJob}
                 editJob={onEditJob}
                 onChangeJobStatus={onChangeJobStatus}
                 onAddNote={onAddNote}
