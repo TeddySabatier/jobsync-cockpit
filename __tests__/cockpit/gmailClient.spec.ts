@@ -9,12 +9,10 @@ import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import prisma from "@/lib/db";
 import { CockpitError } from "@/lib/cockpit/errors";
-import { encrypt } from "@/lib/encryption";
 import {
   createHttpGmailClient,
   exchangeAuthCode,
   getAccessToken,
-  getAccessTokenFromStored,
   revokeToken,
   sendRaw,
 } from "@/lib/cockpit/gmail/client";
@@ -101,6 +99,9 @@ describe("typed Google errors", () => {
     [400, true],
     [401, true],
     [403, true],
+    // Other 4xx are not documented as "not sent": ambiguous, lock kept.
+    [404, false],
+    [413, false],
     [429, false],
     [500, false],
     [503, false],
@@ -140,31 +141,6 @@ describe("typed Google errors", () => {
       idToken: "i",
       scope: "s",
     });
-  });
-});
-
-describe("stored token decrypt failure", () => {
-  it("a changed or missing ENCRYPTION_KEY → GMAIL_RECONNECT_REQUIRED, no Google call", async () => {
-    const stored = encrypt("refresh-1");
-    vi.stubEnv("ENCRYPTION_KEY", "a-different-key-placeholder");
-    expect(await caught(getAccessTokenFromStored(stored.encrypted, stored.iv))).toMatchObject({
-      code: "GMAIL_RECONNECT_REQUIRED",
-      definitive: true,
-    });
-    vi.stubEnv("ENCRYPTION_KEY", "");
-    expect(await caught(getAccessTokenFromStored(stored.encrypted, stored.iv))).toMatchObject({
-      code: "GMAIL_RECONNECT_REQUIRED",
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("decrypts and refreshes with the right key", async () => {
-    const stored = encrypt("refresh-1");
-    fetchMock.mockResolvedValueOnce(json(200, { access_token: "acc" }));
-    expect(await getAccessTokenFromStored(stored.encrypted, stored.iv)).toBe("acc");
-    expect(new URLSearchParams(fetchMock.mock.calls[0][1].body as string).get("refresh_token")).toBe(
-      "refresh-1",
-    );
   });
 });
 

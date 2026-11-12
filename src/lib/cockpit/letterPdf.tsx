@@ -188,6 +188,11 @@ export async function renderLetterPdf(input: {
   letterMd: string;
   cvJson?: string | null;
 }): Promise<Buffer> {
+  // Set on every render on purpose: react-pdf keeps ONE process-wide
+  // hyphenation callback (global state). Setting it here is a cheap assignment
+  // and keeps the letter independent of whatever else registers a callback in
+  // the same process (tests, or future server code). Today the app's other
+  // registrations run only in the browser (D-022 g).
   Font.registerHyphenationCallback(breakLongWords);
   const head = letterhead(input.cvJson);
   const doc = (
