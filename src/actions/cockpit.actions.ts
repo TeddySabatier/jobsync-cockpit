@@ -137,6 +137,7 @@ export async function getPackageDetail(id: string) {
         : null,
       gmail: gmail ? { email: gmail.email, scopes: gmail.scopes } : null,
       // The connected address matches the send allow-list (Send is possible).
+      // Not read by any component yet: the edit/send UI change consumes it.
       gmailSendAllowed: isGmailSendAllowed(gmail?.email),
     };
   });

@@ -13,7 +13,7 @@ vi.mock("@/lib/telemetry", () => ({
 import { revalidatePath } from "next/cache";
 import prisma from "@/lib/db";
 import { getCurrentUser } from "@/utils/user.utils";
-import { AuthError } from "@/lib/authError";
+import { RequireUserError } from "@/lib/authError";
 import { requireUser } from "@/actions/shared";
 import { isGmailSendAllowed } from "@/lib/cockpit/config";
 import { mutate, reviewPaths, run } from "@/lib/cockpit/actionRunner";
@@ -93,13 +93,13 @@ describe("actionRunner", () => {
   });
 });
 
-describe("AuthError", () => {
-  it("requireUser throws a typed AuthError that keeps the legacy message", async () => {
+describe("RequireUserError", () => {
+  it("requireUser throws a typed RequireUserError that keeps the legacy message", async () => {
     m(getCurrentUser).mockResolvedValue(null);
     const e = await requireUser().catch((x) => x);
-    expect(e).toBeInstanceOf(AuthError);
+    expect(e).toBeInstanceOf(RequireUserError);
     expect(e).toBeInstanceOf(Error);
-    expect(e.name).toBe("AuthError");
+    expect(e.name).toBe("RequireUserError");
     expect(e.message).toBe("Not authenticated");
   });
 });

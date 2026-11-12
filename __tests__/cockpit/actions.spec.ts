@@ -114,7 +114,7 @@ describe.each(mutations)("%s", (_name, call, service, args) => {
     expect(revalidatePath).not.toHaveBeenCalled();
   });
 
-  it.each(["INVALID_STATE", "CONFLICT", "NOT_FOUND"] as const)(
+  it.each(["INVALID_STATE", "CONFLICT", "INTERNAL"] as const)(
     "maps a service CockpitError (%s) to its code and still revalidates (the page was stale)",
     async (code) => {
       service.mockRejectedValue(new CockpitError(code));
@@ -124,6 +124,19 @@ describe.each(mutations)("%s", (_name, call, service, args) => {
       expect(revalidatePath).toHaveBeenCalledWith("/dashboard/review/p1");
     },
   );
+
+  it("NOT_FOUND refreshes only the list, never the path built from the client id", async () => {
+    service.mockRejectedValue(new CockpitError("NOT_FOUND"));
+    expect(await call()).toMatchObject({ success: false, code: "NOT_FOUND" });
+    expect(revalidatePath).toHaveBeenCalledTimes(1);
+    expect(revalidatePath).toHaveBeenCalledWith("/dashboard/review");
+  });
+
+  it("VALIDATION revalidates nothing (an input error changes no state)", async () => {
+    service.mockRejectedValue(new CockpitError("VALIDATION"));
+    expect(await call()).toMatchObject({ success: false, code: "VALIDATION" });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
 
   it("returns UNAUTHENTICATED and skips the service when the user is null", async () => {
     m(getCurrentUser).mockResolvedValue(null);

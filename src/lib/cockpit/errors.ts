@@ -1,4 +1,4 @@
-import { AuthError } from "@/lib/authError";
+import { RequireUserError } from "@/lib/authError";
 import { log } from "@/lib/telemetry";
 
 // Cockpit result shape and fixed error messages (cockpit/SPEC.md §1 P6).
@@ -60,9 +60,11 @@ export function toActionResult(err: unknown): CockpitResult<never> {
   if (err instanceof CockpitError) {
     code = err.code;
   } else if (
-    err instanceof AuthError ||
+    err instanceof RequireUserError ||
     // instanceof can fail across duplicated modules (dev HMR, RSC/SSR layers).
-    (err instanceof Error && err.name === "AuthError")
+    (err instanceof Error &&
+      err.name === "RequireUserError" &&
+      err.message === "Not authenticated")
   ) {
     code = "UNAUTHENTICATED";
   } else {

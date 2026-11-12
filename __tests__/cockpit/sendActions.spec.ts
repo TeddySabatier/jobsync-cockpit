@@ -49,7 +49,17 @@ describe.each(calls)("%s", (_n, call, service) => {
     );
   });
 
-  it.each(["CONFLICT", "INVALID_STATE", "SEND_OUTCOME_UNKNOWN"] as const)(
+  it("NOT_FOUND refreshes only the list; VALIDATION nothing", async () => {
+    service.mockRejectedValue(new CockpitError("NOT_FOUND"));
+    await call();
+    expect(revalidated()).toEqual(["/dashboard/review"]);
+    m(revalidatePath).mockClear();
+    service.mockRejectedValue(new CockpitError("VALIDATION"));
+    await call();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it.each(["CONFLICT", "INVALID_STATE", "SEND_OUTCOME_UNKNOWN", "GMAIL_SEND"] as const)(
     "revalidates after a %s failure",
     async (code) => {
       service.mockRejectedValue(new CockpitError(code));

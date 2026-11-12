@@ -21,19 +21,31 @@ export async function run<T>(
   }
 }
 
-// Runs a mutation, then revalidates `paths` after every outcome except an
-// auth/flag failure: a failed mutation (INVALID_STATE, CONFLICT, a send that
-// left a lock) means the page showed stale state and must be refreshed.
+// Runs a mutation, then revalidates `paths` (the first one is the list page).
+// Success and a state failure (INVALID_STATE, CONFLICT, a send that left a
+// lock, GMAIL_*, INTERNAL) revalidate all of them: the page showed stale state.
+// Not revalidated: UNAUTHENTICATED / COCKPIT_DISABLED (nothing happened),
+// VALIDATION (an input error changes no state, a refresh would only flicker).
+// NOT_FOUND only refreshes the list, never a path built from a client id.
 export async function mutate<T>(
   paths: string[],
   fn: (userId: string) => Promise<T>,
 ): Promise<CockpitResult<T>> {
   const result = await run(fn);
-  if (
-    result.success ||
-    (result.code !== "UNAUTHENTICATED" && result.code !== "COCKPIT_DISABLED")
-  ) {
+  if (result.success) {
     for (const p of paths) revalidatePath(p);
+    return result;
+  }
+  switch (result.code) {
+    case "UNAUTHENTICATED":
+    case "COCKPIT_DISABLED":
+    case "VALIDATION":
+      break;
+    case "NOT_FOUND":
+      if (paths[0]) revalidatePath(paths[0]);
+      break;
+    default:
+      for (const p of paths) revalidatePath(p);
   }
   return result;
 }

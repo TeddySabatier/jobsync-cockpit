@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { log } from "@/lib/telemetry";
-import { AuthError } from "@/lib/authError";
+import { RequireUserError } from "@/lib/authError";
 import {
   CockpitError,
   COCKPIT_ERROR_MESSAGES,
@@ -71,18 +71,26 @@ describe("cockpit errors", () => {
     expect(log.error).not.toHaveBeenCalled();
   });
 
-  it("maps the AuthError of requireUser to UNAUTHENTICATED", () => {
-    expect(toActionResult(new AuthError())).toEqual({
+  it("maps the RequireUserError of requireUser to UNAUTHENTICATED", () => {
+    expect(toActionResult(new RequireUserError())).toEqual({
       success: false,
       code: "UNAUTHENTICATED",
       message: COCKPIT_ERROR_MESSAGES.UNAUTHENTICATED,
     });
   });
 
-  it("recognises an AuthError from a duplicated module by its name", () => {
+  it("recognises an RequireUserError from a duplicated module by its name", () => {
     const foreign = new Error("anything");
-    foreign.name = "AuthError";
+    foreign.name = "RequireUserError";
+    expect(toActionResult(foreign)).toMatchObject({ code: "INTERNAL" });
+    foreign.message = "Not authenticated";
     expect(toActionResult(foreign)).toMatchObject({ code: "UNAUTHENTICATED" });
+  });
+
+  it("does not take next-auth's AuthError (same old name) for an anonymous caller", () => {
+    const nextAuth = new Error("Not authenticated");
+    nextAuth.name = "AuthError";
+    expect(toActionResult(nextAuth)).toMatchObject({ code: "INTERNAL" });
   });
 
   it("does not recognise the anonymous caller by message text", () => {

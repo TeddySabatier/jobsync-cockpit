@@ -45,3 +45,13 @@ describe("cockpit*.actions.ts exports (AC-44)", () => {
     }
   });
 });
+
+describe("cockpit helper modules are not server-action files", () => {
+  it.each(["src/lib/cockpit/actionRunner.ts", "src/lib/cockpit/packageView.ts", "src/lib/authError.ts"])(
+    "%s does not start with use server",
+    (rel) => {
+      const src = fs.readFileSync(path.join(process.cwd(), rel), "utf8");
+      expect(src.trimStart()).not.toMatch(/^["']use server["']/);
+    },
+  );
+});
