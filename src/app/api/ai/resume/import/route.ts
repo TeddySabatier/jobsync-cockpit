@@ -3,8 +3,8 @@ import "server-only";
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { streamText, Output } from "ai";
-import path from "path";
 import fs from "fs";
+import { resolveInsideDir, resumesDir } from "@/lib/uploadedFile";
 import { getModel } from "@/lib/ai/providers";
 import { checkRateLimit } from "@/lib/ai/rate-limiter";
 import { TEMPERATURES } from "@/lib/ai/config";
@@ -77,17 +77,11 @@ export const POST = async (req: NextRequest) => {
     );
   }
 
-  // Assert path stays inside the uploads dir (no traversal)
-  const resolvedPath = path.resolve(resume.File.filePath);
-  const uploadsDir = path.resolve(APP_CONSTANTS.UPLOADS_DIR);
-  if (
-    !resolvedPath.startsWith(uploadsDir + path.sep) &&
-    resolvedPath !== uploadsDir
-  ) {
-    return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
-  }
-
-  if (!fs.existsSync(resolvedPath)) {
+  // The stored path must be a regular file inside the resumes dir after
+  // realpath (symlinks and ".." resolved; issue #78, D-024). A path outside
+  // and a missing file get the same answer.
+  const resolvedPath = await resolveInsideDir(resumesDir(), resume.File.filePath);
+  if (!resolvedPath) {
     return NextResponse.json(
       { error: "File not found on disk. Please re-attach the file." },
       { status: 400 },
