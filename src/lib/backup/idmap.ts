@@ -32,18 +32,20 @@ export class IdMap {
   // The model each old id was minted for. ids are only unique per table, and
   // the map is global, so a foreign key must resolve through the model it
   // targets: a replyToPackageId that holds a Job id must not be remapped to
-  // that job (finding 4 of the follow-ups review).
-  private models = new Map<string, string>();
+  // that job (finding 4 of the follow-ups review). A set, because an old file
+  // may legally hold the same id in two tables: both rows then share one new
+  // id (the map is per old id) and keys to either model must keep resolving.
+  private models = new Map<string, Set<string>>();
 
   set(oldId: string, newId: string): void {
     this.map.set(oldId, newId);
   }
 
-  // With a model, an id minted for another model is "unknown".
+  // With a model, an id minted only for other models is "unknown".
   get(oldId: string, model?: string): string | undefined {
     if (model !== undefined) {
-      const owner = this.models.get(oldId);
-      if (owner !== undefined && owner !== model) return undefined;
+      const owners = this.models.get(oldId);
+      if (owners !== undefined && !owners.has(model)) return undefined;
     }
     return this.map.get(oldId);
   }
@@ -53,7 +55,11 @@ export class IdMap {
   mint(oldId: string, model?: string): string {
     const newId = randomUUID();
     this.map.set(oldId, newId);
-    if (model !== undefined) this.models.set(oldId, model);
+    if (model !== undefined) {
+      const owners = this.models.get(oldId) ?? new Set<string>();
+      owners.add(model);
+      this.models.set(oldId, owners);
+    }
     return newId;
   }
 }

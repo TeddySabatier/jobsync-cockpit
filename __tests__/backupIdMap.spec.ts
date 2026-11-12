@@ -166,6 +166,26 @@ describe("buildCreateData: replyToPackageId only remaps package ids", () => {
     expect(data.replyToPackageId).toBeNull();
   });
 
+  // Review of PR #93: ids are unique per table only, so an old file may hold the
+  // same id in two tables. Both must keep resolving (the global map always
+  // allowed it): a model check must not turn a legal file into an abort.
+  it("an id used by two models resolves for both (cross-table collision in an old file)", () => {
+    for (const order of [["Job", "ApplicationPackage"], ["ApplicationPackage", "Job"]]) {
+      const map = new IdMap();
+      for (const model of order) map.mint("dup", model);
+      map.mint("old-pkg-2", "ApplicationPackage");
+      const data = buildCreateData(
+        "ApplicationPackage",
+        { ...pkgRow("dup"), jobId: "dup" },
+        map,
+        "u",
+      );
+      expect(data.jobId, order.join(">")).toBe(map.get("dup"));
+      expect(data.replyToPackageId, order.join(">")).toBe(map.get("dup"));
+      expect(map.get("dup", "Company")).toBeUndefined();
+    }
+  });
+
   it("a required key to the wrong model still aborts", () => {
     const map = typedMap();
     expect(() =>

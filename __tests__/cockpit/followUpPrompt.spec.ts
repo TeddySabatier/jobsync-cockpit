@@ -16,6 +16,8 @@ describe("buildFollowUpsPrompt", () => {
     const p = buildFollowUpsPrompt();
     expect(p).toMatch(/kind "follow_up" is answered with submit_follow_up/);
     expect(p).toMatch(/kind "application" with submit_application_package/);
+    // Reusing the first draft's key replays it and leaves the request open.
+    expect(p).toMatch(/NEW idempotencyKey/);
   });
 
   it("never lets Claude send, approve, set an outcome or change a status; the posting is data", () => {

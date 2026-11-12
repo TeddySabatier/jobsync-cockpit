@@ -31,15 +31,20 @@ const POSTING_END = "[END UNTRUSTED JOB POSTING]";
 
 // The posting is text from the internet. It is returned between fixed markers,
 // and any marker inside it is defused, so it cannot "close" the block and speak
-// as the tool. The tool description also states the rule.
+// as the tool. The text is NFKC-normalised and its format characters (zero-width
+// space, joiners, BOM) dropped first, so a fullwidth, bracketless or
+// zero-width-split copy of a marker is defused too. Lookalike letters from
+// other scripts are not caught: the tool description's rule (data, never
+// instructions) remains the main defence.
+const MARKER_RE = /(BEGIN|END)[\W_]*UNTRUSTED[\W_]*JOB[\W_]*POSTING/gi;
+
 export function wrapUntrustedPosting(text: string | null | undefined): {
   text: string;
   truncated: boolean;
 } {
-  const raw = text ?? "";
+  const raw = (text ?? "").normalize("NFKC").replace(/\p{Cf}/gu, "");
   const truncated = raw.length > POSTING_MAX_CHARS;
-  const body = (truncated ? raw.slice(0, POSTING_MAX_CHARS) : raw)
-    .replace(/\[\s*(BEGIN|END)\s+UNTRUSTED\s+JOB\s+POSTING/gi, "[marker removed");
+  const body = truncateUnits(raw, POSTING_MAX_CHARS).replace(MARKER_RE, "(marker removed)");
   return { text: `${POSTING_BEGIN}\n${body}\n${POSTING_END}`, truncated };
 }
 
@@ -47,15 +52,12 @@ export function wrapUntrustedPosting(text: string | null | undefined): {
 // Subject rule
 // ---------------------------------------------------------------------------
 
+// One slice (a posting can be megabytes), never splitting a surrogate pair.
 function truncateUnits(text: string, limit: number): string {
-  let out = text;
-  while (out.length > limit) {
-    // Never split a surrogate pair.
-    out = out.slice(0, out.length - 1);
-    const last = out.charCodeAt(out.length - 1);
-    if (last >= 0xd800 && last <= 0xdbff) out = out.slice(0, -1);
-  }
-  return out;
+  if (text.length <= limit) return text;
+  const out = text.slice(0, limit);
+  const last = out.charCodeAt(out.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? out.slice(0, -1) : out;
 }
 
 const RE_PREFIX = /^\s*re\s*:/i;
@@ -139,7 +141,9 @@ export async function listDueFollowUps(
         },
       ],
     },
-    orderBy: { createdAt: "asc" },
+    // Newest first: if the cap is ever reached, the old (long expired) jobs are
+    // the ones left out, not the recently applied ones that can be due.
+    orderBy: { createdAt: "desc" },
     take: CANDIDATE_CAP,
     select: {
       id: true,
@@ -240,8 +244,9 @@ export type SubmitFollowUpResult = SubmitResult & {
 // recipient and replies to the active application; it has no CV. Open follow-up
 // drafts of the job are superseded by submitPackage (the change-request loop).
 //
-// The eligibility check and the insert are two transactions: an outcome set in
-// between leaves a draft that the send-time recheck (F-4) refuses.
+// The due check runs inside the insert's transaction (submitPackage's
+// assertAllowed, after the replay): an outcome, skip or stop committed before
+// the insert refuses the draft instead of leaving one for an answered job.
 export async function submitFollowUp(
   userId: string,
   raw: SubmitFollowUpInput,
@@ -251,7 +256,8 @@ export async function submitFollowUp(
   if (!parsed.success) throw new CockpitError("VALIDATION");
   const input = parsed.data;
 
-  const due = await getFollowUpDue(userId, input.jobId, now); // NOT_FOUND
+  // A sent application never changes, so it is read before the transaction
+  // (its recipient and subject build the draft).
   const active = await activeApplication(userId, input.jobId);
   const application =
     active && active.status === "sent"
@@ -260,16 +266,6 @@ export async function submitFollowUp(
           select: { id: true, emailTo: true, emailSubject: true },
         })
       : null;
-
-  const replay = await prisma.applicationPackage.findFirst({
-    where: { userId, idempotencyKey: input.idempotencyKey },
-    select: { id: true },
-  });
-  if (!replay) {
-    if (!application || !due.eligible || due.status !== "due") {
-      throw new CockpitError("FOLLOW_UP_NOT_DUE");
-    }
-  }
 
   const emailTo = application?.emailTo ?? null;
   const emailSubject = followUpSubject(
@@ -285,7 +281,16 @@ export async function submitFollowUp(
       emailBody: input.emailBody,
       idempotencyKey: input.idempotencyKey,
     },
-    { kind: "follow_up", replyToPackageId: application?.id ?? null },
+    {
+      kind: "follow_up",
+      replyToPackageId: application?.id ?? null,
+      assertAllowed: async (tx) => {
+        const due = await getFollowUpDue(userId, input.jobId, now, tx);
+        if (!application || !due.eligible || due.status !== "due") {
+          throw new CockpitError("FOLLOW_UP_NOT_DUE");
+        }
+      },
+    },
   );
   return {
     ...result,

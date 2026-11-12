@@ -828,6 +828,14 @@ def cmd_followup(args, url, token):
     job_id = args.job or ""
     if not revision and not job_id:
         raise CockpitError("VALIDATION", "Pass --job ID, or --revision PACKAGE_ID to answer a change request.")
+    # Size first: a wrong path (a log, a binary) must not be read whole. One UTF-16 unit is at
+    # most 3 UTF-8 bytes; the slack covers a BOM and surrounding whitespace.
+    try:
+        too_big = Path(args.body_file).stat().st_size > MAX_TEXT * 3 + 4096
+    except OSError:
+        too_big = False  # read_text reports the missing file
+    if too_big:
+        raise CockpitError("VALIDATION", "The follow-up body is longer than %d characters." % MAX_TEXT)
     body = read_text(args.body_file, "follow-up body").strip()
     subject = args.subject
     if revision:

@@ -1214,6 +1214,13 @@ class FollowUpTests(FolderMixin, unittest.TestCase):
         self.assertEqual((missing[0], missing[1]["error"]), (1, "FILE_NOT_FOUND"))
         self.assertEqual(self.stub.calls, [])
 
+    def test_a_huge_body_file_is_refused_by_size_before_it_is_read(self):
+        huge = self.body_file("x" * (cs.MAX_TEXT * 3 + 5000))
+        with mock.patch.object(cs, "read_text", side_effect=AssertionError("read")):
+            code, result, _ = self.follow("--job", self.job, body=huge)
+        self.assertEqual((code, result["error"]), (1, "VALIDATION"))
+        self.assertEqual(self.stub.calls, [])
+
     def test_the_stub_rejects_what_the_real_follow_up_schema_rejects(self):
         base = {"jobId": self.job, "emailBody": "Hello", "idempotencyKey": "k1"}
         self.assertNotIn("isError", self.stub.tool("submit_follow_up", dict(base)))

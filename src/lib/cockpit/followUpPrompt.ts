@@ -29,7 +29,8 @@ export function buildFollowUpsPrompt(input: FollowUpsPromptInput = {}): string {
       "Use a stable idempotencyKey per draft. Keep the default subject (\"Re: <original subject>\") so the email threads.\n",
   );
   out.push(
-    "3. Then check list_change_requests: an item with kind \"follow_up\" is answered with submit_follow_up, " +
+    "3. Then check list_change_requests: an item with kind \"follow_up\" is answered with submit_follow_up " +
+      "(with a NEW idempotencyKey: the old key only returns the old draft, idempotent: true), " +
       "an item with kind \"application\" with submit_application_package, never the other way round.\n",
   );
   out.push("4. Tell me how many drafts you created and what to check in Review (the Follow-ups tab).\n\n");

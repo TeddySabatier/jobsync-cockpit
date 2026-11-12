@@ -396,6 +396,19 @@ describe("snooze, skip, stop", () => {
     expect(await getFollowUpDue(userA, jobId, DAY9)).toMatchObject({ eligible: true, step: 2, status: "scheduled" });
   });
 
+  // Review of PR #93: two skips at the same time (two tabs) still skip one step:
+  // the write sets the step number, it does not increment it.
+  it("two concurrent skips skip one step only", async () => {
+    const { jobId } = await appliedJob();
+    const results = await Promise.allSettled([
+      skipFollowUpStep(userA, jobId, DAY9),
+      skipFollowUpStep(userA, jobId, DAY9),
+    ]);
+    expect(results.some((r) => r.status === "fulfilled")).toBe(true);
+    expect((await getFollowUpState(userA, jobId))?.skippedThrough).toBe(1);
+    expect(await getFollowUpDue(userA, jobId, DAY9)).toMatchObject({ step: 2, status: "scheduled" });
+  });
+
   it("skip supersedes open drafts (changes_requested gets handled) but not a locked one", async () => {
     const { jobId } = await appliedJob();
     const pending = await mk(jobId, "follow_up", 1, "pending");
