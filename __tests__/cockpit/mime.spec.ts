@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { buildMimeMessage, encodeRaw } from "@/lib/cockpit/gmail/mime";
+import { buildMimeMessage, encodeRaw, isValidMessageId, newMessageId } from "@/lib/cockpit/gmail/mime";
 
 // AC-24. Synthetic data only.
 const pdf = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(100, 7)]);
@@ -104,5 +104,49 @@ describe("buildMimeMessage (AC-24)", () => {
     ["attachment name quote", { attachment: { fileName: 'cv".pdf', content: pdf } }],
   ])("rejects header injection: %s", (_n, over) => {
     expect(() => buildMimeMessage({ ...base, ...over }, opts)).toThrow();
+  });
+});
+
+describe("buildMimeMessage: follow-up shape (D-042)", () => {
+  const plain = { ...base, attachment: null, subject: "Re: Application for Staff Engineer" };
+
+  it("no attachment: a single text/plain message, no multipart", () => {
+    const body = Buffer.from("Hello,\r\nPlease find my CV.\r\n").toString("base64");
+    expect(buildMimeMessage(plain, opts)).toBe(
+      [
+        "From: you@example.com",
+        "To: jobs@acme.example",
+        "Subject: Re: Application for Staff Engineer",
+        "MIME-Version: 1.0",
+        "Date: Wed, 04 Nov 2026 12:00:00 GMT",
+        "Message-ID: <fixed@jobsync.local>",
+        "Content-Type: text/plain; charset=UTF-8",
+        "Content-Transfer-Encoding: base64",
+        "",
+        body,
+        "",
+      ].join("\r\n"),
+    );
+  });
+
+  it("In-Reply-To and References carry the stored Message-ID", () => {
+    const mime = buildMimeMessage({ ...plain, inReplyTo: "<orig-1@jobsync.local>" }, opts);
+    expect(mime).toContain("\r\nIn-Reply-To: <orig-1@jobsync.local>\r\n");
+    expect(mime).toContain("\r\nReferences: <orig-1@jobsync.local>\r\n");
+    expect(mime).not.toContain("multipart");
+  });
+
+  it.each([
+    ["no brackets", "orig@jobsync.local"],
+    ["space", "<a b@jobsync.local>"],
+    ["two at", "<a@b@jobsync.local>"],
+    ["CRLF", "<a@jobsync.local>\r\nBcc: x@evil.example"],
+    ["trailing text", "<a@jobsync.local> x"],
+  ])("refuses an In-Reply-To that is not a strict Message-ID: %s", (_n, v) => {
+    expect(() => buildMimeMessage({ ...plain, inReplyTo: v }, opts)).toThrow();
+  });
+
+  it("newMessageId matches the strict pattern", () => {
+    expect(isValidMessageId(newMessageId())).toBe(true);
   });
 });

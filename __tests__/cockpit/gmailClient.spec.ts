@@ -121,6 +121,15 @@ describe("typed Google errors", () => {
     expect(await caught(sendRaw("a", "raw"))).toMatchObject({ code: "GMAIL_SEND", definitive: false });
   });
 
+  it("sends the thread id with the raw message only when one is given (D-042)", async () => {
+    fetchMock.mockResolvedValueOnce(json(200, { id: "m1", threadId: "t1" }));
+    await sendRaw("a", "raw");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toEqual({ raw: "raw" });
+    fetchMock.mockResolvedValueOnce(json(200, { id: "m2", threadId: "t1" }));
+    await sendRaw("a", "raw", "t1");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({ raw: "raw", threadId: "t1" });
+  });
+
   it("returns ids on a good send, and a refreshed access token", async () => {
     fetchMock.mockResolvedValueOnce(json(200, { id: "m1", threadId: "t1" }));
     expect(await sendRaw("a", "raw")).toEqual({ id: "m1", threadId: "t1" });

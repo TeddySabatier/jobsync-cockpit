@@ -10,8 +10,11 @@ import { isGmailSendAllowed } from "./config";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
 import { markJobApplied } from "./packages";
+import { activeApplication, activePackageWhere, ACTIVE_PACKAGE_ORDER } from "./activePackage";
+import { getFollowUpDue } from "./followUps";
+import { isValidThreadId, replySubject } from "./followUpView";
 import type { GmailClient } from "./gmail/client";
-import { buildMimeMessage, encodeRaw } from "./gmail/mime";
+import { buildMimeMessage, encodeRaw, isValidMessageId, newMessageId } from "./gmail/mime";
 import { UpdatePackageContentSchema } from "./schemas";
 
 // Send service (cockpit/SPEC.md §6.4) and the two lock-recovery services.
@@ -30,7 +33,8 @@ type Content = {
   to: string;
   subject: string;
   body: string;
-  filePath: string;
+  // The CV. Null for a follow-up, which carries no attachment (D-042).
+  filePath: string | null;
   // Display name the recipient sees; the on-disk name is a generated uuid.
   fileName: string;
 };
@@ -39,10 +43,29 @@ type PackageWithFile = ApplicationPackage & {
   cvFile: { filePath: string; fileName: string } | null;
 };
 
+// Which combinations of kind and fields this path sends (D-042). Anything else
+// (an unknown kind, a follow-up that carries a CV or has no application to
+// reply to, an application that claims to reply to something) is refused with
+// INVALID_STATE before any side effect: such a row can only come from a
+// hand-made backup or a bug, and the two kinds must never borrow each other's
+// send rules (CV attachment, job -> applied).
+function assertKindShape(pkg: ApplicationPackage): void {
+  if (pkg.kind === "application") {
+    if (pkg.replyToPackageId) throw new CockpitError("INVALID_STATE");
+    return;
+  }
+  if (pkg.kind === "follow_up") {
+    if (!pkg.replyToPackageId || pkg.cvFileId) throw new CockpitError("INVALID_STATE");
+    return;
+  }
+  throw new CockpitError("INVALID_STATE");
+}
+
 async function checkContent(
   userId: string,
   pkg: PackageWithFile,
 ): Promise<Content> {
+  if (pkg.kind === "follow_up") return checkFollowUpContent(pkg);
   const parsed = UpdatePackageContentSchema.safeParse({
     emailTo: pkg.emailTo ?? "",
     emailSubject: pkg.emailSubject,
@@ -65,6 +88,73 @@ async function checkContent(
     body: emailBody,
     filePath,
     fileName: sanitizePdfName(pkg.cvFile?.fileName ?? ""),
+  };
+}
+
+// A follow-up: the same validation of To / Subject / Body, no CV, and the
+// subject always starts with "Re: " (D-034 g; added here when the owner removed
+// it, the Send dialog shows the same replySubject()).
+function checkFollowUpContent(pkg: PackageWithFile): Content {
+  const parsed = UpdatePackageContentSchema.safeParse({
+    emailTo: pkg.emailTo ?? "",
+    emailSubject: replySubject(pkg.emailSubject),
+    emailBody: pkg.emailBody,
+  });
+  if (!parsed.success) throw new CockpitError("VALIDATION");
+  const { emailTo, emailSubject, emailBody } = parsed.data;
+  if (!emailTo || emailSubject === undefined || emailBody === undefined) {
+    throw new CockpitError("VALIDATION");
+  }
+  return { to: emailTo, subject: emailSubject, body: emailBody, filePath: null, fileName: "" };
+}
+
+// Where a follow-up goes in Gmail: the thread of the application it replies to
+// and, when we stored it, that email's Message-ID. Both read from the user's
+// own SentEmail row only; a value that fails its strict pattern is dropped (the
+// thread id alone still threads in Gmail, D-033 S1 fallback).
+type ReplyContext = { threadId: string | null; inReplyTo: string | null };
+
+// The send-time recheck of a follow-up (plan 3.3, D-042). CONFLICT when, now:
+// the application it replies to is not this job's sent application any more,
+// the job is not eligible (outcome recorded, follow-ups stopped, job status no
+// longer "applied", both steps done), or the step it was drafted for was
+// consumed (skipped or another follow-up sent: the next step is then only
+// "scheduled"). A snoozed or expired step may still be sent: the owner chose to.
+async function recheckFollowUp(
+  userId: string,
+  pkg: Pick<ApplicationPackage, "jobId" | "replyToPackageId">,
+): Promise<ReplyContext> {
+  if (!pkg.replyToPackageId) throw new CockpitError("INVALID_STATE");
+  const original = await prisma.applicationPackage.findFirst({
+    where: {
+      id: pkg.replyToPackageId,
+      userId,
+      jobId: pkg.jobId,
+      kind: "application",
+    },
+    select: {
+      id: true,
+      status: true,
+      sentEmail: { select: { threadId: true, messageIdHeader: true } },
+    },
+  });
+  if (!original || original.status !== "sent") throw new CockpitError("CONFLICT");
+  const app = await activeApplication(userId, pkg.jobId);
+  if (app?.id !== original.id) throw new CockpitError("CONFLICT");
+
+  let due;
+  try {
+    due = await getFollowUpDue(userId, pkg.jobId, new Date());
+  } catch {
+    throw new CockpitError("CONFLICT");
+  }
+  if (!due.eligible || due.status === "scheduled") throw new CockpitError("CONFLICT");
+
+  const threadId = original.sentEmail?.threadId ?? null;
+  const header = original.sentEmail?.messageIdHeader ?? null;
+  return {
+    threadId: isValidThreadId(threadId) ? threadId : null,
+    inReplyTo: isValidMessageId(header) ? header : null,
   };
 }
 
@@ -207,18 +297,21 @@ export async function sendApplicationPackage(
   ) {
     throw new CockpitError("CONFLICT");
   }
-  // Only an application can be sent here. A follow-up package can only exist
-  // through a hand-made backup before F-4 (D-031); refuse it so the V0 path,
-  // which attaches a CV and marks the job applied, never sends one. F-4 replaces
-  // this guard with the real follow-up send path.
-  if (pkg.kind !== "application") throw new CockpitError("INVALID_STATE");
-  // Only the active version may be sent.
+  // An application, or a follow-up that replies to one; any other shape is
+  // refused (D-042). The kind is fixed for the whole send: the success step
+  // marks the job applied only for an application.
+  assertKindShape(pkg);
+  const isFollowUp = pkg.kind === "follow_up";
+  // Only the active version of its own kind may be sent (versions are numbered
+  // per kind, D-031 b).
   const active = await prisma.applicationPackage.findFirst({
-    where: { jobId: pkg.jobId, userId, status: { not: "superseded" } },
-    orderBy: { version: "desc" },
+    where: activePackageWhere({ jobId: pkg.jobId, userId }, isFollowUp ? "follow_up" : "application"),
+    orderBy: ACTIVE_PACKAGE_ORDER,
     select: { id: true },
   });
   if (active?.id !== pkg.id) throw new CockpitError("CONFLICT");
+  // A follow-up must still be wanted (send-time recheck, plan 3.3).
+  if (isFollowUp) await recheckFollowUp(userId, pkg);
   await checkContent(userId, pkg);
 
   const account = await prisma.gmailAccount.findUnique({
@@ -234,7 +327,10 @@ export async function sendApplicationPackage(
   // takes seconds, and the lock window (STALE_LOCK_MS) is sized for the Gmail
   // calls. Edits are refused while the lock is held, and an edit before the
   // lock fails the updatedAt condition, so the text cannot change.
-  const letterReady = await buildLetterAttachment(pkg, pkg.cvFile?.fileName ?? "");
+  // A follow-up never carries the letter (nor the CV).
+  const letterReady = isFollowUp
+    ? null
+    : await buildLetterAttachment(pkg, pkg.cvFile?.fileName ?? "");
 
   // ---- Step 2: lock (conditional, includes the updatedAt the user saw) ---
   // lockedAt identifies this send's lock in every later write (D-022 b).
@@ -256,20 +352,27 @@ export async function sendApplicationPackage(
   let raw: string;
   let content: Content;
   let accessToken: string;
+  let reply: ReplyContext | null = null;
+  const messageId = newMessageId();
   try {
     const fresh = await withFile(userId, packageId);
     if (
       !fresh ||
       fresh.status !== "approved" ||
-      fresh.sendStartedAt?.getTime() !== lockedAt.getTime()
+      fresh.sendStartedAt?.getTime() !== lockedAt.getTime() ||
+      fresh.kind !== pkg.kind
     ) {
       throw new CockpitError("CONFLICT");
     }
+    assertKindShape(fresh);
+    // The recheck again, under the lock: an outcome, stop or skip recorded
+    // since step 1 refuses the send before Gmail is called (definitive).
+    if (isFollowUp) reply = await recheckFollowUp(userId, fresh);
     content = await checkContent(userId, fresh);
-    const attachment = {
-      fileName: content.fileName,
-      content: await fs.readFile(content.filePath),
-    };
+    const attachment = content.filePath
+      ? { fileName: content.fileName, content: await fs.readFile(content.filePath) }
+      : null;
+    if (!isFollowUp && !attachment) throw new CockpitError("FILE_NOT_FOUND");
     // The cover letter PDF was made before the lock from the text the lock
     // condition (updatedAt) pinned. A letter that differs now was changed
     // behind the lock: refuse rather than render inside the lock window or
@@ -279,14 +382,18 @@ export async function sendApplicationPackage(
     }
     const extraAttachments = letterReady ? [letterReady] : [];
     raw = encodeRaw(
-      buildMimeMessage({
-        from: account.email,
-        to: content.to,
-        subject: content.subject,
-        bodyText: content.body,
-        attachment,
-        extraAttachments,
-      }),
+      buildMimeMessage(
+        {
+          from: account.email,
+          to: content.to,
+          subject: content.subject,
+          bodyText: content.body,
+          attachment,
+          extraAttachments,
+          inReplyTo: reply?.inReplyTo ?? null,
+        },
+        { messageId },
+      ),
     );
     // The only decrypt of the stored token (D-022 e). It fails when
     // ENCRYPTION_KEY is missing or changed: the user must reconnect.
@@ -309,7 +416,10 @@ export async function sendApplicationPackage(
   // ---- Step 5: the Gmail call --------------------------------------------
   let sent: { id: string; threadId: string };
   try {
-    sent = await gmail.sendRaw(accessToken, raw);
+    // A follow-up goes into the application's Gmail thread when we know it.
+    sent = reply?.threadId
+      ? await gmail.sendRaw(accessToken, raw, reply.threadId)
+      : await gmail.sendRaw(accessToken, raw);
   } catch (e) {
     if (e instanceof CockpitError && e.definitive === true) {
       await releaseQuietly(userId, packageId, lockedAt); // 5a: nothing was sent
@@ -346,10 +456,15 @@ export async function sendApplicationPackage(
             toAddress: content.to,
             gmailMessageId: sent.id,
             threadId: sent.threadId,
+            // The Message-ID we put in the header, for a later follow-up's
+            // In-Reply-To / References (D-042).
+            messageIdHeader: messageId,
             sentAt: now,
           },
         });
-        await markJobApplied(tx, userId, pkg.jobId, now);
+        // Only an application moves the job to applied; a follow-up never
+        // touches the job status or appliedDate (plan 3.4).
+        if (!isFollowUp) await markJobApplied(tx, userId, pkg.jobId, now);
       };
       const res = await tx.applicationPackage.updateMany({
         where: {
@@ -436,8 +551,9 @@ function recoverable(userId: string, id: string): Prisma.ApplicationPackageWhere
   return {
     id,
     userId,
-    // Applications only until F-4 (D-031): a follow-up never marks a job applied.
-    kind: "application",
+    // Both kinds (D-042); markSendUnknownAsSent marks the job applied only for
+    // an application.
+    kind: { in: ["application", "follow_up"] },
     status: "approved",
     sendStartedAt: { not: null },
     OR: [
@@ -470,10 +586,12 @@ export async function markSendUnknownAsSent(
     if (res.count === 0) throw await notRecoverable(userId, id);
     const pkg = await tx.applicationPackage.findFirst({
       where: { id, userId },
-      select: { jobId: true },
+      select: { jobId: true, kind: true },
     });
     if (!pkg) throw new CockpitError("NOT_FOUND");
-    await markJobApplied(tx, userId, pkg.jobId, now);
+    // A follow-up marked sent counts as a sent step (followUpDue counts sent
+    // packages), but never changes the job (plan 3.4).
+    if (pkg.kind === "application") await markJobApplied(tx, userId, pkg.jobId, now);
     // In the same transaction: the decision and its history stand or fall
     // together. A failed history write rolls the recovery back, which is safe
     // (the lock stays and the owner can retry).
