@@ -34,7 +34,9 @@ import {
   archiveJobById,
   deleteJobById,
   getJobsList,
+  restoreJobStatus,
 } from "@/actions/job.actions";
+import { clearMockJobsAction } from "@/actions/mock.actions";
 import { clearDiscoveredJobs } from "@/actions/automation/discoveredJobs";
 import appDb from "@/lib/db";
 
@@ -318,4 +320,73 @@ describe("migration 20261112120000: upgrade keeps existing history", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   }, 120_000);
+});
+
+describe("archive Undo", () => {
+  it("returns the previous status and restoreJobStatus puts it back", async () => {
+    const jobId = await createJobFor(prisma, me, draftId);
+    const res = await archiveJobById(jobId);
+    expect(res.previousStatus).toMatchObject({ id: draftId, value: "draft" });
+    expect((await restoreJobStatus(jobId, draftId)).success).toBe(true);
+    const job = await prisma.job.findUniqueOrThrow({ where: { id: jobId } });
+    expect(job.statusId).toBe(draftId);
+  });
+
+  it("a stale Undo does not overwrite a later status change", async () => {
+    const jobId = await createJobFor(prisma, me, draftId);
+    await archiveJobById(jobId);
+    const applied = await prisma.jobStatus.upsert({
+      where: { value: "applied" },
+      update: {},
+      create: { label: "Applied", value: "applied" },
+    });
+    await prisma.job.update({
+      where: { id: jobId },
+      data: { statusId: applied.id },
+    });
+    const res = await restoreJobStatus(jobId, draftId);
+    expect(res.success).toBe(false);
+    const job = await prisma.job.findUniqueOrThrow({ where: { id: jobId } });
+    expect(job.statusId).toBe(applied.id);
+  });
+
+  it("does not restore another user's job", async () => {
+    const jobId = await createJobFor(prisma, other, draftId);
+    state.userId = other.id;
+    await archiveJobById(jobId);
+    state.userId = me.id;
+    expect((await restoreJobStatus(jobId, draftId)).success).toBe(false);
+    const job = await prisma.job.findUniqueOrThrow({
+      where: { id: jobId },
+      include: { Status: true },
+    });
+    expect(job.Status.value).toBe("archived");
+  });
+});
+
+describe("clearMockJobsAction", () => {
+  it("leaves a mock job with packages, and its notes, intact, and reports it", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    try {
+      const kept = await jobWithSentEmail();
+      await prisma.job.update({
+        where: { id: kept },
+        data: { description: "x [MOCK_DATA]" },
+      });
+      await prisma.note.create({
+        data: { jobId: kept, userId: me.id, content: "keep me" } as never,
+      });
+      const gone = await createJobFor(prisma, me, draftId, {
+        description: "y [MOCK_DATA]",
+      });
+      const res = await clearMockJobsAction();
+      expect(res.success).toBe(true);
+      expect(res.message).toMatch(/Skipped 1 with application packages/);
+      expect(await prisma.job.count({ where: { id: gone } })).toBe(0);
+      expect(await counts(kept)).toEqual({ job: 1, packages: 1, sent: 1 });
+      expect(await prisma.note.count({ where: { jobId: kept } })).toBe(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });

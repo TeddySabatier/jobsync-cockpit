@@ -8,6 +8,7 @@ import {
   getJobDetails,
   updateJobStatus,
 } from "@/actions/job.actions";
+import { toastArchived } from "./archiveUndo";
 import { toastError, toastSuccess } from "@/lib/toast";
 import {
   Company,
@@ -99,9 +100,9 @@ function JobsContainer({
   };
 
   const onArchiveJob = async (jobId: string) => {
-    const { success, message } = await archiveJobById(jobId);
+    const { success, message, previousStatus } = await archiveJobById(jobId);
     if (success) {
-      toastSuccess("Job has been archived");
+      toastArchived(previousStatus, jobId, reloadJobs);
     } else {
       toastError(message);
     }

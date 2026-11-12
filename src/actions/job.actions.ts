@@ -8,7 +8,7 @@ export {
   getJobDetails,
 } from "./job/queries";
 
-export { addJob, updateJob, deleteJobById, archiveJobById } from "./job/mutations";
+export { addJob, updateJob, deleteJobById, archiveJobById, restoreJobStatus } from "./job/mutations";
 
 export { updateJobStatus, saveJobMatchResult } from "./job/status";
 

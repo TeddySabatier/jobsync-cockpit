@@ -172,7 +172,7 @@ export const archiveJobById = async (
 
     const owned = await prisma.job.findFirst({
       where: { id: jobId, userId: user.id },
-      select: { id: true },
+      select: { id: true, Status: true },
     });
     if (!owned) {
       return { success: false, message: "Job not found." };
@@ -188,9 +188,41 @@ export const archiveJobById = async (
       data: { statusId: status.id },
     });
     revalidatePath("/dashboard");
-    return { job, success: true };
+    // Returned so the UI can offer Undo. Null when it was already archived.
+    const previousStatus =
+      owned.Status.value === "archived" ? null : owned.Status;
+    return { job, success: true, previousStatus };
   } catch (error) {
     const msg = "Failed to archive job.";
+    return handleError(error, msg);
+  }
+};
+
+// Undo for archiveJobById: puts back the status the job had before. Only sets
+// the status (updateJobStatus has side effects for "applied") and only acts
+// on a job that is still archived, so a stale Undo cannot overwrite a later
+// manual status change.
+export const restoreJobStatus = async (
+  jobId: string,
+  statusId: string,
+): Promise<any | undefined> => {
+  try {
+    const user = await requireUser();
+
+    const res = await prisma.job.updateMany({
+      where: { id: jobId, userId: user.id, Status: { value: "archived" } },
+      data: { statusId },
+    });
+    if (res.count === 0) {
+      return {
+        success: false,
+        message: "Nothing to undo: the job is no longer archived.",
+      };
+    }
+    revalidatePath("/dashboard");
+    return { success: true };
+  } catch (error) {
+    const msg = "Failed to restore job status.";
     return handleError(error, msg);
   }
 };

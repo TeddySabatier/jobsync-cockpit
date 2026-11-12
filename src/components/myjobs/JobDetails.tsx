@@ -70,6 +70,7 @@ import {
 } from "../ui/dropdown-menu";
 import { DeleteAlertDialog } from "../DeleteAlertDialog";
 import { AddJob } from "./AddJob";
+import { toastArchived } from "./archiveUndo";
 import { archiveJobById, deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { ClaudePromptButton } from "@/components/cockpit/ClaudePromptButton";
@@ -184,9 +185,9 @@ function JobDetails({
   const isArchived = currentStatus?.value === "archived";
 
   const onArchiveJob = async () => {
-    const { success, message } = await archiveJobById(job.id);
+    const { success, message, previousStatus } = await archiveJobById(job.id);
     if (success) {
-      toastSuccess("Job has been archived");
+      toastArchived(previousStatus, job.id, () => router.refresh());
       router.push("/dashboard/myjobs");
     } else {
       toastError(message);
@@ -317,13 +318,13 @@ function JobDetails({
                   </DropdownMenuItem>
                 )}
                 {!hasPackages && (
-                <DropdownMenuItem
-                  className="text-red-600 cursor-pointer"
-                  onClick={() => setDeleteAlertOpen(true)}
-                >
-                  <Trash className="mr-2 h-4 w-4" />
-                  Delete
-                </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-red-600 cursor-pointer"
+                    onClick={() => setDeleteAlertOpen(true)}
+                  >
+                    <Trash className="mr-2 h-4 w-4" />
+                    Delete
+                  </DropdownMenuItem>
                 )}
               </DropdownMenuGroup>
             </DropdownMenuContent>
@@ -350,6 +351,7 @@ function JobDetails({
                   size="sm"
                   className="h-8 px-2"
                   onClick={onEditJob}
+                  aria-label="Edit job"
                   data-testid="job-details-edit-btn"
                 >
                   <Pencil className="h-4 w-4 sm:mr-1" />
@@ -361,6 +363,7 @@ function JobDetails({
                     size="sm"
                     className="h-8 px-2"
                     onClick={onArchiveJob}
+                    aria-label="Archive job"
                     data-testid="job-details-archive-btn"
                   >
                     <Archive className="h-4 w-4 sm:mr-1" />
@@ -368,16 +371,17 @@ function JobDetails({
                   </Button>
                 )}
                 {!hasPackages && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2 text-destructive hover:text-destructive"
-                  onClick={() => setDeleteAlertOpen(true)}
-                  data-testid="job-details-delete-btn"
-                >
-                  <Trash2 className="h-4 w-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Delete</span>
-                </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 text-destructive hover:text-destructive"
+                    onClick={() => setDeleteAlertOpen(true)}
+                    aria-label="Delete job"
+                    data-testid="job-details-delete-btn"
+                  >
+                    <Trash2 className="h-4 w-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Delete</span>
+                  </Button>
                 )}
               </div>
               {job.matchScore != null && (
