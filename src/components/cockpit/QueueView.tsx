@@ -75,7 +75,7 @@ export default function QueueView({
           className="flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm"
           data-testid="follow-ups-due"
         >
-          <span className="min-w-0 flex-1">
+          <span className="min-w-[12rem] flex-1">
             {dueFollowUps === 1
               ? "1 follow-up is due. Copy the prompt and paste it into Claude: the draft comes back here in To do."
               : `${dueFollowUps} follow-ups are due. Copy the prompt and paste it into Claude: the drafts come back here in To do.`}

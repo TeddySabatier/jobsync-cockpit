@@ -13,6 +13,7 @@ import {
   canSkipOrSnooze,
   followUpLabel,
   followUpStatusText,
+  hasFollowUpMenu,
   type FollowUpSummary,
 } from "@/lib/cockpit/followUpView";
 import { Button } from "@/components/ui/button";
@@ -44,11 +45,6 @@ function useRun(): [boolean, Run] {
   const [busy, setBusy] = useState(false);
   const run: Run = (fn, success) => runAction(fn, { success, setBusy });
   return [busy, run];
-}
-
-// Is there anything for the menu to offer?
-export function hasFollowUpMenu(s: FollowUpSummary): boolean {
-  return canSkipOrSnooze(s) || (!s.stopped && !s.outcome && s.status !== null);
 }
 
 // "Remind me in 3 / 7 days", "Skip this follow-up" (only for a due or snoozed

@@ -11,7 +11,8 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { sendState } from "@/lib/cockpit/queueOrder";
-import { FollowUpChip, FollowUpMenu, hasFollowUpMenu } from "./FollowUpControls";
+import { hasFollowUpMenu } from "@/lib/cockpit/followUpView";
+import { FollowUpChip, FollowUpMenu } from "./FollowUpControls";
 import FitGradeBadge from "./FitGradeBadge";
 import StatusBadge from "./StatusBadge";
 import type { getReviewQueue } from "@/actions/cockpit.actions";

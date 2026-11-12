@@ -32,6 +32,7 @@ import {
   type HistoryTone,
 } from "./panelModels";
 import { renderLetterMarkdown } from "@/lib/cockpit/markdown";
+import { replySubject } from "@/lib/cockpit/followUpView";
 import type { getPackageDetail } from "@/actions/cockpit.actions";
 
 export type PackageDetail = Extract<
@@ -354,7 +355,9 @@ export function EmailPanel({ detail }: { detail: PackageDetail }) {
         <dd className="break-all">{detail.gmail?.email ?? "Not connected"}</dd>
         <dt className="text-muted-foreground">To</dt>
         <dd className="break-all">{pkg.emailTo?.trim() || "Apply via link"}</dd>
-        {pkg.emailTo?.trim() && (
+        {/* A follow-up goes to the address of the application already sent
+            (D-042): no source to show. The Send dialog still warns. */}
+        {pkg.emailTo?.trim() && detail.kind !== "follow_up" && (
           <>
             <dt className="text-muted-foreground">Found at</dt>
             <dd className="[overflow-wrap:anywhere]" data-testid="email-contact-source">
@@ -367,12 +370,16 @@ export function EmailPanel({ detail }: { detail: PackageDetail }) {
           </>
         )}
         <dt className="text-muted-foreground">Subject</dt>
-        <dd className="[overflow-wrap:anywhere]">{pkg.emailSubject}</dd>
+        <dd className="[overflow-wrap:anywhere]">
+          {detail.kind === "follow_up" ? replySubject(pkg.emailSubject) : pkg.emailSubject}
+        </dd>
         <dt className="text-muted-foreground">Attachment</dt>
-        <dd className="break-all">
-          {detail.attachment
-            ? `${detail.attachment.fileName} (${formatBytes(detail.attachment.size)})`
-            : "None"}
+        <dd className="[overflow-wrap:anywhere]">
+          {detail.kind === "follow_up"
+            ? "None (a follow-up has no attachment)"
+            : detail.attachment
+              ? `${detail.attachment.fileName} (${formatBytes(detail.attachment.size)})`
+              : "None"}
         </dd>
       </dl>
       <div className="mt-3">

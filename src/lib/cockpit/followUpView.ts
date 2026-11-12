@@ -59,8 +59,21 @@ export function canSkipOrSnooze(s: Pick<FollowUpSummary, "status">): boolean {
   return s.status === "due" || s.status === "snoozed";
 }
 
+// Is there anything for the follow-up menu to offer? (Pure: the server-rendered
+// queue row calls it.)
+export function hasFollowUpMenu(s: FollowUpSummary): boolean {
+  return canSkipOrSnooze(s) || (!s.stopped && !s.outcome && s.status !== null);
+}
+
+// A fixed locale and zone: the same text on the server render and in the
+// browser (no hydration mismatch). Day precision is all the UI needs.
 const fmtDay = (d: Date) =>
-  new Date(d).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  new Date(d).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 
 // One plain sentence about where the follow-ups of a job stand.
 export function followUpStatusText(s: FollowUpSummary): string {
