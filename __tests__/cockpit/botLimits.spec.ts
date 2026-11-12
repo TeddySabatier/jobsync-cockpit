@@ -5,6 +5,7 @@
 // and the stub cannot drift from the server.
 import { spawnSync } from "child_process";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import {
   AttachFileSchema,
@@ -174,5 +175,41 @@ describe("cockpit_limits.json matches the real schemas (issue #83)", () => {
     }
     // letterMd shares the emailBody cap in the script (one MAX_TEXT)
     expect(limits.letterMdMax).toBe(limits.emailBodyMax);
+  });
+
+  it("the script's built-in fallback equals this table, and a script copied alone still runs", () => {
+    // The bot setup copies cockpit_submit.py into the bot folder; the table
+    // may not come along. The script then uses _FALLBACK_LIMITS.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cockpit-alone-"));
+    try {
+      fs.copyFileSync(
+        path.join(botDir, "cockpit_submit.py"),
+        path.join(dir, "cockpit_submit.py"),
+      );
+      const probe = spawnSync(
+        "python3",
+        [
+          "-I",
+          "-c",
+          [
+            "import json, sys",
+            "sys.path.insert(0, sys.argv[1])",
+            "import cockpit_submit as cs",
+            "print(json.dumps([cs.LIMITS, cs._FALLBACK_LIMITS]))",
+          ].join("\n"),
+          dir,
+        ],
+        { encoding: "utf8" },
+      );
+      if (probe.error) return; // no python3 on this machine
+      expect(probe.status, probe.stderr).toBe(0);
+      const [alone, fallback] = JSON.parse(probe.stdout);
+      expect(alone).toEqual(fallback);
+      const { _comment, ...table } = limits;
+      expect(_comment).toBeDefined();
+      expect(fallback).toEqual(table);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

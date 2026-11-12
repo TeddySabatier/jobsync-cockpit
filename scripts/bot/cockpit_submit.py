@@ -50,8 +50,28 @@ DEFAULT_URL = "http://127.0.0.1:3737/api/mcp"
 TIMEOUT_SECONDS = 90
 # The server's limits live in ONE table shared with the test stub (cockpit_limits.json);
 # __tests__/cockpit/botLimits.spec.ts checks it against the server's Zod schemas.
-with open(Path(__file__).with_name("cockpit_limits.json"), encoding="utf-8") as _limits_file:
-    LIMITS = json.load(_limits_file)
+# The bot setup may copy this script alone into the bot folder: when the table is not next to
+# it (or is unreadable), these built-in values apply. The same spec checks they equal the table.
+_FALLBACK_LIMITS = {
+    "base64Max": 7000000, "fileNameMin": 1, "fileNameMax": 120, "emailAddressMax": 254,
+    "subjectMax": 300, "emailBodyMax": 20000, "letterMdMax": 20000, "fitAnalysisMax": 20000,
+    "cvJsonMax": 200000, "sourceFolderMax": 300, "listLimitMin": 1, "listLimitMax": 100,
+    "idempotencyKeyPattern": "^[A-Za-z0-9._:-]{1,100}$",
+}
+
+
+def _load_limits():
+    try:
+        with open(Path(__file__).with_name("cockpit_limits.json"), encoding="utf-8") as table_file:
+            table = json.load(table_file)
+        if all(isinstance(table.get(key), type(value)) for key, value in _FALLBACK_LIMITS.items()):
+            return table
+    except (OSError, ValueError, AttributeError):
+        pass
+    return dict(_FALLBACK_LIMITS)
+
+
+LIMITS = _load_limits()
 MAX_BASE64_CHARS = LIMITS["base64Max"]  # the server's limit for attach_file
 MAX_PDF_BYTES = MAX_BASE64_CHARS // 4 * 3
 MAX_SUBJECT = LIMITS["subjectMax"]
@@ -321,7 +341,7 @@ def find_pdf(folder, override):
 def safe_pdf_name(name):
     if u16len(name) <= MAX_FILE_NAME:
         return name
-    return name[: MAX_FILE_NAME - 4].rstrip(". ") + ".pdf"
+    return truncate16(name, MAX_FILE_NAME - 4).rstrip(". ") + ".pdf"
 
 
 def build_body(letter, recipient, link):

@@ -407,6 +407,9 @@ class HelperTests(unittest.TestCase):
         long_name = cs.safe_pdf_name("a" * 300 + ".pdf")
         self.assertLessEqual(len(long_name), 120)
         self.assertTrue(long_name.endswith(".pdf"))
+        astral = cs.safe_pdf_name(chr(0x1F600) * 100 + ".pdf")  # the server counts UTF-16 units
+        self.assertLessEqual(cs.u16len(astral), 120)
+        self.assertTrue(astral.endswith(".pdf"))
 
     def test_endpoint_rules(self):
         cs.check_endpoint("http://localhost:3737/api/mcp")
