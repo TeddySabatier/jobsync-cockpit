@@ -48,6 +48,8 @@ export function CopyPromptButton({
   successMessage,
   testId,
   textTestId,
+  className,
+  variant = "outline",
 }: {
   buildPrompt: () => string;
   label: string;
@@ -55,6 +57,9 @@ export function CopyPromptButton({
   successMessage: string;
   testId: string;
   textTestId: string;
+  // Replaces the default compact look (the action bar wants a full-size button).
+  className?: string;
+  variant?: "outline" | "default";
 }) {
   const [manualText, setManualText] = useState<string | null>(null);
 
@@ -71,8 +76,8 @@ export function CopyPromptButton({
     <>
       <Button
         size="sm"
-        variant="outline"
-        className="h-8 gap-1 cursor-pointer max-sm:h-11 max-sm:min-w-11"
+        variant={variant}
+        className={className ?? "h-8 gap-1 cursor-pointer max-sm:h-11 max-sm:min-w-11"}
         data-testid={testId}
         title={title}
         onClick={onClick}

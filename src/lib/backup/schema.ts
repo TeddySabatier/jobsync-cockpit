@@ -224,6 +224,8 @@ const ApplicationPackage = z.object({
   cvFileId: optId,
   cvPdfStale: z.boolean(),
   sourceFolder: optStr,
+  // D-041: absent in backups made before it; null when restored from those.
+  contactSource: optStr.optional(),
   idempotencyKey: optStr,
   rejectReason: optStr,
   changeRequest: optStr,

@@ -14,6 +14,8 @@ import { getCurrentUser } from "@/utils/user.utils";
 import StaleSessionSignOut from "@/components/StaleSessionSignOut";
 import { signOut } from "@/auth";
 import { isCockpitEnabled } from "@/lib/cockpit/config";
+import { countTodo } from "@/lib/cockpit/packages";
+import { getTodoCount } from "@/actions/cockpit.actions";
 
 export default async function RootLayout({
   children,
@@ -42,6 +44,17 @@ export default async function RootLayout({
     return <StaleSessionSignOut signOutAction={signOutAction} />;
   }
 
+  // Sidebar badge (D-041): one count, only with the cockpit on. A failure is
+  // just no badge; it must never break the dashboard.
+  let reviewCount: number | undefined;
+  if (cockpitEnabled) {
+    try {
+      reviewCount = await countTodo(user.id);
+    } catch {
+      reviewCount = undefined;
+    }
+  }
+
   return (
     <ActivityProvider>
       <SidebarProvider initialExpanded={initialExpanded}>
@@ -52,9 +65,11 @@ export default async function RootLayout({
                 user={user}
                 signOutAction={signOutAction}
                 cockpitEnabled={cockpitEnabled}
+                reviewCount={reviewCount}
+                todoCountAction={cockpitEnabled ? getTodoCount : undefined}
               />
               <SidebarInset>
-                <Header cockpitEnabled={cockpitEnabled} />
+                <Header cockpitEnabled={cockpitEnabled} reviewCount={reviewCount} />
                 <GlobalActivityBanner />
                 {/* Container, not viewport, queries: the docked chat panel
                     shrinks this box without changing the viewport width. */}

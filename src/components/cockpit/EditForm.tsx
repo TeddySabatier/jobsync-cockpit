@@ -19,6 +19,9 @@ import type { UpdatePackageContentInput } from "@/lib/cockpit/schemas";
 import { toastError, toastSuccess } from "@/lib/toast";
 import type { PackageDetail } from "./Panels";
 import { REQUEST_FAILED } from "./runAction";
+import { clearDraft } from "@/lib/cockpit/editDraft";
+import { useNavGuard } from "./navGuard";
+import { useDraftAutosave, useRestoredDraft } from "./useEditDraft";
 
 // Edit mode (cockpit/SPEC.md §5.4). Manual edits only, saved through the
 // updatePackageContent action; nothing here generates or fills in content.
@@ -139,8 +142,20 @@ export default function EditForm({
   );
   const originalCv = useMemo(() => parseObject(pkg.cvJson), [pkg.cvJson]);
 
-  const [values, setValues] = useState<EditValues>(original);
-  const [cv, setCv] = useState<Record<string, unknown> | null>(originalCv);
+  // The draft autosaved by an earlier visit (D-041): read once, on mount.
+  const { key: draftStorageKey, restored } = useRestoredDraft(pkg.id, pkg.updatedAt);
+  const [values, setValues] = useState<EditValues>(() => restored?.values ?? original);
+  const [cv, setCv] = useState<Record<string, unknown> | null>(() =>
+    restored && originalCv ? (restored.cv ?? originalCv) : originalCv,
+  );
+  const [showRestored, setShowRestored] = useState(() => {
+    if (!restored) return false;
+    return (
+      (Object.keys(restored.values) as (keyof EditValues)[]).some(
+        (k) => restored.values[k] !== original[k],
+      ) || JSON.stringify(restored.cv) !== JSON.stringify(originalCv)
+    );
+  });
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
 
@@ -167,39 +182,18 @@ export default function EditForm({
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
 
-  // Guards while there are unsaved edits. Reload / tab close: beforeunload.
-  // In-app navigation (back link, sidebar, "Open vN" link) does not unload the
-  // page: a capture-phase click listener asks before a same-origin link is
-  // followed. (The browser back button is not guarded.)
-  useEffect(() => {
-    if (!dirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
-    const onClick = (e: MouseEvent) => {
-      if (e.defaultPrevented || e.button !== 0) return;
-      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-      const a = (e.target as Element | null)?.closest?.("a[href]");
-      if (!(a instanceof HTMLAnchorElement)) return;
-      if (a.target && a.target !== "_self") return;
-      if (a.hasAttribute("download") || a.origin !== window.location.origin) return;
-      if (a.pathname === window.location.pathname && a.search === window.location.search) return;
-      if (!window.confirm(DISCARD_MESSAGE)) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    document.addEventListener("click", onClick, true);
-    return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      document.removeEventListener("click", onClick, true);
-    };
-  }, [dirty]);
+  // Guards while there are unsaved edits: reload / tab close, in-app links and
+  // the Back button or gesture (navGuard.ts, D-041). The edits are also
+  // autosaved locally, so even a lost tab does not lose them.
+  useNavGuard(dirty, DISCARD_MESSAGE);
+  useDraftAutosave(pkg.id, draftStorageKey, { values, cv, dirty });
 
   const set = (k: keyof EditValues) => (v: string) =>
     setValues((s) => ({ ...s, [k]: v }));
 
   function cancel() {
     if (dirty && !window.confirm(DISCARD_MESSAGE)) return;
+    clearDraft(draftStorageKey);
     onClose();
   }
 
@@ -215,6 +209,7 @@ export default function EditForm({
       const r = await updatePackageContent(pkg.id, patch);
       if (r.success) {
         toastSuccess("Changes saved");
+        clearDraft(draftStorageKey);
         onClose();
       } else if (r.code === "CONFLICT" || r.code === "INVALID_STATE") {
         setConflict(true);
@@ -238,6 +233,27 @@ export default function EditForm({
         void save();
       }}
     >
+      {showRestored && (
+        <div
+          role="status"
+          data-testid="edit-restored"
+          className="flex flex-wrap items-center gap-2 rounded-md border p-3 text-sm"
+        >
+          <span>Restored unsaved edits from your last visit.</span>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setValues(original);
+              setCv(originalCv);
+              clearDraft(draftStorageKey);
+              setShowRestored(false);
+            }}
+          >
+            Discard them
+          </Button>
+        </div>
+      )}
       {conflict && (
         <div
           role="alert"
@@ -333,8 +349,8 @@ export default function EditForm({
         >
           <h2 className="text-sm font-semibold">CV data</h2>
           <p className="text-sm text-muted-foreground">
-            Only text can be edited. Saving a change marks the CV PDF out of
-            date until the bot re-renders it.
+            Only text can be edited. Changing CV text makes the PDF out of
+            date, and Send stays blocked until Claude re-renders it.
           </p>
           {cvChanged && <Badge variant="outline">PDF will be marked stale</Badge>}
           {leaves.map((leaf) => (

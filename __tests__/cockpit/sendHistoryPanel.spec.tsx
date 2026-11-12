@@ -36,6 +36,7 @@ const detail = (
     version: 1,
     status: "approved",
     emailTo: "jobs@acme.example",
+    contactSource: null,
     emailSubject: "Application",
     emailBody: "Hello",
     letterMd: null,

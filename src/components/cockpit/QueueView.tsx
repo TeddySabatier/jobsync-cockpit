@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ChangeRequestsPromptButton } from "./ChangeRequestsPromptButton";
+import FocusRefresh from "./FocusRefresh";
 import { todoGroup } from "@/lib/cockpit/queueOrder";
 import QueueRow, { type QueueRowData } from "./QueueRow";
 import QueueTabs from "./QueueTabs";
@@ -13,11 +15,11 @@ type QueueData = Extract<
 >["data"];
 
 const EMPTY_MESSAGES: Record<QueueTabValue, string> = {
-  todo: "Nothing to review. Application packages appear here when your bot submits one through the MCP tools.",
+  todo: "All done: nothing to review. Use Refresh and prepare on the Jobs page to get new applications.",
   changes:
-    "No packages are waiting for changes. Packages show up here after you request changes and until the bot resubmits.",
-  sent: "Nothing sent yet. Packages move here once you send them or mark them applied.",
-  rejected: "No rejected packages. Packages you reject are kept here.",
+    "No changes requested. An application shows up here after you request changes, until Claude sends back a new version.",
+  sent: "Nothing sent yet. Applications move here once you send them or mark them applied.",
+  rejected: "No rejected applications. The ones you reject are kept here, and you can reopen them.",
 };
 
 export default function QueueView({
@@ -31,6 +33,7 @@ export default function QueueView({
   const counts = "counts" in data ? data.counts : undefined;
   return (
     <div className="flex flex-col gap-4 py-4">
+      <FocusRefresh />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <QueueTabs tab={tab} counts={counts} />
         <Link
@@ -52,7 +55,7 @@ export default function QueueView({
         <Alert>
           <TriangleAlert />
           <AlertDescription>
-            Gmail is not connected, so approved packages with a recipient cannot
+            Gmail is not connected, so approved applications with a recipient cannot
             be sent.{" "}
             <Link
               href="/dashboard/review/settings"
@@ -63,6 +66,15 @@ export default function QueueView({
             .
           </AlertDescription>
         </Alert>
+      )}
+
+      {tab === "changes" && rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm">
+          <span className="min-w-0 flex-1">
+            Claude has to answer these. Copy the prompt and paste it into Claude.
+          </span>
+          <ChangeRequestsPromptButton className="h-11 gap-2" variant="default" />
+        </div>
       )}
 
       {rows.length === 0 ? (

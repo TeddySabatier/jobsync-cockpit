@@ -17,9 +17,11 @@ interface NavLinkProps {
   route: string;
   pathname: string;
   expanded: boolean;
+  // A count shown next to the label (the Review queue's To do items). 0 / undefined: none.
+  badge?: number;
 }
 
-function NavLink({ label, Icon, route, pathname, expanded }: NavLinkProps) {
+function NavLink({ label, Icon, route, pathname, expanded, badge }: NavLinkProps) {
   // "/dashboard" is a prefix of every other route, so it only matches exactly.
   const isActive =
     pathname === route ||
@@ -45,6 +47,12 @@ function NavLink({ label, Icon, route, pathname, expanded }: NavLinkProps) {
           same spot in both states and never moves during the slide. */}
       <span className="flex h-full w-14 shrink-0 items-center justify-center">
         <Icon className="h-6 w-6 shrink-0" strokeWidth={1.5} />
+        {!!badge && !expanded && (
+          <span
+            aria-hidden
+            className="absolute right-2 top-1 h-2.5 w-2.5 rounded-full bg-primary"
+          />
+        )}
       </span>
       <span
         className={cn(
@@ -54,6 +62,18 @@ function NavLink({ label, Icon, route, pathname, expanded }: NavLinkProps) {
       >
         {label}
       </span>
+      {!!badge && (
+        <span
+          data-testid="nav-badge"
+          aria-label={`${badge} to do`}
+          className={cn(
+            "ml-auto mr-3 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground transition-opacity duration-200",
+            expanded ? "opacity-100 delay-100" : "sr-only"
+          )}
+        >
+          {badge}
+        </span>
+      )}
     </Link>
   );
 

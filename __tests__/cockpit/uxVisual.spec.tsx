@@ -1,6 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+// QueueView refreshes on focus (D-041): it needs a router.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/actions/cockpit.actions", () => ({ getReviewQueue: vi.fn() }));
 vi.mock("@/components/TipTapContentViewer", () => ({
   TipTapContentViewer: () => <div />,

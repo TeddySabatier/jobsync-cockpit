@@ -8,6 +8,7 @@ type PackageRow = {
   version: number;
   status: string;
   emailTo: string | null;
+  contactSource?: string | null;
   emailSubject: string;
   emailBody: string;
   letterMd: string | null;
@@ -38,6 +39,7 @@ export function toPackageView(p: PackageRow) {
     version: p.version,
     status: p.status,
     emailTo: p.emailTo,
+    contactSource: p.contactSource ?? null,
     emailSubject: p.emailSubject,
     emailBody: p.emailBody,
     letterMd: p.letterMd,

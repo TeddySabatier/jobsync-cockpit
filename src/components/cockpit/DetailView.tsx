@@ -5,6 +5,14 @@ import { useRouter } from "next/navigation";
 import { Info } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { formatUrl } from "@/lib/utils";
 import ActionBar from "./ActionBar";
 import EditForm, { canEditPackage, DISCARD_MESSAGE } from "./EditForm";
@@ -18,9 +26,10 @@ import {
   SendHistoryPanel,
   type PackageDetail,
 } from "./Panels";
-import FitGradeBadge from "./FitGradeBadge";
 import { statusLabel } from "./statusLabels";
+import SummaryStrip from "./SummaryStrip";
 import { useQueueKeys } from "./useQueueKeys";
+import type { AdjacentIds } from "@/lib/cockpit/advance";
 
 // Plain sentence for a version that is not the active one. Never the raw status.
 function versionNote(version: number, status: string): string {
@@ -36,7 +45,15 @@ function versionNote(version: number, status: string): string {
   }
 }
 
-export type Adjacent = { previousId: string | null; nextId: string | null };
+export type Adjacent = AdjacentIds;
+
+const SHORTCUTS: [string, string][] = [
+  ["j / k", "Next / previous application in To do"],
+  ["a", "The main action: Approve and send, Send or I applied (never sends by itself)"],
+  ["e", "Edit"],
+  ["x", "Reject"],
+  ["?", "This help"],
+];
 
 export default function DetailView({
   detail,
@@ -48,6 +65,7 @@ export default function DetailView({
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [wasEditing, setWasEditing] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const dirtyRef = useRef(false);
   const onDirtyChange = useCallback((d: boolean) => {
     dirtyRef.current = d;
@@ -59,7 +77,8 @@ export default function DetailView({
     if (wasEditing && !editing) setWasEditing(false);
   }, [wasEditing, editing]);
   // j / k must not navigate away from unsaved edits.
-  useQueueKeys(editing ? { previousId: null, nextId: null } : adjacent);
+  const showHelp = useCallback(() => setHelpOpen(true), []);
+  useQueueKeys(editing ? { previousId: null, nextId: null } : adjacent, editing ? undefined : showHelp);
 
   const { package: pkg, versions, activePackageId, isActive } = detail;
   const canEdit = canEditPackage(detail);
@@ -73,22 +92,47 @@ export default function DetailView({
     prevStatus.current = pkg.status;
   }, [pkg.status]);
 
+  const company = pkg.job.Company.label;
+  const title = pkg.job.JobTitle.label;
+
   return (
     <div className="flex flex-col gap-4 py-4">
       <header className="flex flex-col gap-2">
-        <Link
-          href="/dashboard/review"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Review queue
-        </Link>
+        <div className="flex items-center justify-between gap-2">
+          <Link
+            href="/dashboard/review"
+            className="inline-flex min-h-11 items-center text-sm text-muted-foreground hover:text-foreground md:min-h-0"
+          >
+            ← Review queue
+          </Link>
+          {/* Phone: labelled prev / next, since j / k need a keyboard (D-041). */}
+          {!editing && (adjacent.previousId || adjacent.nextId) && (
+            <div className="flex gap-2 md:hidden">
+              {adjacent.previousId ? (
+                <Button asChild variant="outline" className="h-11">
+                  <Link href={`/dashboard/review/${adjacent.previousId}`}>Previous</Link>
+                </Button>
+              ) : null}
+              {adjacent.nextId ? (
+                <Button asChild variant="outline" className="h-11">
+                  <Link href={`/dashboard/review/${adjacent.nextId}`}>Next</Link>
+                </Button>
+              ) : null}
+            </div>
+          )}
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <h1 ref={headingRef} tabIndex={-1} className="truncate text-xl font-semibold outline-none">
-              {pkg.job.Company.label}
+            <h1
+              ref={headingRef}
+              tabIndex={-1}
+              title={company}
+              className="line-clamp-2 break-words text-xl font-semibold outline-none"
+            >
+              {company}
             </h1>
-            <p className="truncate text-sm text-muted-foreground">
-              {pkg.job.JobTitle.label}
+            <p title={title} className="line-clamp-2 break-words text-sm text-muted-foreground">
+              {title}
               {pkg.job.jobUrl && (
                 <>
                   {" · "}
@@ -105,27 +149,26 @@ export default function DetailView({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {pkg.fitGrade && <FitGradeBadge grade={pkg.fitGrade} />}
             <Badge variant="secondary">{statusLabel(pkg.status)}</Badge>
             {pkg.cvPdfStale && <Badge variant="outline">PDF stale</Badge>}
-            <select
-              aria-label="Version"
-              value={pkg.id}
-              onChange={(e) => {
-                // A controlled select: declining keeps the current version.
-                if (editing && dirtyRef.current && !window.confirm(DISCARD_MESSAGE)) return;
-                router.push(`/dashboard/review/${e.target.value}`);
-              }}
-              className="h-9 rounded-md border bg-background px-2 text-sm"
-            >
-              {versions.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {`v${v.version} · ${statusLabel(v.status)}`}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
+        <select
+          aria-label="Version"
+          value={pkg.id}
+          onChange={(e) => {
+            // A controlled select: declining keeps the current version.
+            if (editing && dirtyRef.current && !window.confirm(DISCARD_MESSAGE)) return;
+            router.push(`/dashboard/review/${e.target.value}`);
+          }}
+          className="h-11 w-full rounded-md border bg-background px-2 text-sm sm:h-9 sm:w-auto sm:self-start"
+        >
+          {versions.map((v) => (
+            <option key={v.id} value={v.id}>
+              {`v${v.version} · ${statusLabel(v.status)}`}
+            </option>
+          ))}
+        </select>
       </header>
 
       {!isActive && (
@@ -163,13 +206,17 @@ export default function DetailView({
         />
       ) : (
         <>
+          {/* Reading order = DOM order: Summary, Email, Letter, CV, Fit, Posting. */}
           <div className="grid grid-cols-1 gap-4 @3xl/main:grid-cols-2">
-            <PostingPanel pkg={pkg} />
+            <div className="@3xl/main:col-span-2">
+              <SummaryStrip detail={detail} />
+            </div>
+            <EmailPanel detail={detail} />
+            <LetterPanel pkg={pkg} fileName={detail.letterAttachment?.fileName} />
             <CvPanel detail={detail} />
             <FitPanel pkg={pkg} />
-            <EmailPanel detail={detail} />
             <div className="@3xl/main:col-span-2">
-              <LetterPanel pkg={pkg} fileName={detail.letterAttachment?.fileName} />
+              <PostingPanel pkg={pkg} />
             </div>
           </div>
 
@@ -178,6 +225,9 @@ export default function DetailView({
               j / k: next / previous in To do
             </p>
           )}
+          <p className="hidden text-xs text-muted-foreground md:block" data-testid="keys-hint">
+            {isActive ? "a: main action, e: edit, x: reject, " : ""}?: all shortcuts
+          </p>
 
           <SendHistoryPanel history={detail.sendHistory} />
 
@@ -186,10 +236,30 @@ export default function DetailView({
               detail={detail}
               onEdit={canEdit ? () => setEditing(true) : undefined}
               focusEditOnMount={wasEditing}
+              adjacent={adjacent}
             />
           )}
         </>
       )}
+
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Keyboard shortcuts</DialogTitle>
+            <DialogDescription>
+              They do nothing while you type in a field or while a dialog is open.
+            </DialogDescription>
+          </DialogHeader>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+            {SHORTCUTS.map(([k, v]) => (
+              <div key={k} className="contents">
+                <dt className="font-mono font-medium">{k}</dt>
+                <dd>{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

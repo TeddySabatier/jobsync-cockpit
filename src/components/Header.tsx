@@ -15,8 +15,10 @@ import { AgentChatTrigger } from "./AgentChatTrigger";
 
 async function Header({
   cockpitEnabled = false,
+  reviewCount,
 }: {
   cockpitEnabled?: boolean;
+  reviewCount?: number;
 }) {
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
@@ -55,6 +57,11 @@ async function Header({
                   >
                     <item.icon className="h-5 w-5" />
                     {item.label}
+                    {item.cockpitOnly && !!reviewCount && (
+                      <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                        {reviewCount}
+                      </span>
+                    )}
                   </Link>
                 </SheetClose>
               );

@@ -147,6 +147,27 @@ export async function submitPackage(
   }
 }
 
+// contactSource is one line of bot-supplied text shown next to the recipient
+// (D-041). Control characters (CR/LF, tab), zero-width and bidi-override
+// characters become a space, so the line cannot be split, hidden or shown
+// reversed; runs of spaces collapse. Blank is null.
+// Code point ranges (inclusive): C0 / C1 controls, soft hyphen, Arabic letter
+// mark, Mongolian vowel separator, zero-width and directional marks, line /
+// paragraph separators and bidi embeddings / overrides, word joiner and bidi
+// isolates, BOM.
+const CONTACT_SOURCE_STRIP: ReadonlyArray<readonly [number, number]> = [
+  [0x00, 0x1f], [0x7f, 0x9f], [0xad, 0xad], [0x61c, 0x61c], [0x180e, 0x180e],
+  [0x200b, 0x200f], [0x2028, 0x202e], [0x2060, 0x206f], [0xfeff, 0xfeff],
+];
+const stripped = (cp: number) => CONTACT_SOURCE_STRIP.some(([lo, hi]) => cp >= lo && cp <= hi);
+export function cleanContactSource(v: string | null | undefined): string | null {
+  const s = Array.from(v ?? "", (ch) => (stripped(ch.codePointAt(0)!) ? " " : ch))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+  return s || null;
+}
+
 async function submitInTransaction(
   tx: Db,
   userId: string,
@@ -267,6 +288,7 @@ async function submitInTransaction(
       cvJson: input.cvJson ? JSON.stringify(input.cvJson) : null,
       cvFileId: input.cvFileId ?? null,
       sourceFolder: input.sourceFolder ?? null,
+      contactSource: cleanContactSource(input.contactSource),
       idempotencyKey: input.idempotencyKey ?? null,
     },
   });
@@ -347,14 +369,14 @@ export async function unapprovePackage(userId: string, id: string) {
 export async function rejectPackage(
   userId: string,
   id: string,
-  reason: string,
+  reason?: string,
 ) {
-  const { reason: rejectReason } = parse(RejectPackageSchema, { reason });
+  const { reason: text } = parse(RejectPackageSchema, { reason });
   const now = new Date();
   await prisma.$transaction(async (tx) => {
     await transition(tx, userId, id, ["pending", "approved"], {
       status: "rejected",
-      rejectReason,
+      rejectReason: text || null,
       rejectedAt: now,
     });
     // Rejecting a follow-up draft skips that step, so the bot is not asked to
@@ -368,6 +390,57 @@ export async function rejectPackage(
     }
   });
   return reload(userId, id);
+}
+
+// Undo a reject (D-041): back to pending, as if it had never been rejected.
+// The reject reason and time are cleared (a later reject writes its own). The
+// job needs no change: Reject never touched it. The bot's JOB_REJECTED guard
+// looks at the job's active package, so once this one is pending again the
+// bot may resubmit like for any open application. Refused (INVALID_STATE) when
+// the job has another live package, which the submit rules should prevent.
+export async function reopenPackage(userId: string, id: string) {
+  await prisma.$transaction(async (tx) => {
+    const pkg = await tx.applicationPackage.findFirst({
+      where: { id, userId },
+      select: { jobId: true, kind: true, version: true },
+    });
+    if (!pkg) throw new CockpitError("NOT_FOUND");
+    // Rejecting a follow-up draft skipped its step (D-031): not undoable here.
+    if (pkg.kind === "follow_up") throw new CockpitError("INVALID_STATE");
+    // Another live package of the job, or a newer non-superseded application
+    // version (e.g. a later rejected one): only the job's active application may
+    // come back, otherwise the bot's JOB_REJECTED guard (active package) and the
+    // queue would disagree about this job.
+    const other = await tx.applicationPackage.findFirst({
+      where: {
+        jobId: pkg.jobId,
+        userId,
+        id: { not: id },
+        OR: [
+          { status: { in: ["pending", "approved", "changes_requested", "sent"] } },
+          { kind: "application", status: { not: "superseded" }, version: { gt: pkg.version } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (other) throw new CockpitError("INVALID_STATE");
+    await transition(tx, userId, id, ["rejected"], {
+      status: "pending",
+      rejectReason: null,
+      rejectedAt: null,
+      approvedAt: null,
+    });
+  });
+  return reload(userId, id);
+}
+
+// Number of To do applications (pending and approved), for the sidebar badge.
+// Applications only, like the To do tab (listPackagesByTab): a follow-up draft
+// is not in that list, so it must not be in the badge either.
+export function countTodo(userId: string): Promise<number> {
+  return prisma.applicationPackage.count({
+    where: { userId, kind: "application", status: { in: QUEUE_TAB_STATUSES.todo } },
+  });
 }
 
 // A later request overwrites the previous one and resets the bot's response.

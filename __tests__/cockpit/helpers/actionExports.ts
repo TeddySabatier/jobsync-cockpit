@@ -11,6 +11,8 @@ export const ALLOWED: Record<string, string[]> = {
     "getReviewQueue",
     "getPackageDetail",
     "getAdjacentPackageIds",
+    "reopenPackage",
+    "getTodoCount",
   ],
   "cockpitFollowUps.actions.ts": [
     "snoozeFollowUp",

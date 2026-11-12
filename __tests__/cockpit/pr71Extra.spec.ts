@@ -168,7 +168,7 @@ describe("toPackageView", () => {
     const v = toPackageView(full);
     expect(Object.keys(v).sort()).toEqual(
       [
-        "id", "version", "status", "emailTo", "emailSubject", "emailBody", "letterMd",
+        "id", "version", "status", "emailTo", "contactSource", "emailSubject", "emailBody", "letterMd",
         "fitGrade", "fitAnalysis", "cvJson", "cvFileId", "cvPdfStale", "rejectReason",
         "changeRequest", "changeRequestedAt", "changeRequestResponse", "sendStartedAt",
         "sendOutcome", "updatedAt", "job",

@@ -10,6 +10,7 @@
   "fitAnalysisMax": 20000,
   "cvJsonMax": 200000,
   "sourceFolderMax": 300,
+  "contactSourceMax": 300,
   "idempotencyKeyPattern": "^[A-Za-z0-9._:-]{1,100}$",
   "listLimitMin": 1,
   "listLimitMax": 100

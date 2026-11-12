@@ -105,6 +105,35 @@ function hostOf(url: string | null): string | null {
   }
 }
 
+// Recruiting platforms and staffing agencies: an address there is a third
+// party's mailbox, not the employer's. Matched on the registrable domain, or on
+// its label for the agencies that own many country domains (D-041).
+const ATS_AGENCY_DOMAINS = new Set([
+  "greenhouse.io", "lever.co", "workday.com", "myworkdayjobs.com", "smartrecruiters.com",
+  "ashbyhq.com", "recruitee.com", "teamtailor.com", "jobvite.com", "icims.com", "taleo.net",
+  "bamboohr.com", "personio.com", "personio.de", "workable.com", "breezy.hr", "join.com",
+  "welcometothejungle.com", "hellowork.com", "indeed.com", "linkedin.com", "monster.com",
+  "glassdoor.com", "apec.fr", "pole-emploi.fr", "francetravail.fr",
+]);
+const AGENCY_LABELS = new Set([
+  "randstad", "adecco", "manpower", "hays", "michaelpage", "roberthalf", "robertwalters",
+  "kellyservices", "gigroup", "synergie", "crit", "proman", "supplay", "page-personnel",
+  "pagepersonnel", "expectra", "spring",
+]);
+
+function isAtsOrAgency(host: string): boolean {
+  const r = registrable(host);
+  return ATS_AGENCY_DOMAINS.has(r.domain) || AGENCY_LABELS.has(r.label);
+}
+
+// Where the bot said it found the address: a URL (-> its host) or a short note.
+function sourceHost(source: string | null | undefined): string | null {
+  const s = source?.trim();
+  if (!s || /\s/.test(s)) return null;
+  const host = hostOf(s);
+  return host && host.includes(".") ? host : null;
+}
+
 // SPEC §5.3: warn when the recipient is a free-mail address, or when its
 // registrable domain matches neither the company name nor the posting's
 // registrable domain. The bot picks the recipient from untrusted postings, so
@@ -112,10 +141,18 @@ function hostOf(url: string | null): string | null {
 // generic words (careers.evil.example, inc.evil.example), which an attacker
 // controls. False warnings are possible (ATS domains) and are acceptable:
 // the user confirms anyway.
+//
+// D-041: `contactSource` is where the bot says it found the address. Omitted
+// (undefined) = the old behaviour, unchanged. Given (a string or null): free
+// mail, a platform / agency address and an incomplete address always warn; a
+// plain domain mismatch warns only when there is NO source (with a source it
+// becomes the neutral recipientNote, so a real recruiter address is not
+// drowned in false alarms).
 export function recipientWarning(
   to: string,
   company: string,
   jobUrl: string | null,
+  contactSource?: string | null,
 ): string | null {
   const domain = to.split("@").pop()?.trim().toLowerCase() ?? "";
   if (!to.trim()) return null;
@@ -126,6 +163,9 @@ export function recipientWarning(
   const mine = registrable(domain);
   if (FREE_MAIL.has(domain) || FREE_MAIL.has(mine.domain)) {
     return `${domain} is a free-mail domain. Check that this is the right recipient.`;
+  }
+  if (contactSource !== undefined && isAtsOrAgency(domain)) {
+    return `${domain} is a recruiting platform or agency, not the employer. Check that this is the right recipient.`;
   }
   // Accents and apostrophes dropped: "Crédit Agricole", "L'Oréal" must still
   // match credit-agricole.fr / loreal.com (a false warning is trained away).
@@ -147,9 +187,31 @@ export function recipientWarning(
       (words.includes(label) && !WEAK_WORDS.has(label)) ||
       label === companyKey ||
       label === companyKeyDashed);
-  return matches
-    ? null
-    : `The recipient domain (${domain}) does not match the company (${company}) or the job posting. Check that this is the right recipient.`;
+  if (matches) return null;
+  // A recorded source is evidence the owner can read: no strong warning.
+  if (contactSource?.trim()) return null;
+  return `The recipient domain (${domain}) does not match the company (${company}) or the job posting. ${
+    contactSource === undefined ? "" : "No source was recorded for this address. "
+  }Check that this is the right recipient.`;
+}
+
+// The neutral line under the recipient (D-041): where the address came from.
+// Null when there is nothing to say.
+export function recipientNote(
+  to: string,
+  contactSource: string | null | undefined,
+): string | null {
+  const source = contactSource?.trim();
+  if (!to.trim() || !source) return null;
+  const domain = to.split("@").pop()?.trim().toLowerCase() ?? "";
+  const host = sourceHost(source);
+  if (host && domain && registrable(host).domain === registrable(domain).domain) {
+    // Same domain as the address, which says nothing about who owns it: no
+    // reassuring wording (the bot's source is as untrusted as the address).
+    return `Found on ${host} (same domain as the address).`;
+  }
+  if (host) return `Found at ${source}. Its site differs from the address domain: open it to confirm.`;
+  return `Source: ${source}.`;
 }
 
 // The address in chunks that may wrap: a break opportunity after "@" and each
@@ -166,10 +228,16 @@ export default function SendDialog({
   detail,
   open,
   onOpenChange,
+  onSent,
+  sentMessage = "Email sent",
 }: {
   detail: PackageDetail;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  // Called once, after a CONFIRMED send only (never on a failure or an
+  // unknown outcome): the caller moves to the next application (D-041).
+  onSent?: () => void;
+  sentMessage?: string;
 }) {
   const router = useRouter();
   const pkg = detail.package;
@@ -186,7 +254,15 @@ export default function SendDialog({
   }, [open]);
 
   const to = pkg.emailTo?.trim() ?? "";
-  const warning = recipientWarning(to, pkg.job.Company.label, pkg.job.jobUrl);
+  const contactSource = pkg.contactSource?.trim() || null;
+  const warning = recipientWarning(to, pkg.job.Company.label, pkg.job.jobUrl, contactSource);
+  const note = recipientNote(to, contactSource);
+  // A source softens a plain domain mismatch, never hides it (D-041): the
+  // owner still reads that the domain differs, next to where the bot found it.
+  const mismatch =
+    !warning && contactSource
+      ? recipientWarning(to, pkg.job.Company.label, pkg.job.jobUrl)
+      : null;
 
   async function send() {
     if (inFlight.current) return;
@@ -196,8 +272,9 @@ export default function SendDialog({
     try {
       const r = await sendPackage(pkg.id, pkg.updatedAt);
       if (r.success) {
-        toastSuccess("Email sent");
+        toastSuccess(sentMessage);
         onOpenChange(false);
+        onSent?.();
       } else if (CLOSE_ON.has(r.code)) {
         // The page now shows the new state (send-outcome panel, a changed or
         // locked package): the dialog has nothing left to offer.
@@ -236,6 +313,11 @@ export default function SendDialog({
             className="rounded border border-amber-500 p-2 text-sm font-medium text-amber-700 dark:text-amber-400"
           >
             {warning}
+            {contactSource && (
+              <span className="block font-normal" data-testid="send-contact-source">
+                {`The bot says it found this address here: ${contactSource}`}
+              </span>
+            )}
           </p>
         )}
         <p
@@ -249,6 +331,23 @@ export default function SendDialog({
             </Fragment>
           ))}
         </p>
+        {note && !warning && (
+          <p
+            className={
+              mismatch
+                ? "rounded border border-amber-500 p-2 text-sm text-amber-700 dark:text-amber-400"
+                : "text-sm text-muted-foreground"
+            }
+            data-testid="send-contact-source"
+          >
+            {mismatch && (
+              <span className="block font-medium">
+                The recipient domain differs from the company and the job posting.
+              </span>
+            )}
+            {note}
+          </p>
+        )}
         {failure && (
           <p
             role="alert"

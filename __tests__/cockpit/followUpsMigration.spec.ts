@@ -54,11 +54,13 @@ describe(`migration ${NEW}: upgrade keeps existing rows`, () => {
       );
       await client.$disconnect();
 
-      fs.cpSync(
-        path.join(src, "migrations", NEW),
-        path.join(prismaDir, "migrations", NEW),
-        { recursive: true },
-      );
+      // This migration and every later one: the generated client expects the latest schema.
+      for (const name of fs.readdirSync(path.join(src, "migrations"))) {
+        if (name < NEW || name === "migration_lock.toml") continue;
+        fs.cpSync(path.join(src, "migrations", name), path.join(prismaDir, "migrations", name), {
+          recursive: true,
+        });
+      }
       deploy();
 
       client = new PrismaClient({ datasources: { db: { url } } });

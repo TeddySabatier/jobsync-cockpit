@@ -570,6 +570,7 @@ model ApplicationPackage {
   cvFile           File?     @relation(fields: [cvFileId], references: [id], onDelete: SetNull)
   cvPdfStale       Boolean   @default(false) // true after a manual cvJson edit, until a new version arrives
   sourceFolder     String?                   // bot's local folder name, informational
+  contactSource    String?                   // where the recipient address was found (URL or short note), shown in Review
   idempotencyKey   String?
   rejectReason     String?
   changeRequest    String?

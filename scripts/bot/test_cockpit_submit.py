@@ -34,7 +34,7 @@ KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{1,100}$")
 CONFLICT_TEXT = "The package or job changed, or a send is in progress; fetch the current state and retry the whole request"
 LIMITS = json.loads((Path(__file__).parent / "cockpit_limits.json").read_text(encoding="utf-8"))
 SUBMIT_KEYS = ("jobId", "emailTo", "emailSubject", "emailBody", "letterMd", "fitGrade", "fitAnalysis",
-               "cvJson", "cvFileId", "sourceFolder", "idempotencyKey")
+               "cvJson", "cvFileId", "sourceFolder", "contactSource", "idempotencyKey")
 # The server's blank rule, written out independently of the script's: only whitespace, separators,
 # control / format characters (zero width, soft hyphen, BOM) and the fillers that draw nothing.
 BLANK_RE = re.compile(
@@ -165,6 +165,7 @@ class Stub:
                 lambda a: self.json_problem("cvJson", a.get("cvJson"), LIMITS["cvJsonMax"]),
                 lambda a: self.length_problem("cvFileId", a["cvFileId"], 1, None) if "cvFileId" in a else None,
                 lambda a: self.length_problem("sourceFolder", a.get("sourceFolder") or "", 0, LIMITS["sourceFolderMax"]),
+                lambda a: self.length_problem("contactSource", a.get("contactSource") or "", 0, LIMITS["contactSourceMax"]),
                 lambda a: None if "idempotencyKey" not in a or re.match(LIMITS["idempotencyKeyPattern"], a["idempotencyKey"])
                 else "idempotencyKey has an invalid format",
             ))
@@ -565,6 +566,44 @@ class CommandTests(FolderMixin, unittest.TestCase):
         self.assertRegex(package["idempotencyKey"], KEY_RE)
         self.assertEqual(set(self.stub.auth), {"Bearer " + TOKEN})
 
+    def test_contact_source_is_passed_only_when_given(self):
+        # D-041: an older server refuses unknown keys, so an absent source is an absent key.
+        folder = self.make_folder()
+        code, result, _ = run(self.args(folder))
+        self.assertEqual(code, 0, result)
+        self.assertNotIn("contactSource", self.stub.calls[3][1])
+        other = self.make_folder()
+        code, result, _ = run(self.args(other, "--contact-source", "https://acme.example/careers", company="Beta", link="https://example.com/job/2"))
+        self.assertEqual(code, 0, result)
+        package = [c for c in self.stub.calls if c[0] == "submit_application_package"][-1][1]
+        self.assertEqual(package["contactSource"], "https://acme.example/careers")
+
+    def test_contact_source_from_the_meta_file_and_a_blank_one_is_dropped(self):
+        folder = self.make_folder()
+        meta = folder / "meta.json"
+        meta.write_text(json.dumps({"company": "Acme", "role": "Backend Engineer", "subject": "S", "fit": "A",
+                                    "url": LINK, "contact_source": "  posting  "}), encoding="utf-8")
+        code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(folder), "--meta", str(meta)])
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.stub.calls[3][1]["contactSource"], "posting")
+
+    def test_contact_source_is_truncated_to_the_server_limit(self):
+        folder = self.make_folder()
+        code, result, _ = run(self.args(folder, "--contact-source", "u" * 500))
+        self.assertEqual(code, 0, result)
+        self.assertEqual(len(self.stub.calls[3][1]["contactSource"]), LIMITS["contactSourceMax"])
+
+    def test_a_run_without_contact_source_keeps_its_old_digest(self):
+        # Adding the option must not turn an already submitted folder into CONTENT_CHANGED.
+        folder = self.make_folder()
+        code, _, _ = run(self.args(folder))
+        self.assertEqual(code, 0)
+        calls = len(self.stub.calls)
+        code, result, _ = run(self.args(folder))
+        self.assertEqual(code, 0, result)
+        self.assertTrue(result.get("idempotent"))
+        self.assertEqual(len(self.stub.calls), calls)
+
     def test_a_job_that_exists_without_a_package_is_reused(self):
         job_id = self.stub.seed_job()
         code, result, _ = run(self.args(self.make_folder()))
@@ -778,6 +817,26 @@ class CommandTests(FolderMixin, unittest.TestCase):
         self.assertEqual(package["idempotencyKey"], "scout-rev-pkg-9")
         self.assertEqual(package["fitAnalysis"]["track"], "AI")
         self.assertEqual(package["fitAnalysis"]["extra"], {"keep": "me"})  # nothing the owner stored is dropped
+
+    def test_revision_keeps_the_contact_source_of_the_same_recipient_only(self):
+        # D-041 review: the source belongs to the address; a new address must not inherit it.
+        self.change_request(contactSource="https://example.com/team")
+        code, result, _ = self.revise(self.make_folder())
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.stub.calls[-1][1]["contactSource"], "https://example.com/team")
+
+    def test_revision_with_a_new_recipient_does_not_inherit_the_old_source(self):
+        self.change_request(contactSource="https://example.com/team")
+        code, result, _ = self.revise(self.make_folder(), "--to", "other@example.org")
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.stub.calls[-1][0], "submit_application_package")
+        self.assertNotIn("contactSource", self.stub.calls[-1][1])
+
+    def test_revision_with_a_new_recipient_and_its_own_source(self):
+        self.change_request(contactSource="https://example.com/team")
+        code, result, _ = self.revise(self.make_folder(), "--to", "other@example.org", "--contact-source", "posting")
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.stub.calls[-1][1]["contactSource"], "posting")
 
     def test_revision_options_override_the_package_values(self):
         self.change_request()
@@ -1651,6 +1710,7 @@ class StubLimitTests(FolderMixin, unittest.TestCase):
             "emailBody": LIMITS["emailBodyMax"],
             "letterMd": LIMITS["letterMdMax"],
             "sourceFolder": LIMITS["sourceFolderMax"],
+            "contactSource": LIMITS["contactSourceMax"],
         }
         for field, limit in cases.items():
             self.assertAccepts(self.submit(**{field: "x" * limit}), field)

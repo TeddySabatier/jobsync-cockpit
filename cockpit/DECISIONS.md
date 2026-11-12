@@ -496,3 +496,21 @@ Scope of this entry: data model, the pure due calculation, the follow-up state a
 
 - **Scope:** `statusLabels.ts`, `StatusBadge.tsx`, `FitGradeBadge.tsx`, `queueOrder.ts`, `panelModels.ts`, the queue components, `Panels.tsx` (Letter, Fit, history), `SendOutcomePanel.tsx`, `SendDialog.tsx`, `TextDialog.tsx`, `EditForm.tsx` (error colour), `packages.ts` (`listPackagesByTab`, `countPackagesByTab`), `getReviewQueue` (adds `counts`), the My jobs table, toolbar, job details, `AddJob`, `CopyPromptButton` (class only), `__tests__/cockpit/uxVisual.spec.tsx`.
 - **Not changed:** schema, send and approve logic, the detail header, the action bar (part B).
+
+## D-041 UX flow B: summary strip, next-step button, auto-advance, reopen (owner request)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | `contactSource` (nullable text, <= 300) on the package: where the recipient was found. Migration `20261116120000_contact_source` is one `ADD COLUMN`, no default. Submit schema, MCP descriptions, `get_job` / `list_change_requests`, bot script (`--contact-source`, `contact_source` in meta, kept out of the idempotency digest so old folders do not turn into CONTENT_CHANGED; sent only when present because an older server refuses unknown keys), limits table and backup schema (`optional`, old backups import) | **Accept.** | The costliest field was unexplained |
+| (b) | Recipient warning: free-mail, ATS / agency and incomplete addresses always warn; a domain mismatch warns strongly only with **no** source. With a source it becomes a visible amber note, never silence. Callers that pass no source keep the old behaviour | **Accept.** | Fewer false alarms without hiding a mismatch |
+| (c) | **Approve and send…** approves, then opens the Send dialog once the approval is on the page (fresh `updatedAt`). It never sends by itself. Lock, in-flight guard, `updatedAt` check and unknown-outcome recovery untouched | **Accept.** | Removes a click, not a guard |
+| (d) | Apply-by-link: **Open job posting** + **I applied**. `markPackageAppliedManually` already accepts `pending` for a package without recipient (SPEC 2.1), so no server rule changed; a package WITH a recipient is still refused | **Accept.** | |
+| (e) | Auto-advance (Send, Mark applied, Reject) to the next To do item (else previous, else the queue "All done"), only after a confirmed success | **Accept.** | |
+| (f) | Reject reason optional (blank stored as null). **Reopen**: rejected -> pending, reason / time cleared, refused when the job has another live package or the package is locked. Reject never touched the job, so nothing to undo there; the bot's `JOB_REJECTED` guard looks at the active package, so after a reopen the bot sees a pending package | **Accept.** | A wrong reject was permanent |
+| (g) | New prompts: change requests, refresh and prepare (cap `REFRESH_AND_PREPARE_CAP` = 5, A/B only, table report, never sends). The Review link is added only when an app URL is given; no such setting exists, so the prompts say "open Review in the app" | **Accept.** | |
+| (h) | Edit drafts autosave to `localStorage` (try/catch, key = id + updatedAt, 7 days); `navGuard` also guards Back (sentinel history entry) | **Accept.** | |
+| (i) | **Deferred:** multi-select "Copy prompt for selected" on the jobs list (not clean in the current list), human labels for CV fields (EditForm styling is coder A's), an app base URL setting | | |
+
+- **Scope:** review detail, action bar, summary strip, sidebar, prompts, backup schema, MCP submit, bot script, tests.
+- **Not changed:** `send.ts`, the Send guards.
+- **Review of PR #95 (tester):** Reopen is also refused when a newer non-superseded application version of the job exists (only the active one may come back, so the queue and the bot's `JOB_REJECTED` guard agree). `contactSource` is stored as one line: control (CR/LF, tab), zero-width and bidi characters become a space (`cleanContactSource`). The sidebar count counts applications only, like the To do tab (follow-up drafts are not in it). The bot script carries a change request's `contactSource` over only when the recipient is unchanged. The Send dialog's same-domain note no longer calls the address domain "its own site".

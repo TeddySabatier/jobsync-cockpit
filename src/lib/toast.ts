@@ -30,3 +30,12 @@ export function toastActionResult<T>(
     toastError(result?.message ?? opts.error);
   }
 }
+
+// A success toast with one action button (e.g. "Undo") that stays for `ms`.
+export function toastWithAction(
+  message: string,
+  action: { label: string; onClick: () => void },
+  ms = 6000,
+) {
+  toast.success(message, { duration: ms, action: { label: action.label, onClick: action.onClick } });
+}

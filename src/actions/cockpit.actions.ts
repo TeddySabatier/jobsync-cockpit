@@ -19,7 +19,9 @@ import {
   listPackagesByTab,
   listSendHistory,
   markPackageAppliedManually as markPackageAppliedManuallySvc,
+  countTodo,
   rejectPackage as rejectPackageSvc,
+  reopenPackage as reopenPackageSvc,
   requestPackageChanges as requestPackageChangesSvc,
   unapprovePackage as unapprovePackageSvc,
   updatePackageContent as updatePackageContentSvc,
@@ -50,8 +52,14 @@ export async function unapprovePackage(id: string) {
   return mutate(reviewPaths(id), (userId) => unapprovePackageSvc(userId, id));
 }
 
-export async function rejectPackage(id: string, reason: string) {
+// The reason is optional (D-041).
+export async function rejectPackage(id: string, reason?: string) {
   return mutate(reviewPaths(id), (userId) => rejectPackageSvc(userId, id, reason));
+}
+
+// Undo a reject: back to pending (D-041).
+export async function reopenPackage(id: string) {
+  return mutate(reviewPaths(id, { jobs: true }), (userId) => reopenPackageSvc(userId, id));
 }
 
 export async function requestPackageChanges(id: string, instruction: string) {
@@ -152,6 +160,14 @@ export async function getAdjacentPackageIds(id: string) {
     return {
       previousId: i > 0 ? rows[i - 1].id : null,
       nextId: i >= 0 && i < rows.length - 1 ? rows[i + 1].id : null,
+      // Other To do applications besides this one (auto-advance toast).
+      todoLeft: i >= 0 ? rows.length - 1 : rows.length,
     };
   });
+}
+
+// Sidebar badge and focus refresh: how many applications wait in To do. Cheap
+// (one count); an error or a disabled cockpit is a quiet failure result.
+export async function getTodoCount() {
+  return run(async (userId) => countTodo(userId));
 }

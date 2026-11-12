@@ -1,15 +1,22 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { formatDistanceToNow } from "date-fns";
 import { MoreHorizontal } from "lucide-react";
 import {
   approvePackage,
   markPackageAppliedManually,
   rejectPackage,
+  reopenPackage,
   requestPackageChanges,
   unapprovePackage,
 } from "@/actions/cockpit.actions";
 import type { CockpitResult } from "@/lib/cockpit/errors";
+import { advanceMessage, pickAdvanceTarget, type AdjacentIds } from "@/lib/cockpit/advance";
+import { nextStep } from "@/lib/cockpit/nextStep";
+import { sendBlockedReason } from "@/lib/cockpit/sendBlocked";
+import { toastWithAction } from "@/lib/toast";
 import { formatUrl } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,46 +43,53 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ChangeRequestsPromptButton } from "./ChangeRequestsPromptButton";
 import EditRerender from "./EditRerender";
 import type { PackageDetail } from "./Panels";
+import RejectDialog from "./RejectDialog";
 import SendDialog from "./SendDialog";
 import SendOutcomePanel from "./SendOutcomePanel";
 import { runAction } from "./runAction";
 import TextDialog from "./TextDialog";
+import { useActionKeys } from "./useActionKeys";
 
 type DialogKind = "reject" | "changes" | "applied" | null;
 
-// Why an approved package cannot be sent yet (SPEC §5.3), in priority order.
-export function sendBlockedReason(detail: PackageDetail): string | null {
-  const pkg = detail.package;
-  if (pkg.cvPdfStale) return "The CV PDF is out of date. Ask the bot to re-render.";
-  if (!pkg.cvFileId || !detail.attachment) return "No CV file is attached.";
-  if (!detail.gmail) return "Gmail is not connected. Connect it in settings.";
-  // Send would refuse with "Reconnect Gmail" for this (D-023): say why instead.
-  if (!detail.gmailSendAllowed) {
-    return "Sending is only allowed from the address configured for the cockpit. Connect that address in settings.";
-  }
-  return null;
-}
+// Kept here for existing importers; the rule lives in lib/cockpit/sendBlocked.ts.
+export { sendBlockedReason };
+
+const NO_ADJACENT: AdjacentIds = { previousId: null, nextId: null };
+
+// Reject is a destructive action: red outline (dark-mode contrast included).
+const REJECT_CLASS =
+  "h-11 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive dark:text-red-400 dark:border-red-400/50 @md/main:ml-auto";
 
 // Sticky action bar (SPEC §5.3). Hidden entirely on non-active versions by the
-// caller. One primary CTA per state; the rest are secondary. Hosts the Send
-// button, its dialog and (when locked) the send-outcome panel.
+// caller. One primary per stage (lib/cockpit/nextStep.ts), the rest secondary.
+// Hosts the Send dialog, the send-outcome panel (when locked), and moves on to
+// the next application after Send / Mark applied / Reject (D-041).
 export default function ActionBar({
   detail,
   onEdit,
   focusEditOnMount,
+  adjacent = NO_ADJACENT,
 }: {
   detail: PackageDetail;
   onEdit?: () => void;
   // Set when the bar comes back after leaving edit mode: focus goes to Edit.
   focusEditOnMount?: boolean;
+  // To do neighbours of this application, for auto-advance.
+  adjacent?: AdjacentIds;
 }) {
   const pkg = detail.package;
+  const router = useRouter();
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  // "Approve and send...": the dialog opens once the approval is on the page,
+  // so Send runs against the fresh updatedAt (the dialog reads `detail`).
+  const [sendAfterApprove, setSendAfterApprove] = useState(false);
 
   const editRef = useRef<HTMLButtonElement>(null);
   const regionRef = useRef<HTMLDivElement>(null);
@@ -87,38 +101,43 @@ export default function ActionBar({
     if (document.activeElement !== editRef.current) regionRef.current?.focus();
   }, [focusEditOnMount]);
 
-  const isOpenStatus = pkg.status === "pending" || pkg.status === "approved";
-
-  if (pkg.status === "changes_requested") {
-    return (
-      <p className="py-3 text-sm text-muted-foreground">
-        Waiting for the bot to resubmit with your requested changes.
-      </p>
-    );
-  }
-  if (!isOpenStatus) return null;
-  if (pkg.sendStartedAt) {
-    return (
-      <SendOutcomePanel
-        packageId={pkg.id}
-        sendStartedAt={pkg.sendStartedAt}
-        sendOutcome={pkg.sendOutcome}
-      />
-    );
-  }
+  useEffect(() => {
+    if (!sendAfterApprove) return;
+    if (pkg.status === "approved" && !pkg.sendStartedAt) {
+      setSendAfterApprove(false);
+      setSendOpen(true);
+      return;
+    }
+    // The refreshed page never arrived: do not open a dialog out of the blue later.
+    const t = setTimeout(() => setSendAfterApprove(false), 10_000);
+    return () => clearTimeout(t);
+  }, [sendAfterApprove, pkg.status, pkg.sendStartedAt]);
 
   const company = pkg.job.Company.label;
   const role = pkg.job.JobTitle.label;
   const jobUrl = pkg.job.jobUrl?.trim() || null;
-  const linkApply = !pkg.emailTo?.trim();
+  const step = nextStep({
+    status: pkg.status,
+    sendStarted: !!pkg.sendStartedAt,
+    hasRecipient: !!pkg.emailTo?.trim(),
+    blockedReason: sendBlockedReason(detail),
+    hasJobUrl: !!jobUrl,
+  });
+  const target = pickAdvanceTarget(adjacent);
 
-  const run = (fn: () => Promise<CockpitResult<unknown>>, success: string) =>
+  const run = (
+    fn: () => Promise<CockpitResult<unknown>>,
+    success: string,
+    extra?: { onSuccess?: () => void; showSuccess?: () => void },
+  ) =>
     runAction(fn, {
       success,
       setBusy,
+      showSuccess: extra?.showSuccess,
       onSuccess: () => {
         setDialog(null);
         setSheetOpen(false);
+        extra?.onSuccess?.();
       },
     });
 
@@ -127,75 +146,186 @@ export default function ActionBar({
     setDialog(kind);
   };
 
-  let primary: React.ReactNode = null;
-  let reason: React.ReactNode = null;
-  if (pkg.status === "pending") {
-    primary = (
-      <Button
-        disabled={busy}
-        onClick={() => run(() => approvePackage(pkg.id), "Package approved")}
-      >
-        Approve
-      </Button>
+  const approveAndSend = () =>
+    run(() => approvePackage(pkg.id), "Application approved", {
+      onSuccess: () => setSendAfterApprove(true),
+    });
+  // Approve without sending: reachable from the menu, with a 6 s Undo.
+  const approveOnly = () =>
+    run(() => approvePackage(pkg.id), "Application approved", {
+      showSuccess: () =>
+        toastWithAction("Application approved", {
+          label: "Undo",
+          onClick: () => void run(() => unapprovePackage(pkg.id), "Approval undone"),
+        }),
+    });
+  const unapprove = () => run(() => unapprovePackage(pkg.id), "Approval undone");
+  const reopen = () => run(() => reopenPackage(pkg.id), "Application reopened");
+
+  const actionable =
+    step.kind === "approve_and_send" ||
+    step.kind === "approve_only" ||
+    step.kind === "send" ||
+    step.kind === "send_blocked" ||
+    step.kind === "link_apply";
+
+  // a / e / x (lib/cockpit/keys.ts): only while this bar offers the action.
+  useActionKeys({
+    approve:
+      busy || !actionable
+        ? undefined
+        : step.kind === "approve_and_send"
+          ? () => void approveAndSend()
+          : step.kind === "approve_only"
+            ? () => void approveOnly()
+            : step.kind === "send"
+              ? () => setSendOpen(true)
+              : step.kind === "link_apply"
+                ? () => setDialog("applied")
+                : undefined,
+    edit: busy || !actionable ? undefined : onEdit,
+    reject: busy || !actionable ? undefined : () => setDialog("reject"),
+  });
+
+  if (step.kind === "locked") {
+    return (
+      <SendOutcomePanel
+        packageId={pkg.id}
+        sendStartedAt={pkg.sendStartedAt!}
+        sendOutcome={pkg.sendOutcome}
+      />
     );
-  } else if (linkApply) {
-    if (jobUrl) {
-      primary = (
-        <Button asChild>
-          <a href={formatUrl(jobUrl)} target="_blank" rel="noopener noreferrer">
-            Open job posting
-          </a>
-        </Button>
-      );
-    }
-  } else {
-    const blocked = sendBlockedReason(detail);
-    if (blocked) {
-      reason = (
+  }
+  if (step.kind === "none") return null;
+
+  const barClass =
+    "sticky bottom-0 z-10 flex flex-col gap-2 border-t bg-background pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-4px_8px_rgba(0,0,0,0.12)]";
+
+  if (step.kind === "handle_changes") {
+    return (
+      <div role="region" aria-label="Actions" className={barClass}>
         <p className="text-sm text-muted-foreground">
-          {blocked}
-          {(!detail.gmail || !detail.gmailSendAllowed) && (
-            <>
-              {" "}
-              <Link href="/dashboard/review/settings" className="underline">
-                Open settings
-              </Link>
-            </>
-          )}
+          {`Waiting for Claude to answer your change request${
+            pkg.changeRequestedAt
+              ? ` (asked ${formatDistanceToNow(new Date(pkg.changeRequestedAt), { addSuffix: true })})`
+              : ""
+          }. Copy the prompt, paste it into Claude, and the new version appears in To do.`}
         </p>
-      );
-    } else {
-      primary = (
-        <Button className="w-full @md/main:w-auto" disabled={busy} onClick={() => setSendOpen(true)}>
-          Send
-        </Button>
-      );
-    }
+        <div>
+          <ChangeRequestsPromptButton className="h-11 gap-2" variant="default" />
+        </div>
+      </div>
+    );
+  }
+  if (step.kind === "reopen") {
+    return (
+      <div role="region" aria-label="Actions" className={barClass}>
+        <p className="text-sm text-muted-foreground">
+          This application was rejected. Reopen it to review it again.
+        </p>
+        <div>
+          <Button className="h-11" disabled={busy} onClick={() => void reopen()}>
+            Reopen
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  if (step.kind === "next") {
+    return (
+      <div role="region" aria-label="Actions" className={barClass}>
+        <div>
+          <Button asChild className="h-11">
+            <Link href={target.href}>Next: back to To do</Link>
+          </Button>
+        </div>
+      </div>
+    );
   }
 
-  const secondary = (
-    <>
-      {pkg.status === "approved" && (
+  let primary: React.ReactNode = null;
+  let reason: React.ReactNode = null;
+  switch (step.kind) {
+    case "approve_and_send":
+      primary = (
         <Button
-          variant="outline"
+          className="h-11 w-full @md/main:w-auto"
           disabled={busy}
-          onClick={() => run(() => unapprovePackage(pkg.id), "Package unapproved")}
+          onClick={() => void approveAndSend()}
         >
-          Unapprove
+          Approve and send…
         </Button>
-      )}
-      {onEdit && (
-        <Button ref={editRef} variant="outline" disabled={busy} onClick={onEdit}>
-          Edit
+      );
+      break;
+    case "approve_only":
+      primary = (
+        <Button
+          className="h-11 w-full @md/main:w-auto"
+          disabled={busy}
+          onClick={() => void approveOnly()}
+        >
+          Approve
         </Button>
-      )}
-      <Button variant="outline" disabled={busy} onClick={() => pickDialog("reject")}>
-        Reject
-      </Button>
-      <Button variant="outline" disabled={busy} onClick={() => pickDialog("changes")}>
-        Request changes
-      </Button>
-    </>
+      );
+      reason = <BlockedReason text={step.reason} detail={detail} />;
+      break;
+    case "send":
+      primary = (
+        <Button
+          className="h-11 w-full @md/main:w-auto"
+          disabled={busy}
+          onClick={() => setSendOpen(true)}
+        >
+          Send…
+        </Button>
+      );
+      break;
+    case "send_blocked":
+      reason = <BlockedReason text={step.reason} detail={detail} />;
+      break;
+    case "link_apply":
+      primary = (
+        <>
+          {jobUrl && (
+            <Button asChild className="h-11 flex-1 @md/main:flex-none">
+              <a href={formatUrl(jobUrl)} target="_blank" rel="noopener noreferrer">
+                Open job posting
+              </a>
+            </Button>
+          )}
+          <Button
+            variant={jobUrl ? "outline" : "default"}
+            className="h-11 flex-1 @md/main:flex-none"
+            disabled={busy}
+            onClick={() => setDialog("applied")}
+          >
+            I applied
+          </Button>
+        </>
+      );
+      break;
+  }
+
+  const approved = pkg.status === "approved";
+  const canApproveOnly = step.kind === "approve_and_send";
+  const hasMenu = approved || canApproveOnly;
+
+  // Edit and Request changes: next to the primary on wide containers, in the
+  // sheet on narrow ones.
+  const editButton = onEdit && (
+    <Button ref={editRef} variant="outline" className="h-11" disabled={busy} onClick={onEdit}>
+      Edit
+    </Button>
+  );
+  const changesButton = (
+    <Button variant="outline" className="h-11" disabled={busy} onClick={() => pickDialog("changes")}>
+      Request changes
+    </Button>
+  );
+  const rejectButton = (
+    <Button variant="outline" className={REJECT_CLASS} disabled={busy} onClick={() => pickDialog("reject")}>
+      Reject
+    </Button>
   );
 
   return (
@@ -204,7 +334,7 @@ export default function ActionBar({
       aria-label="Actions"
       ref={regionRef}
       tabIndex={-1}
-      className="sticky bottom-0 z-10 flex flex-col gap-2 border-t bg-background py-3"
+      className={barClass}
     >
       {reason}
       {pkg.cvPdfStale && (
@@ -214,68 +344,91 @@ export default function ActionBar({
       )}
       <div className="flex flex-wrap items-center gap-2">
         {primary}
-        {/* Wide containers: secondary buttons inline, Mark applied in the overflow menu. */}
-        <div className="hidden items-center gap-2 @md/main:flex">{secondary}</div>
-        {linkApply && (
-          <div className="hidden @md/main:block">
+        {/* Wide containers: Edit and Request changes inline, Reject at the far
+            end, the rest in the menu. `contents` keeps them in this flex row. */}
+        <div className="hidden @md/main:contents">
+          {editButton}
+          {changesButton}
+          {hasMenu && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" aria-label="Overflow menu">
+                <Button variant="outline" size="icon" className="h-11 w-11" aria-label="Overflow menu">
                   <MoreHorizontal />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                <DropdownMenuItem onSelect={() => setDialog("applied")}>
-                  Mark applied manually
-                </DropdownMenuItem>
+                {canApproveOnly && (
+                  <DropdownMenuItem onSelect={() => void approveOnly()}>
+                    Approve only (send later)
+                  </DropdownMenuItem>
+                )}
+                {approved && (
+                  <DropdownMenuItem onSelect={() => void unapprove()}>Unapprove</DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
-        )}
+          )}
+          {rejectButton}
+        </div>
         {/* Narrow containers: everything secondary goes into one sheet. */}
         <div className="@md/main:hidden">
           <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
             <SheetTrigger asChild>
-              <Button variant="outline">More</Button>
+              <Button variant="outline" className="h-11">
+                More
+              </Button>
             </SheetTrigger>
             <SheetContent side="bottom">
               <SheetHeader>
                 <SheetTitle>More actions</SheetTitle>
                 <SheetDescription className="sr-only">
-                  Other actions for this package
+                  Other actions for this application
                 </SheetDescription>
               </SheetHeader>
               <div className="mt-4 flex flex-col gap-2 [&>button]:w-full">
-                {secondary}
-                {linkApply && (
-                  <Button variant="outline" onClick={() => pickDialog("applied")}>
-                    Mark applied manually
+                {editButton}
+                {changesButton}
+                {canApproveOnly && (
+                  <Button variant="outline" className="h-11" disabled={busy} onClick={() => void approveOnly()}>
+                    Approve only (send later)
                   </Button>
                 )}
+                {approved && (
+                  <Button variant="outline" className="h-11" disabled={busy} onClick={() => void unapprove()}>
+                    Unapprove
+                  </Button>
+                )}
+                {rejectButton}
               </div>
             </SheetContent>
           </Sheet>
         </div>
       </div>
 
-      <SendDialog detail={detail} open={sendOpen} onOpenChange={setSendOpen} />
-      <TextDialog
+      <SendDialog
+        detail={detail}
+        open={sendOpen}
+        onOpenChange={setSendOpen}
+        sentMessage={advanceMessage("Email sent", target)}
+        onSent={() => router.push(target.href)}
+      />
+      <RejectDialog
         open={dialog === "reject"}
         onOpenChange={(o) => !o && setDialog(null)}
-        title="Reject this package"
-        description="Say why. The reason is kept with the package and the job stays rejected."
-        label="Reject reason"
-        submitLabel="Reject"
         busy={busy}
         onSubmit={(reasonText) =>
-          run(() => rejectPackage(pkg.id, reasonText), "Package rejected")
+          run(
+            () => rejectPackage(pkg.id, reasonText || undefined),
+            advanceMessage("Application rejected", target),
+            { onSuccess: () => router.push(target.href) },
+          )
         }
       />
       <TextDialog
         open={dialog === "changes"}
         onOpenChange={(o) => !o && setDialog(null)}
         title="Request changes"
-        description="Tell the bot what to change. It will resubmit a new version."
+        description="Tell Claude what to change. It will send back a new version."
         label="Change request"
         submitLabel="Request changes"
         busy={busy}
@@ -292,7 +445,7 @@ export default function ActionBar({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Mark applied manually</AlertDialogTitle>
+            <AlertDialogTitle>Mark as applied</AlertDialogTitle>
             <AlertDialogDescription>
               {`Mark your application to ${role} at ${company} (${jobUrl ?? "no posting URL"}) as applied? No email will be sent.`}
             </AlertDialogDescription>
@@ -305,7 +458,8 @@ export default function ActionBar({
                 e.preventDefault();
                 void run(
                   () => markPackageAppliedManually(pkg.id),
-                  "Marked as applied",
+                  advanceMessage("Marked as applied", target),
+                  { onSuccess: () => router.push(target.href) },
                 );
               }}
             >
@@ -315,5 +469,21 @@ export default function ActionBar({
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+function BlockedReason({ text, detail }: { text: string; detail: PackageDetail }) {
+  return (
+    <p className="text-sm text-muted-foreground">
+      {text}
+      {(!detail.gmail || !detail.gmailSendAllowed) && (
+        <>
+          {" "}
+          <Link href="/dashboard/review/settings" className="underline">
+            Open settings
+          </Link>
+        </>
+      )}
+    </p>
   );
 }

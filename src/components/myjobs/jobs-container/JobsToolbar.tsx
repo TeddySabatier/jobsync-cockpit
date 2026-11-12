@@ -15,6 +15,7 @@ import {
 } from "../../ui/select";
 import { RecordsCount } from "../../RecordsCount";
 import { RefreshJobsPromptButton } from "@/components/cockpit/RefreshJobsPromptButton";
+import { RefreshAndPreparePromptButton } from "@/components/cockpit/RefreshAndPreparePromptButton";
 import { JobsViewToggle } from "../JobsViewToggle";
 import { AddJob } from "../AddJob";
 import {
@@ -193,6 +194,7 @@ export function JobsToolbar({
           </span>
         </Button>
         {cockpitEnabled && <RefreshJobsPromptButton />}
+        {cockpitEnabled && <RefreshAndPreparePromptButton />}
         <AddJob
           jobStatuses={statuses}
           companies={companies}
