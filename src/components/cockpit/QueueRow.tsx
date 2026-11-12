@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { sendState } from "@/lib/cockpit/queueOrder";
+import { FollowUpChip, FollowUpMenu, hasFollowUpMenu } from "./FollowUpControls";
 import FitGradeBadge from "./FitGradeBadge";
 import StatusBadge from "./StatusBadge";
 import type { getReviewQueue } from "@/actions/cockpit.actions";
@@ -22,10 +23,15 @@ type QueueData = Extract<
 export type QueueRowData = QueueData["rows"][number];
 
 // Readiness chips (SPEC §5.2): shown only for a problem or a mode.
-export function readinessChips(row: QueueRowData, gmailConnected: boolean) {
+export function readinessChips(
+  row: Pick<QueueRowData, "emailTo" | "cvPdfStale" | "cvFileId"> & { kind?: string },
+  gmailConnected: boolean,
+) {
   const chips: string[] = [];
   const hasEmail = !!row.emailTo?.trim();
   if (hasEmail && !gmailConnected) chips.push("Gmail");
+  // A follow-up carries no CV and is always an email (D-042).
+  if (row.kind === "follow_up") return chips;
   if (row.cvPdfStale) chips.push("PDF stale");
   if (!row.cvFileId) chips.push("No CV");
   if (!hasEmail) chips.push("Link apply");
@@ -66,11 +72,27 @@ export default function QueueRow({
   const unknown = state === "unknown";
   const company = row.job.Company.label;
   const title = row.job.JobTitle.label;
+  const isFollowUp = row.kind === "follow_up";
+  // Row menu (D-042): only on an open, unlocked follow-up draft. It sits beside
+  // the link (a menu inside a link would navigate on every click).
+  const menu =
+    isFollowUp &&
+    row.followUp &&
+    !row.sendStartedAt &&
+    ["pending", "approved", "changes_requested"].includes(row.status) &&
+    hasFollowUpMenu(row.followUp)
+      ? row.followUp
+      : null;
   return (
-    <li>
+    <li className="relative">
+      {menu && (
+        <div className="absolute right-2 top-2 z-[1]">
+          <FollowUpMenu summary={menu} className="h-11 w-11 @md/main:h-9 @md/main:w-9" />
+        </div>
+      )}
       <Link
         href={`/dashboard/review/${row.id}`}
-        className="flex flex-col gap-2 rounded-lg border bg-card p-3 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @md/main:flex-row @md/main:flex-wrap @md/main:items-center @md/main:gap-x-4 @md/main:gap-y-2"
+        className={`flex flex-col gap-2 rounded-lg border bg-card p-3 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @md/main:flex-row @md/main:flex-wrap @md/main:items-center @md/main:gap-x-4 @md/main:gap-y-2 ${menu ? "pr-16 @md/main:pr-14" : ""}`}
       >
         <div className="min-w-0 flex-1 @md/main:min-w-[10rem]">
           <p className="truncate font-medium" title={company}>
@@ -97,6 +119,7 @@ export default function QueueRow({
               Sending
             </Badge>
           )}
+          {isFollowUp && <FollowUpChip step={row.followUpStep} />}
           {row.fitGrade && <FitGradeBadge grade={row.fitGrade} />}
           <span className="text-xs text-muted-foreground">v{row.version}</span>
           <StatusBadge status={row.status} />

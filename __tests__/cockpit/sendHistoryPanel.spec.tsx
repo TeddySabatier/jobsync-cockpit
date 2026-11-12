@@ -31,6 +31,10 @@ const detail = (
   history: PackageDetail["sendHistory"],
   over: Partial<PackageDetail["package"]> = {},
 ): PackageDetail => ({
+  kind: "application",
+  followUp: null,
+  followUpStep: null,
+  replyTo: null,
   package: {
     id: "p1",
     version: 1,

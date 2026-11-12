@@ -3,6 +3,7 @@
 import { mutate } from "@/lib/cockpit/actionRunner";
 import { CockpitError } from "@/lib/cockpit/errors";
 import {
+  setApplicationOutcome as setApplicationOutcomeSvc,
   setFollowUpOutcome as setFollowUpOutcomeSvc,
   skipFollowUpStep as skipFollowUpStepSvc,
   snoozeFollowUp as snoozeFollowUpSvc,
@@ -43,6 +44,15 @@ export async function setFollowUpOutcome(jobId: string, outcome: string) {
   return mutate(PATHS, (userId) =>
     setFollowUpOutcomeSvc(userId, jobIdOf(jobId), outcome),
   );
+}
+
+// The review page toggles (D-042): "replied", "rejected" (also sets the job
+// status), or null to clear. Outcome and status change in one transaction.
+export async function setApplicationOutcome(jobId: string, outcome: string | null) {
+  return mutate(PATHS, (userId) => {
+    if (outcome !== null && typeof outcome !== "string") throw new CockpitError("VALIDATION");
+    return setApplicationOutcomeSvc(userId, jobIdOf(jobId), outcome);
+  });
 }
 
 export async function undoFollowUpOutcome(jobId: string) {

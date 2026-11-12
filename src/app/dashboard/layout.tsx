@@ -15,6 +15,7 @@ import StaleSessionSignOut from "@/components/StaleSessionSignOut";
 import { signOut } from "@/auth";
 import { isCockpitEnabled } from "@/lib/cockpit/config";
 import { countTodo } from "@/lib/cockpit/packages";
+import { countDueFollowUps } from "@/lib/cockpit/followUpMcp";
 import { getTodoCount } from "@/actions/cockpit.actions";
 
 export default async function RootLayout({
@@ -44,12 +45,14 @@ export default async function RootLayout({
     return <StaleSessionSignOut signOutAction={signOutAction} />;
   }
 
-  // Sidebar badge (D-041): one count, only with the cockpit on. A failure is
-  // just no badge; it must never break the dashboard.
+  // Sidebar badge (D-041, D-042): To do items plus due follow-ups not drafted
+  // yet, only with the cockpit on. A failure is just no badge; it must never
+  // break the dashboard.
   let reviewCount: number | undefined;
   if (cockpitEnabled) {
     try {
-      reviewCount = await countTodo(user.id);
+      const [todo, due] = await Promise.all([countTodo(user.id), countDueFollowUps(user.id)]);
+      reviewCount = todo + due;
     } catch {
       reviewCount = undefined;
     }

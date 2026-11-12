@@ -457,13 +457,24 @@ describe("snooze, skip, stop", () => {
     expect((await row(locked.id)).status).toBe("approved");
   });
 
-  it("stop ends suggestions, is idempotent, and leaves an open draft alone", async () => {
+  it("stop ends suggestions, is idempotent, and supersedes an open draft (D-042 b)", async () => {
     const { jobId } = await appliedJob();
     const draft = await mk(jobId, "follow_up", 1, "pending");
     expect((await stopFollowUps(userA, jobId)).stopped).toBe(true);
     expect((await stopFollowUps(userA, jobId)).stopped).toBe(true);
     expect(await getFollowUpDue(userA, jobId, DAY9)).toEqual({ eligible: false, reason: "stopped" });
-    expect((await row(draft.id)).status).toBe("pending");
+    expect((await row(draft.id)).status).toBe("superseded");
+  });
+
+  it("stop leaves a locked draft alone (the send-time recheck refuses it)", async () => {
+    const { jobId } = await appliedJob();
+    const draft = await mk(jobId, "follow_up", 1, "approved");
+    await prisma.applicationPackage.update({
+      where: { id: draft.id },
+      data: { sendStartedAt: new Date(), sendOutcome: "unknown" },
+    });
+    await stopFollowUps(userA, jobId);
+    expect((await row(draft.id)).status).toBe("approved");
   });
 
   it("stop needs a sent application", async () => {

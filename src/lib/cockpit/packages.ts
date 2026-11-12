@@ -434,13 +434,43 @@ export async function reopenPackage(userId: string, id: string) {
   return reload(userId, id);
 }
 
-// Number of To do applications (pending and approved), for the sidebar badge.
-// Applications only, like the To do tab (listPackagesByTab): a follow-up draft
-// is not in that list, so it must not be in the badge either.
-export function countTodo(userId: string): Promise<number> {
+// Number of To do packages (pending and approved), for the sidebar badge. The
+// same rows as the To do tab (queueWhere): applications and follow-up drafts
+// (D-042), without a snoozed follow-up draft.
+export function countTodo(userId: string, now: Date = new Date()): Promise<number> {
   return prisma.applicationPackage.count({
-    where: { userId, kind: "application", status: { in: QUEUE_TAB_STATUSES.todo } },
+    where: queueWhere(userId, "todo", "all", now),
   });
+}
+
+// "Remind me in N days" on a follow-up draft (D-042): while its job is snoozed,
+// an open (not locked) follow-up draft is hidden from the queue; it comes back
+// when the snooze ends. A locked one always shows (its send must be resolved).
+function notSnoozedFollowUp(now: Date): Prisma.ApplicationPackageWhereInput {
+  return {
+    NOT: {
+      kind: "follow_up",
+      status: { in: ["pending", "approved"] },
+      sendStartedAt: null,
+      job: { followUp: { is: { snoozedUntil: { gt: now } } } },
+    },
+  };
+}
+
+// The rows of a queue tab. kind "all" (the review queue, D-042) lists both
+// kinds; a single kind is kept for the MCP and job-page callers.
+function queueWhere(
+  userId: string,
+  tab: QueueTab,
+  kind: PackageKind | "all",
+  now: Date,
+): Prisma.ApplicationPackageWhereInput {
+  return {
+    userId,
+    ...(kind === "all" ? {} : { kind }),
+    status: { in: [...QUEUE_TAB_STATUSES[tab]] },
+    ...notSnoozedFollowUp(now),
+  };
 }
 
 // A later request overwrites the previous one and resets the bot's response.
@@ -620,20 +650,24 @@ export async function updatePackageContent(
 // One row per job: the active package (highest non-superseded version). By
 // §2.2 a job never has two non-superseded packages of a kind (a submit
 // supersedes the open ones; sent/rejected block further submits), so filtering
-// on the tab statuses is enough. Newest first. The queue tabs list applications
-// only (D-031): follow-up drafts have their own tab, so the default is
-// "application".
+// on the tab statuses is enough. Newest first. The default stays "application"
+// (D-031); the review queue passes "all" (D-042): a follow-up draft is a normal
+// To do row with a "Follow-up N" chip, and a snoozed one is hidden.
 export async function listPackagesByTab(
   userId: string,
   tab: QueueTab,
-  kind: PackageKind = "application",
+  kind: PackageKind | "all" = "application",
+  now: Date = new Date(),
 ) {
   const rows = await prisma.applicationPackage.findMany({
-    where: { userId, kind, status: { in: QUEUE_TAB_STATUSES[tab] } },
+    where: queueWhere(userId, tab, kind, now),
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
       jobId: true,
+      kind: true,
+      replyToPackageId: true,
+      sentAt: true,
       version: true,
       status: true,
       fitGrade: true,
@@ -657,15 +691,19 @@ export async function listPackagesByTab(
 }
 
 // One count per tab, from a single groupBy (no rows are loaded). Same kind
-// scope as listPackagesByTab, so a tab count matches its list (follow-up
-// drafts are not counted in the application tabs, D-031).
+// scope and snooze filter as listPackagesByTab, so a tab count matches its list.
 export async function countPackagesByTab(
   userId: string,
-  kind: PackageKind = "application",
+  kind: PackageKind | "all" = "application",
+  now: Date = new Date(),
 ): Promise<Record<QueueTab, number>> {
   const groups = await prisma.applicationPackage.groupBy({
     by: ["status"],
-    where: { userId, kind },
+    where: {
+      userId,
+      ...(kind === "all" ? {} : { kind }),
+      ...notSnoozedFollowUp(now),
+    },
     _count: { _all: true },
   });
   return tabCounts(

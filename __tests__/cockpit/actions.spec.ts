@@ -29,6 +29,12 @@ vi.mock("@/lib/db", () => ({
     applicationPackage: { count: vi.fn() },
   },
 }));
+// D-042: the due count and the follow-up summaries have their own tests.
+vi.mock("@/lib/cockpit/followUpMcp", () => ({ countDueFollowUps: vi.fn().mockResolvedValue(0) }));
+vi.mock("@/lib/cockpit/followUps", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/lib/cockpit/followUps")>();
+  return { ...mod, getFollowUpSummary: vi.fn().mockResolvedValue(null), followUpStepOf: vi.fn().mockResolvedValue(1) };
+});
 vi.mock("@/lib/cockpit/packages", async (importOriginal) => {
   const mod = await importOriginal<typeof import("@/lib/cockpit/packages")>();
   return {
@@ -198,12 +204,14 @@ describe("getReviewQueue", () => {
     gmailFind.mockResolvedValue(null);
     pkgCount.mockResolvedValue(2);
     const r = await actions.getReviewQueue("todo");
-    expect(svc.listPackagesByTab).toHaveBeenCalledWith("u1", "todo");
+    // Both kinds (D-042).
+    expect(svc.listPackagesByTab).toHaveBeenCalledWith("u1", "todo", "all", expect.any(Date));
     expect(r).toEqual({
       success: true,
       data: {
-        rows: [{ id: "p1" }],
+        rows: [{ id: "p1", followUpStep: null, followUp: null }],
         counts: { todo: 1, changes: 0, sent: 0, rejected: 0 },
+        dueFollowUps: 0,
         gmail: null,
         gmailCalloutNeeded: true,
       },
@@ -250,14 +258,17 @@ describe("getAdjacentPackageIds", () => {
       success: true,
       data: expected,
     });
-    expect(svc.listPackagesByTab).toHaveBeenCalledWith("u1", "todo");
+    expect(svc.listPackagesByTab).toHaveBeenCalledWith("u1", "todo", "all");
   });
 });
 
 describe("getTodoCount (D-041)", () => {
-  it("returns the To do count for the session user", async () => {
+  it("returns the To do count plus due follow-ups for the session user (D-042)", async () => {
     m(svc.countTodo).mockResolvedValue(4);
-    expect(await actions.getTodoCount()).toEqual({ success: true, data: 4 });
+    const { countDueFollowUps } = await import("@/lib/cockpit/followUpMcp");
+    m(countDueFollowUps).mockResolvedValueOnce(2);
+    expect(await actions.getTodoCount()).toEqual({ success: true, data: 6 });
+    expect(countDueFollowUps).toHaveBeenCalledWith("u1");
     expect(svc.countTodo).toHaveBeenCalledWith("u1");
   });
 });

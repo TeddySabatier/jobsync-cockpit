@@ -10,6 +10,7 @@ const svc = vi.hoisted(() => ({
   stopFollowUps: vi.fn(),
   setFollowUpOutcome: vi.fn(),
   undoFollowUpOutcome: vi.fn(),
+  setApplicationOutcome: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -45,6 +46,7 @@ const ARGS: Record<string, unknown[]> = {
   stopFollowUps: ["job1"],
   setFollowUpOutcome: ["job1", "replied"],
   undoFollowUpOutcome: ["job1"],
+  setApplicationOutcome: ["job1", "replied"],
 };
 
 beforeEach(() => {

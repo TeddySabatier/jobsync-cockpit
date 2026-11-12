@@ -234,11 +234,11 @@ describe("countTodo", () => {
     expect(await countTodo(a.id)).toBe(before + 2);
   });
 
-  it("does not count follow-up drafts (they are not in the To do tab)", async () => {
+  it("counts follow-up drafts too: they are To do rows since D-042", async () => {
     const before = await countTodo(a.id);
     await mk("pending", { kind: "follow_up" });
     await mk("approved", { kind: "follow_up" });
-    expect(await countTodo(a.id)).toBe(before);
+    expect(await countTodo(a.id)).toBe(before + 2);
   });
 });
 

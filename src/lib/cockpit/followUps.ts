@@ -14,6 +14,7 @@ import {
   type FollowUpOutcome,
   type SnoozeDays,
 } from "./followUpDue";
+import { gmailThreadUrl, type FollowUpSummary } from "./followUpView";
 
 // Follow-up domain service (V1 plan 3.1-3.3, D-031): the follow-up state of a
 // job (snooze, skip, stop, outcome, undo) and the due calculation fed from the
@@ -241,14 +242,19 @@ export async function skipNextStepInTx(
 }
 
 // Stop all follow-ups of a job. Needs a sent application (nothing to stop
-// otherwise). Does not touch an open draft: the send-time recheck refuses it.
+// otherwise). Since D-042 (b) it also supersedes the open (not locked) follow-up
+// drafts, like skip and an outcome: a draft that can no longer be sent must not
+// stay in To do. A locked draft is left alone; the send-time recheck refuses it.
 export async function stopFollowUps(
   userId: string,
   jobId: string,
+  now: Date = new Date(),
 ): Promise<FollowUpStateView> {
   return prisma.$transaction(async (tx) => {
     await requireSentApplication(tx, userId, jobId);
-    return writeState(tx, userId, jobId, { stopped: true });
+    const state = await writeState(tx, userId, jobId, { stopped: true });
+    await supersedeOpenFollowUps(tx, userId, jobId, now);
+    return state;
   });
 }
 
@@ -337,4 +343,130 @@ export async function undoFollowUpOutcome(
     });
     return toStateView(row);
   });
+}
+
+// ---------------------------------------------------------------------------
+// The two outcome toggles of the review UI (D-042 c)
+// ---------------------------------------------------------------------------
+
+// The outcomes the review page offers as toggles. "rejected" means "Rejected /
+// closed": it also moves the job to the "rejected" status.
+export const UI_OUTCOMES = ["replied", "rejected"] as const;
+export type UiOutcome = (typeof UI_OUTCOMES)[number];
+
+async function setJobStatusByValue(
+  tx: Db,
+  userId: string,
+  jobId: string,
+  value: string,
+  onlyFrom?: string,
+): Promise<void> {
+  const status = await tx.jobStatus.findUnique({ where: { value }, select: { id: true } });
+  if (!status) throw new CockpitError("INTERNAL");
+  await tx.job.updateMany({
+    where: { id: jobId, userId, ...(onlyFrom ? { Status: { value: onlyFrom } } : {}) },
+    data: { statusId: status.id },
+  });
+}
+
+// Set or clear the outcome of a sent application, in one transaction:
+// - "replied": stops follow-ups (the outcome does) and supersedes open drafts;
+//   the job status is not touched.
+// - "rejected" (Rejected / closed): the same, and the job status becomes
+//   "rejected".
+// - null (the pressed toggle pressed again): clears the outcome.
+// Leaving "rejected" (to null or to "replied") puts a job that is still
+// "rejected" back to "applied", so the toggle undoes what it did; a status the
+// owner changed by hand since then is left alone.
+export async function setApplicationOutcome(
+  userId: string,
+  jobId: string,
+  outcome: string | null,
+  now: Date = new Date(),
+): Promise<FollowUpStateView> {
+  if (outcome !== null && !(UI_OUTCOMES as readonly string[]).includes(outcome)) {
+    throw new CockpitError("VALIDATION");
+  }
+  return prisma.$transaction(async (tx) => {
+    await requireSentApplication(tx, userId, jobId);
+    const before = await tx.jobFollowUp.findFirst({
+      where: { jobId, userId },
+      select: { outcome: true },
+    });
+    const state = await writeState(tx, userId, jobId, {
+      outcome,
+      outcomeAt: outcome ? now : null,
+    });
+    if (outcome) await supersedeOpenFollowUps(tx, userId, jobId, now);
+    if (outcome === "rejected") {
+      await setJobStatusByValue(tx, userId, jobId, "rejected");
+    } else if (before?.outcome === "rejected") {
+      await setJobStatusByValue(tx, userId, jobId, "applied", "rejected");
+    }
+    return state;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// What the review UI shows (D-042)
+// ---------------------------------------------------------------------------
+
+// The follow-up state of one job for the review page and the queue rows, or
+// null when the job is not the user's. Dates stay Date objects; the thread URL
+// is built from the application's own SentEmail row (a thread id, never a
+// token).
+export async function getFollowUpSummary(
+  userId: string,
+  jobId: string,
+  now: Date = new Date(),
+): Promise<FollowUpSummary | null> {
+  const input = await loadDueInput(prisma, userId, jobId, now);
+  if (!input) return null;
+  const [application, state] = await Promise.all([
+    prisma.applicationPackage.findFirst({
+      where: sentApplicationWhere({ jobId, userId }),
+      orderBy: { version: "desc" },
+      select: { id: true, sentAt: true, sentEmail: { select: { threadId: true } } },
+    }),
+    prisma.jobFollowUp.findFirst({
+      where: { jobId, userId },
+      select: { outcome: true, stopped: true },
+    }),
+  ]);
+  const due = computeFollowUpDue(input);
+  return {
+    jobId,
+    outcome: state?.outcome ?? null,
+    stopped: state?.stopped ?? false,
+    step: due.eligible ? due.step : null,
+    status: due.eligible ? due.status : null,
+    reason: due.eligible ? null : due.reason,
+    dueAt: due.eligible ? due.dueAt : null,
+    snoozedUntil: due.eligible ? due.snoozedUntil : null,
+    threadUrl: gmailThreadUrl(application?.sentEmail?.threadId),
+    applicationSentAt: application?.sentAt ?? null,
+    applicationPackageId: application?.id ?? null,
+  };
+}
+
+// The step number a follow-up package stands for: a sent one by its rank among
+// the sent follow-ups of its job, an open one by the step that is next (else
+// one more than the sent ones). Shown as "Follow-up 1" / "Follow-up 2".
+export async function followUpStepOf(
+  userId: string,
+  pkg: { jobId: string; status: string; sentAt: Date | null },
+  summary: Pick<FollowUpSummary, "step"> | null,
+): Promise<1 | 2> {
+  const sent = await prisma.applicationPackage.findMany({
+    where: { jobId: pkg.jobId, userId, kind: "follow_up", status: "sent" },
+    select: { sentAt: true },
+  });
+  let n: number;
+  if (pkg.status === "sent") {
+    const at = pkg.sentAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    n = sent.filter((s) => (s.sentAt?.getTime() ?? 0) <= at).length;
+  } else {
+    n = summary?.step ?? sent.length + 1;
+  }
+  return n >= 2 ? 2 : 1;
 }

@@ -18,6 +18,7 @@ vi.mock("@/lib/db", () => ({
       groupBy: vi.fn().mockResolvedValue([]),
     },
     gmailAccount: { findUnique: vi.fn() },
+    job: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 

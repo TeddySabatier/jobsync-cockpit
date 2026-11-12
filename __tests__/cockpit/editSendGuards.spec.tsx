@@ -36,6 +36,10 @@ import TextDialog from "@/components/cockpit/TextDialog";
 import { STALE_LOCK_MS } from "@/lib/cockpit/constants";
 
 const fixture = (over: Partial<PackageDetail["package"]> = {}): PackageDetail => ({
+  kind: "application",
+  followUp: null,
+  followUpStep: null,
+  replyTo: null,
   package: {
     id: "p2",
     version: 2,

@@ -116,13 +116,21 @@ export default function ActionBar({
   const company = pkg.job.Company.label;
   const role = pkg.job.JobTitle.label;
   const jobUrl = pkg.job.jobUrl?.trim() || null;
-  const step = nextStep({
+  const isFollowUp = detail.kind === "follow_up";
+  const noun = isFollowUp ? "Follow-up" : "Application";
+  const rawStep = nextStep({
     status: pkg.status,
     sendStarted: !!pkg.sendStartedAt,
-    hasRecipient: !!pkg.emailTo?.trim(),
+    // A follow-up is always an email (D-042): no link-apply path; a missing
+    // recipient is a blocked reason instead.
+    hasRecipient: isFollowUp || !!pkg.emailTo?.trim(),
     blockedReason: sendBlockedReason(detail),
     hasJobUrl: !!jobUrl,
   });
+  // A rejected follow-up skipped its step and cannot be reopened (the server
+  // refuses it): nothing left to do here.
+  const step: typeof rawStep =
+    isFollowUp && rawStep.kind === "reopen" ? { kind: "next" } : rawStep;
   const target = pickAdvanceTarget(adjacent);
 
   const run = (
@@ -147,14 +155,14 @@ export default function ActionBar({
   };
 
   const approveAndSend = () =>
-    run(() => approvePackage(pkg.id), "Application approved", {
+    run(() => approvePackage(pkg.id), `${noun} approved`, {
       onSuccess: () => setSendAfterApprove(true),
     });
   // Approve without sending: reachable from the menu, with a 6 s Undo.
   const approveOnly = () =>
-    run(() => approvePackage(pkg.id), "Application approved", {
+    run(() => approvePackage(pkg.id), `${noun} approved`, {
       showSuccess: () =>
-        toastWithAction("Application approved", {
+        toastWithAction(`${noun} approved`, {
           label: "Undo",
           onClick: () => void run(() => unapprovePackage(pkg.id), "Approval undone"),
         }),
@@ -419,7 +427,7 @@ export default function ActionBar({
         onSubmit={(reasonText) =>
           run(
             () => rejectPackage(pkg.id, reasonText || undefined),
-            advanceMessage("Application rejected", target),
+            advanceMessage(isFollowUp ? "Follow-up rejected: step skipped" : "Application rejected", target),
             { onSuccess: () => router.push(target.href) },
           )
         }
