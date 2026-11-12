@@ -13,12 +13,12 @@ Format: id, decision, why, cost if wrong.
 - **Why:** the primary checkout shows many files modified (line-ending noise) and may hold the owner's own work. A worktree never touches it, and it is faster for `npm ci` and the tests.
 - **Cost if wrong:** none for the code. The worktree is listed in `git worktree list` and can be removed after the push.
 
-## D-003 `gh` is authenticated as TeddySabatier; real issue/PR flow
-- **Decision:** `gh` is now authenticated as TeddySabatier (verified with `gh api user --jq .login`). The D-001 fallback is superseded: use the real issue/PR flow via `gh ... --repo TeddySabatier/jobsync-cockpit`, after `gh auth switch --hostname github.com --user TeddySabatier`. The original prompt's "don't use gh" line is overridden by its later explicit gh instructions. No `cockpit/pending-github/` files are needed.
+## D-003 `gh` is authenticated for the repo owner; real issue/PR flow
+- **Decision:** `gh` is now authenticated as the repo owner (verified with `gh api user --jq .login`). The D-001 fallback is superseded: use the real issue/PR flow via `gh ... --repo <owner>/jobsync-cockpit`, after switching to the owner account with `gh auth switch`. The original prompt's "don't use gh" line is overridden by its later explicit gh instructions. No `cockpit/pending-github/` files are needed.
 - **Why:** the blocker behind D-001 (stored token rejected) is gone, and the prompt's later instructions ask for issues, PRs and reviewer comments.
-- **Cost if wrong:** if the wrong account is active, an issue or PR lands under the wrong account. Run `gh api user --jq .login` before each `gh` write and check it prints `TeddySabatier`.
+- **Cost if wrong:** if the wrong account is active, an issue or PR lands under the wrong account. Run `gh api user --jq .login` before each `gh` write and check it prints the repo owner login.
 
-## D-004 Security review rulings (review-security.md, SPEC v1.1)
+## D-004 Security review rulings (security review, SPEC v1.1)
 All 15 items accepted, with the details below. Source of authority: the owner's handoff rulings on the reviews (kept outside the repo).
 
 | # | Item | Ruling | SPEC |
@@ -40,7 +40,7 @@ All 15 items accepted, with the details below. Source of authority: the owner's 
 
 - **Cost if wrong:** more code and tests in C-04, C-09 and C-10 than the v1 draft (these tickets stay under orchestrator alignment checks). The unverified assumption is that a sandboxed PDF renders in the target browser; if not, AC-30 triggers a new decision.
 
-## D-005 Data review rulings (review-data.md, SPEC v1.1)
+## D-005 Data review rulings (data review, SPEC v1.1)
 
 | # | Item | Ruling | SPEC |
 |---|---|---|---|
@@ -57,7 +57,7 @@ All 15 items accepted, with the details below. Source of authority: the owner's 
 
 - **Cost if wrong:** D1 rejected means nothing, since C-02 creates the models and AC-01 checks the migration. D4 means a job with an old sent package can never get a new package; the user would have to create a new job.
 
-## D-006 UX review rulings (review-ux.md, SPEC v1.1)
+## D-006 UX review rulings (UX review, SPEC v1.1)
 
 | # | Item | Ruling | SPEC |
 |---|---|---|---|
@@ -75,7 +75,7 @@ All 15 items accepted, with the details below. Source of authority: the owner's 
 - **Spec choices made while applying these (not in the handoff rulings, flag if you disagree):** (a) an approved package with empty `emailTo` gets "Open job posting" as its primary CTA, since Mark applied manually moved to the overflow menu; (b) a lock older than 60 s with no outcome counts as unresolved, so a crash needs no manual DB fix; (c) the Gmail chip means "package has an `emailTo` and Gmail is not connected".
 - **Cost if wrong:** UI tickets C-06, C-07 and C-10 carry a little more work. Rejected U6 may annoy a power user who wants `j` / `k` from the list.
 
-## D-007 Next.js review rulings (review-nextjs.md, SPEC v1.1 → v2)
+## D-007 Next.js review rulings (Next.js review, SPEC v1.1 → v2)
 All 18 items accepted (one with a ruling that adds a requirement instead of a fix). **SPEC frozen at v2 (2026-11-04); later changes need a new DECISIONS.md entry.**
 
 | # | Item | Ruling | SPEC |
@@ -99,7 +99,7 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 | N17 | Container-query layout | Accept. `@md/main:` / `@3xl/main:` variants; `review/layout.tsx` gives all review pages a full-width `col-span-3` wrapper | §5, §5.2, §5.3 |
 | N18 | Backup and new tables | **Ruling (requirement, not a fix).** V0 does not add cockpit tables to the backup. Requirement: the export never includes `GmailAccount`. C-09 reads the backup code; if it dumps tables generically it excludes `GmailAccount` (and `SentEmail` / `ApplicationPackage` only if needed to keep `backupRoundTrip.spec.ts` green) and logs what it found. Packages in backups are a V1 hook | §6.2, §11, AC-39 |
 
-- **Ticket ownership changes (TICKETS.md final):** `errors.ts` and the SQLite harness → C-02; MCP `cockpit.ts`, `cockpitDescriptions.ts`, `attachments.ts`, `rate-limit.ts`, `mcpToken.actions.ts` (+ test), `route.ts` → C-04; `next.config.mjs` → C-05; `layout.tsx`, `Sidebar`, `Header` → C-06; `markdown.ts` → C-07; backup → C-09.
+- **Ticket ownership changes (final ticket split):** `errors.ts` and the SQLite harness → C-02; MCP `cockpit.ts`, `cockpitDescriptions.ts`, `attachments.ts`, `rate-limit.ts`, `mcpToken.actions.ts` (+ test), `route.ts` → C-04; `next.config.mjs` → C-05; `layout.tsx`, `Sidebar`, `Header` → C-06; `markdown.ts` → C-07; backup → C-09.
 - **New ACs:** AC-49 (result shape and error mapping), AC-50 (rate limit). No renumbering.
 - **Cost if wrong:** C-04 and C-05 carry more tests (shape vs schema, rate-limit compatibility, headers order). The unverified assumptions are: Next applies the last matching `headers()` entry per key, and the SDK 1.30 shape-validation text. Both are covered by tests or the Phase 4 `curl -I` check.
 

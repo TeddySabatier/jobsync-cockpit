@@ -8,7 +8,7 @@ Scope: the cockpit V0 code on `main` (about 6,100 lines: `src/lib/cockpit`, `src
 
 1. **Free-model review lanes.** An engine (`scripts/qa/`, PR #30) sent allow-listed source to free models through `opencode run`. The model gets prompt text only and no tools. Lenses: L1 security, L2 state machine and concurrency, L3 data and migration, L4 UX and a11y, L6 Next.js boundaries, L7 SPEC conformance, L10 red team (payload generation).
 2. **Mechanical quote check.** A finding survives only if its file exists and its quoted line appears in the file (whitespace-normalised). This killed the "model made it up" class.
-3. **Dedupe and vote count**, then **paid-model triage** of the survivors: every in-scope finding (P0, P1, and P2 with at least 2 votes) was read against the real code path including callers. Output: `FINDINGS.jsonl`, `REJECTED.md`, `V1-IDEAS.md`.
+3. **Dedupe and vote count**, then **paid-model triage** of the survivors: every in-scope finding (P0, P1, and P2 with at least 2 votes) was read against the real code path including callers. Output: this report, `REJECTED.md`, `V1-IDEAS.md`.
 4. **Test-writing lanes (not free-model reviews):** L8 property tests (fast-check, PR #32) and L9 end-to-end tests (Playwright against a fake Google, PR for issue #36).
 5. **Gates:** fresh `npm ci`, lint, tsc, build, vitest ×3 on `f8192ff`.
 
@@ -88,7 +88,7 @@ Dominant failure modes of the free models:
 - **Upstream files** the cockpit did not touch.
 - **Contradicts the frozen SPEC** (find_job scope, idempotent replay).
 
-Details per finding: `FINDINGS.jsonl`, `REJECTED.md`. Out-of-scope ideas: `V1-IDEAS.md`.
+Rejected findings: `REJECTED.md`. Out-of-scope ideas: `V1-IDEAS.md`.
 
 ## 4. What each lane found
 
