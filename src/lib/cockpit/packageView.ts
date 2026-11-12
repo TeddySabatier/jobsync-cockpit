@@ -79,7 +79,7 @@ export function toSendHistoryView(rows: SendAttemptRow[]) {
     id: r.id,
     outcome: r.outcome,
     reason:
-      r.errorCode && r.errorCode in COCKPIT_ERROR_MESSAGES
+      r.errorCode && Object.hasOwn(COCKPIT_ERROR_MESSAGES, r.errorCode)
         ? COCKPIT_ERROR_MESSAGES[r.errorCode as keyof typeof COCKPIT_ERROR_MESSAGES]
         : null,
     gmailMessageId: r.gmailMessageId,
