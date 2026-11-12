@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sendPackage } from "@/actions/cockpitSend.actions";
 import { toastError, toastSuccess } from "@/lib/toast";
@@ -169,7 +170,7 @@ export default function SendDialog({
   // A ref too: two clicks in the same tick both see busy === false.
   const inFlight = useRef(false);
   // Persistent explanation of a definitive failure (a toast alone vanishes).
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<{ code: string; message: string } | null>(null);
   useEffect(() => {
     if (!open) {
       setBusy(false);
@@ -198,7 +199,7 @@ export default function SendDialog({
       } else {
         // Nothing was sent (Gmail refused, token, validation): keep the dialog
         // open with the reason; the user can fix it or retry.
-        setFailure(r.message);
+        setFailure({ code: r.code, message: r.message });
       }
     } catch {
       // Unknown outcome: close, so a second click cannot send twice, and
@@ -239,7 +240,19 @@ export default function SendDialog({
             data-testid="send-failure"
             className="rounded border border-destructive p-2 text-sm font-medium text-destructive"
           >
-            {`Not sent: ${failure}`}
+            {`Not sent: ${failure.message}`}
+            {failure.code === "VALIDATION" && (
+              <span className="block font-normal">
+                Check the recipient, subject and body: close this dialog and use Edit.
+              </span>
+            )}
+            {failure.code === "GMAIL_RECONNECT_REQUIRED" && (
+              <span className="block font-normal">
+                <Link href="/dashboard/review/settings" className="underline">
+                  Reconnect Gmail in settings
+                </Link>
+              </span>
+            )}
           </p>
         )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">

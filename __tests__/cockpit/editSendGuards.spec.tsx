@@ -164,6 +164,18 @@ describe("focus handling (finding 8)", () => {
     expect(screen.getAllByRole("button", { name: "Edit" })[0]).toHaveFocus();
   });
 
+  it("a later ActionBar remount does not take focus back to Edit", async () => {
+    const view = render(<DetailView detail={fixture()} adjacent={noAdjacent} />);
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getAllByRole("button", { name: "Edit" })[0]).toHaveFocus();
+    // Viewing another version unmounts the bar; coming back remounts it.
+    view.rerender(<DetailView detail={{ ...fixture(), isActive: false }} adjacent={noAdjacent} />);
+    expect(screen.queryByRole("region", { name: "Actions" })).toBeNull();
+    view.rerender(<DetailView detail={fixture()} adjacent={noAdjacent} />);
+    expect(screen.getAllByRole("button", { name: "Edit" })[0]).not.toHaveFocus();
+  });
+
   it("after a Send the page heading takes focus (the action bar is gone)", () => {
     const view = render(
       <DetailView detail={fixture({ status: "approved" })} adjacent={noAdjacent} />,

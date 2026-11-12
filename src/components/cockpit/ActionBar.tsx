@@ -53,7 +53,7 @@ export function sendBlockedReason(detail: PackageDetail): string | null {
   if (!detail.gmail) return "Gmail is not connected. Connect it in settings.";
   // Send would refuse with "Reconnect Gmail" for this (D-023): say why instead.
   if (!detail.gmailSendAllowed) {
-    return `Gmail is connected as ${detail.gmail.email}, but sending is only allowed from the address set for the cockpit (COCKPIT_GMAIL_ALLOWED_ADDRESS), which is a different address or not configured. Connect that account in settings.`;
+    return "Sending is only allowed from the address configured for the cockpit. Connect that address in settings.";
   }
   return null;
 }

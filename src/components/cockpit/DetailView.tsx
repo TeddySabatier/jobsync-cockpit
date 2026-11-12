@@ -52,6 +52,11 @@ export default function DetailView({
     dirtyRef.current = d;
   }, []);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  // The remounted ActionBar has taken focus (its effect runs before this one):
+  // later remounts must not take it again.
+  useEffect(() => {
+    if (wasEditing && !editing) setWasEditing(false);
+  }, [wasEditing, editing]);
   // j / k must not navigate away from unsaved edits.
   useQueueKeys(editing ? { previousId: null, nextId: null } : adjacent);
 

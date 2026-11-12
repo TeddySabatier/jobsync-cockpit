@@ -208,10 +208,28 @@ describe("Send button and dialog (AC-45)", () => {
     expect(within(dialog).getByTestId("send-failure")).toHaveAttribute("role", "alert");
     expect(within(dialog).getByRole("button", { name: "Send now" })).toBeEnabled();
     expect(toast.toastSuccess).not.toHaveBeenCalled();
+    if (code === "GMAIL_RECONNECT_REQUIRED") {
+      expect(within(dialog).getByRole("link", { name: "Reconnect Gmail in settings" })).toHaveAttribute(
+        "href",
+        "/dashboard/review/settings",
+      );
+    } else {
+      expect(within(dialog).queryByRole("link", { name: "Reconnect Gmail in settings" })).toBeNull();
+    }
     // closing and reopening clears the old failure
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(screen.queryByTestId("send-failure")).toBeNull();
+  });
+
+  it("VALIDATION tells the owner what to check and to use Edit", async () => {
+    sendPackage.mockResolvedValue({ success: false, code: "VALIDATION", message: "The input is invalid" });
+    render(<ActionBar detail={detail()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(screen.getByTestId("send-failure")).toHaveTextContent(
+      /Check the recipient, subject and body.*Edit/,
+    );
   });
 
   it("a double click in the same tick sends once (the inFlight ref, not the disabled button)", async () => {
@@ -362,7 +380,7 @@ describe("Gmail connected as a different address than the allowed one", () => {
     render(<ActionBar detail={{ ...detail(), gmailSendAllowed: false }} />);
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect(
-      screen.getByText(/Gmail is connected as you@example\.com, but sending is only allowed from/),
+      screen.getByText(/Sending is only allowed from the address configured for the cockpit\. Connect that address in settings\./),
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open settings" })).toHaveAttribute(
       "href",
