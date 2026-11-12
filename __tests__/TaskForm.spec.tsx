@@ -70,6 +70,18 @@ describe("TaskForm Component", () => {
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
   window.HTMLElement.prototype.hasPointerCapture = vi.fn();
 
+  // The tests use a due date of 2026-12-31, and the schema refuses a past due
+  // date: without a frozen clock they all fail from 2027-01-01. Only Date is
+  // faked (user-event keeps real timers). Fixed local instant, mid-2026.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 5, 15, 12, 0, 0));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     (getCurrentUser as any).mockResolvedValue(mockUser);
     vi.clearAllMocks();

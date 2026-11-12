@@ -6,7 +6,7 @@ The hand-over is a small script, `scripts/bot/cockpit_submit.py` (Python standar
 
 ## One-time setup
 
-1. Copy `scripts/bot/cockpit_submit.py` into the bot folder, next to the CV renderer.
+1. Copy `scripts/bot/cockpit_submit.py` into the bot folder, next to the CV renderer. Copy `scripts/bot/cockpit_limits.json` next to it too (the server's limits, read by the script). The script still works without it, on built-in values, but they may then lag behind a server change.
 2. In the cockpit, open **Settings → MCP Access → Generate**. Name it after the bot. Pick the **longest expiry** and note the date: when a token expires every call fails with `UNAUTHORIZED` (loudly: exit code 1, `"ok": false`). The silent risk is a scheduled prompt that ignores `"ok": false`: make it report any `"ok": false` to you. Copy the token (it is shown once).
 3. Save it in `secrets/cockpit_token.txt` next to the script (or set `COCKPIT_TOKEN`). Never commit it.
 4. The script talks to `http://127.0.0.1:3737/api/mcp` by default (not `localhost`, which is slow on Windows). If the cockpit is somewhere else, set `COCKPIT_URL` to `<address>/api/mcp`. Plain `http` is only accepted for localhost; any other address must be `https`, unless you set `COCKPIT_ALLOW_HTTP=1` for a network you trust (for example a private VPN address).

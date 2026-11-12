@@ -53,12 +53,19 @@ test.describe("Gmail connect", () => {
   });
 
   test("settings: disconnect, then connect again through the callback", async ({ page, request }) => {
-    await page.goto(SETTINGS);
+    // ?connected=1 is still in the URL after the OAuth callback (review 07 finding 1).
+    await page.goto(`${SETTINGS}?connected=1`);
     await expect(page.getByText("Connected as")).toBeVisible();
     await expect(page.getByText("you@example.com").first()).toBeVisible();
 
     await page.getByRole("button", { name: "Disconnect" }).click();
+    // Disconnect asks first (finding 6): Cancel does nothing.
+    await page.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByText("Connected as")).toBeVisible();
+    await page.getByRole("button", { name: "Disconnect" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Disconnect" }).click();
     await expect(page.getByText("Gmail is not connected.")).toBeVisible();
+    await expect(page.getByText("Gmail connected.")).toHaveCount(0);
     // Disconnect revokes (best effort) at the fake endpoint.
     await expect.poll(() => fakeLog().filter((e) => e.kind === "revoke").length).toBe(1);
 

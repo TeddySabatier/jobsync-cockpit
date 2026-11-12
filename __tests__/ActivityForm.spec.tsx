@@ -85,6 +85,19 @@ async function setEndTimeToStartOfDay() {
 }
 
 describe("ActivityForm", () => {
+  // The form defaults its start to "now" and adds five minutes; near local
+  // midnight (or when the UTC and local dates differ) that made the suite
+  // depend on the wall clock. Only Date is faked, so user-event and
+  // Testing Library timers keep running. 10:00 local on a fixed day.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 5, 15, 10, 0, 0));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("saves the combined date/time and duration", async () => {
     const { onClose, reloadActivities } = await renderForm();
     vi.mocked(createActivity).mockResolvedValue({
@@ -100,6 +113,8 @@ describe("ActivityForm", () => {
     expect(payload.activityName).toBe("Applied to roles");
     expect(payload.activityType).toBe("type-1");
     expect(payload.duration).toBe(5);
+    // The clock is frozen: the default start is exactly the faked "now"
+    expect(payload.startTime.getTime()).toBe(new Date(2026, 5, 15, 10, 0, 0).getTime());
     expect(payload.endTime!.getTime() - payload.startTime.getTime()).toBe(
       5 * 60 * 1000
     );

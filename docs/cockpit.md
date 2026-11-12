@@ -97,7 +97,7 @@ The built-in **Cover Letter** and **Match with AI** buttons are JobSync's own AI
 
 - **Queue:** `/dashboard/review` — tabs: To do (`pending` + `approved`), Changes, Sent, Rejected. Readiness chips: Gmail, PDF stale, No CV, Link apply.
 - **Detail:** `/dashboard/review/[packageId]` — posting, CV PDF, fit analysis, email preview, cover letter, version selector. **Non-active versions** show a banner; the action bar is hidden.
-- **Edit:** email fields, letter, CV JSON string leaves; editing CV text marks **PDF stale** until the bot re-renders and resubmits (reverting the text by hand does not clear it).
+- **Edit:** email fields, letter, CV JSON string leaves; editing CV text marks **PDF stale** until the bot re-renders and resubmits (reverting the text by hand does not clear it). Unsaved edits are guarded: Cancel, the version selector and any link to another page ask before discarding (the browser Back button is not guarded; reload and tab close show the browser's own prompt). CV fields are labelled with their raw JSON path (for example `experience.0.bullets.1`). **Reload** after a "package changed" message leaves edit mode and shows the current version. Focus moves to the first field when you press Edit, back to Edit on Cancel / Save, and to the page title after a successful Send.
 - **Settings:** `/dashboard/review/settings` — Gmail connect/disconnect.
 
 Keyboard: **`j` / `k`** on a **To do** detail page moves to next/previous in queue order.
@@ -116,7 +116,7 @@ Required env (plus `ENCRYPTION_KEY` — see Security):
 - `GOOGLE_REDIRECT_URI` — default `http://localhost:3737/api/cockpit/gmail/callback`
 - `COCKPIT_GMAIL_ALLOWED_ADDRESS` — must match the connected Google account (case-insensitive). **Required for Send.**
 
-Connect: **Review → Settings → Connect Gmail** → `/api/cockpit/gmail/connect`. Disconnect revokes the grant (best effort) and deletes the stored row.
+Connect: **Review → Settings → Connect Gmail** → `/api/cockpit/gmail/connect`. Disconnect (after a confirmation) revokes the grant (best effort) and deletes the stored row.
 
 **Reconnect (D-010):** reconnecting the **same** allowed address does **not** revoke the previous refresh token (shared grant). Reconnecting a **different** address revokes the old token. Disconnect always revokes.
 
@@ -126,11 +126,13 @@ OAuth errors appear on settings as `?error=<code>` with fixed messages (e.g. `ad
 
 Send runs only from a signed-in session via server action — **never via MCP**.
 
-Flow: approve → **Send** (when Gmail connected, valid `emailTo`, CV file present, PDF not stale) → confirm dialog (full body, domain warning) → lock → Gmail API.
+Flow: approve → **Send** (when Gmail connected, valid `emailTo`, CV file present, PDF not stale) → confirm dialog (full body, domain warning) → lock → Gmail API. When Gmail is connected as an address other than `COCKPIT_GMAIL_ALLOWED_ADDRESS` (or that variable is unset), the Send button is replaced by a reason that says so, with a link to settings.
+
+The **domain warning** compares the recipient's registrable domain (`acme.co.uk`, not `careers.acme.co.uk`) with the company name and the job posting's registrable domain, and flags free-mail providers (Gmail, Outlook, Yahoo, Orange, Free, SFR, Laposte, and others). Subdomains and words such as `careers`, `jobs`, `inc`, `corp` never count as a match: an attacker who controls `evil.example` also controls `careers.evil.example`. Accents and apostrophes in the company name are ignored (Crédit Agricole matches credit-agricole.fr), a lone word shared by many companies (technologies, solutions, ...) is not a match, two-part suffixes (co.uk, com.au, asso.fr) only count under a country TLD (acme.co.com is evil.co.com territory), and an address with nothing after the @ is flagged as incomplete. A TLD swap of the real name (acme.co for acme.com) cannot be told from the name alone. It is a hint, not proof, and ATS domains give false warnings.
 
 - **Lock:** while `sendStartedAt` is set, the package is frozen (no edit, approve, or supersede via submit).
 - **Ambiguous failure** (timeout, 5xx, network): lock kept, `sendOutcome = "unknown"`. UI: check Gmail **Sent** folder, then **Mark as sent (manual)** or **Release lock**.
-- **Definitive failure** (token/decrypt/MIME/400/401/403): lock cleared; fix and retry.
+- **Definitive failure** (token/decrypt/MIME/400/401/403): lock cleared; the Send dialog stays open with the reason ("Not sent: ...") so you can fix it and retry. If the request itself fails (network drop), the dialog closes and the page refreshes, so a second click cannot send twice.
 - Lock older than **60 s** without outcome is treated like unknown (crash recovery).
 - If a recovery action ran while Gmail was still answering, the late result records nothing (no sent-email row, no job update): the package shows **unknown** again, locked, so check Gmail **Sent** and pick the action again (D-022). If the package was meanwhile replaced by a newer version, un-approved or rejected, the late email is recorded (sent history, job applied) and you are told to check Gmail; take care not to send the newer version a second time.
 

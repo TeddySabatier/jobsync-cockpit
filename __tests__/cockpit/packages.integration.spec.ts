@@ -777,6 +777,29 @@ describe("updatePackageContent", () => {
     expect((await row(pkg.id)).cvJson).toBe(stored);
   });
 
+  it.each([
+    ["emailSubject", "\u200B\u2060"],
+    ["emailBody", "\uFEFF\u00AD"],
+    ["emailSubject", "\u00A0\u3000"],
+    ["emailBody", "\u2028\u2029"],
+  ])("refuses a %s with no visible character and changes nothing (issue #82)", async (field, v) => {
+    const pkg = await mk("pending");
+    const before = await row(pkg.id);
+    await expect(
+      updatePackageContent(userA, pkg.id, { [field]: v }),
+    ).rejects.toMatchObject(code("VALIDATION"));
+    const after = await row(pkg.id);
+    expect(after.emailSubject).toBe(before.emailSubject);
+    expect(after.emailBody).toBe(before.emailBody);
+  });
+
+  it("stores a subject that has invisible characters around visible text unchanged (issue #82)", async () => {
+    const pkg = await mk("pending");
+    const subject = "\u200BNew\u00AD subject\uFEFF";
+    await updatePackageContent(userA, pkg.id, { emailSubject: subject });
+    expect((await row(pkg.id)).emailSubject).toBe(subject);
+  });
+
   it("keeps empty arrays / objects in the shape", async () => {
     const stored = { a: [], b: {} };
     const pkg = await mk("pending", { cvJson: JSON.stringify(stored) });
@@ -797,10 +820,10 @@ describe("updatePackageContent", () => {
   });
 
   it.each([
-    ["NBSP-only subject", { emailSubject: "  " }],
-    ["ideographic-space subject", { emailSubject: "　" }],
-    ["NBSP / line-separator body", { emailBody: "  \n" }],
-    ["BOM-only body", { emailBody: "﻿" }],
+    ["NBSP-only subject", { emailSubject: "\u00A0\u00A0" }],
+    ["ideographic-space subject", { emailSubject: "\u3000" }],
+    ["NBSP / line-separator body", { emailBody: "\u00A0\u2028\n" }],
+    ["BOM-only body", { emailBody: "\uFEFF" }],
     ["misspelled key", { emailSubjct: "Typo" }],
   ])("edit refuses a %s and leaves the package unchanged (review 01 #5, #6)", async (_n, patch) => {
     const pkg = await mk("pending");

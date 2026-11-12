@@ -33,6 +33,8 @@ test.describe("send", () => {
 
     await dialog.getByRole("button", { name: "Send now" }).click();
     await expect(page.locator("header").getByText("Sent", { exact: true })).toBeVisible();
+    // Focus is not lost to <body> (finding 8): the page title has it.
+    await expect(page.locator("h1[tabindex='-1']")).toBeFocused();
 
     const sends = fakeSends();
     expect(sends).toHaveLength(1);

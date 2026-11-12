@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const sendPackage = vi.hoisted(() => vi.fn());
@@ -16,6 +16,8 @@ vi.mock("@/actions/cockpit.actions", () => ({
   requestPackageChanges: vi.fn(),
   markPackageAppliedManually: vi.fn(),
 }));
+const refresh = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
 const toast = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn() }));
 vi.mock("@/lib/toast", () => toast);
 
@@ -93,6 +95,36 @@ describe("recipientWarning (AC-45)", () => {
   it("warns on a free-mail domain, even if the company name matches", () => {
     expect(recipientWarning("acme@gmail.com", "Gmail Inc", null)).toMatch(/free-mail/);
   });
+
+  // Review 07 finding 2: the bot picks the recipient from untrusted postings,
+  // so a subdomain or a generic word the attacker controls must not match.
+  it.each([
+    ["subdomain copied from the posting host", "hr@careers.evil.example", "Acme Corp", "https://careers.acme.example/1"],
+    ["generic company suffix Inc as a subdomain", "hr@inc.evil.example", "Acme Inc", null],
+    ["generic company suffix Corp as a subdomain", "hr@corp.evil.example", "Acme Corp", null],
+    ["company name as a subdomain", "hr@acme.evil.example", "Acme Corp", "https://acme.example/1"],
+    ["generic registrable label", "hr@careers.example", "Careers Inc", null],
+    ["prefix of the company name", "hr@acm.example", "Acme Corp", null],
+  ])("warns: %s", (_n, to, company, url) => {
+    expect(recipientWarning(to, company, url)).toMatch(/does not match/);
+  });
+
+  it.each([
+    "a@orange.fr",
+    "a@wanadoo.fr",
+    "a@free.fr",
+    "a@sfr.fr",
+    "a@laposte.net",
+    "a@hotmail.fr",
+    "a@yahoo.fr",
+    "a@mail.gmail.com",
+  ])("warns about a free-mail provider: %s", (to) => {
+    expect(recipientWarning(to, "Acme", null)).toMatch(/free-mail/);
+  });
+
+  it("still accepts the real company domain with a subdomain mail host", () => {
+    expect(recipientWarning("hr@mail.acme.example", "Acme Corp", null)).toBeNull();
+  });
 });
 
 describe("Send button and dialog (AC-45)", () => {
@@ -146,7 +178,7 @@ describe("Send button and dialog (AC-45)", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("shows the fixed error message from a failed send", async () => {
+  it("an unknown outcome toasts the fixed message and closes the dialog (the page shows the panel)", async () => {
     sendPackage.mockResolvedValue({
       success: false,
       code: "SEND_OUTCOME_UNKNOWN",
@@ -158,6 +190,62 @@ describe("Send button and dialog (AC-45)", () => {
     expect(toast.toastError).toHaveBeenCalledWith(
       "The send result is unknown; check your Gmail Sent folder",
     );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // Review 07 finding 4: a definitive failure must not vanish with a toast.
+  it.each([
+    ["GMAIL_RECONNECT_REQUIRED", "Reconnect Gmail in the cockpit settings"],
+    ["GMAIL_SEND", "Gmail rejected the message"],
+    ["GMAIL_TOKEN", "Could not get a Gmail access token"],
+  ])("%s keeps the dialog open with an inline alert and Send enabled", async (code, message) => {
+    sendPackage.mockResolvedValue({ success: false, code, message });
+    render(<ActionBar detail={detail()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send now" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByTestId("send-failure")).toHaveTextContent(message);
+    expect(within(dialog).getByTestId("send-failure")).toHaveAttribute("role", "alert");
+    expect(within(dialog).getByRole("button", { name: "Send now" })).toBeEnabled();
+    expect(toast.toastSuccess).not.toHaveBeenCalled();
+    if (code === "GMAIL_RECONNECT_REQUIRED") {
+      expect(within(dialog).getByRole("link", { name: "Reconnect Gmail in settings" })).toHaveAttribute(
+        "href",
+        "/dashboard/review/settings",
+      );
+    } else {
+      expect(within(dialog).queryByRole("link", { name: "Reconnect Gmail in settings" })).toBeNull();
+    }
+    // closing and reopening clears the old failure
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(screen.queryByTestId("send-failure")).toBeNull();
+  });
+
+  it("VALIDATION tells the owner what to check and to use Edit", async () => {
+    sendPackage.mockResolvedValue({ success: false, code: "VALIDATION", message: "The input is invalid" });
+    render(<ActionBar detail={detail()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(screen.getByTestId("send-failure")).toHaveTextContent(
+      /Check the recipient, subject and body.*Edit/,
+    );
+  });
+
+  it("a double click in the same tick sends once (the inFlight ref, not the disabled button)", async () => {
+    let resolve: (v: unknown) => void = () => {};
+    sendPackage.mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<ActionBar detail={detail()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    const confirm = screen.getByRole("button", { name: "Send now" });
+    // Both clicks inside one act(): React has not re-rendered the button as
+    // disabled in between, exactly like two clicks in one tick.
+    act(() => {
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+    });
+    expect(sendPackage).toHaveBeenCalledTimes(1);
+    await act(async () => resolve({ success: true, data: {} }));
   });
 
   it.each([
@@ -253,7 +341,7 @@ describe("rejected action requests show an error toast", () => {
     expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
   });
 
-  it("SendDialog: sendPackage rejects -> toast says to check the package state, button re-enabled", async () => {
+  it("SendDialog: sendPackage throws -> toast, dialog closed (no second Send click) and the page refreshed", async () => {
     sendPackage.mockRejectedValue(new Error("network"));
     render(<ActionBar detail={detail()} />);
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -263,6 +351,8 @@ describe("rejected action requests show an error toast", () => {
     );
     expect(toast.toastSuccess).not.toHaveBeenCalled();
     expect(sendPackage).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("SendOutcomePanel: releaseSendLock rejects -> toast, button re-enabled", async () => {
@@ -280,5 +370,27 @@ describe("rejected action requests show an error toast", () => {
       "Request failed. Check your connection and try again.",
     );
     expect(screen.getByRole("button", { name: "Release lock" })).toBeEnabled();
+  });
+});
+
+// D-020 (f) / D-023: getPackageDetail says whether the connected address is the
+// allowed one; the bar shows why Send is missing instead of a Send that fails.
+describe("Gmail connected as a different address than the allowed one", () => {
+  it("shows a dedicated reason with a settings link and no Send button", () => {
+    render(<ActionBar detail={{ ...detail(), gmailSendAllowed: false }} />);
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(
+      screen.getByText(/Sending is only allowed from the address configured for the cockpit\. Connect that address in settings\./),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open settings" })).toHaveAttribute(
+      "href",
+      "/dashboard/review/settings",
+    );
+  });
+
+  it("allowed: no reason, Send is offered", () => {
+    render(<ActionBar detail={detail()} />);
+    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(screen.queryByText(/only allowed from/)).toBeNull();
   });
 });

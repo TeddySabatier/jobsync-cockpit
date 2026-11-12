@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { updatePackageContent } from "@/actions/cockpit.actions";
 import { TipTapContentViewer } from "@/components/TipTapContentViewer";
@@ -11,10 +11,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { collectCvLeaves, setCvLeaf } from "@/lib/cockpit/cvLeaves";
 import { renderLetterMarkdown } from "@/lib/cockpit/markdown";
-import { UpdatePackageContentInputShape as Shape } from "@/lib/cockpit/schemas";
+import {
+  isBlankText,
+  UpdatePackageContentInputShape as Shape,
+} from "@/lib/cockpit/schemas";
 import type { UpdatePackageContentInput } from "@/lib/cockpit/schemas";
 import { toastError, toastSuccess } from "@/lib/toast";
 import type { PackageDetail } from "./Panels";
+import { REQUEST_FAILED } from "./runAction";
 
 // Edit mode (cockpit/SPEC.md §5.4). Manual edits only, saved through the
 // updatePackageContent action; nothing here generates or fills in content.
@@ -53,14 +57,14 @@ export function validateEditValues(v: EditValues): EditErrors {
       ? "Required"
       : /[\r\n]/.test(v.emailSubject)
         ? "No line break allowed"
-        : !v.emailSubject.trim()
+        : isBlankText(v.emailSubject)
           ? "Must not be blank"
           : "At most 300 characters";
   }
   if (!Shape.emailBody.safeParse(v.emailBody).success) {
     errors.emailBody = !v.emailBody
       ? "Required"
-      : !v.emailBody.trim()
+      : isBlankText(v.emailBody)
         ? "Must not be blank"
         : "At most 20,000 characters";
   }
@@ -81,6 +85,8 @@ function parseObject(text: string | null): Record<string, unknown> | null {
     return null;
   }
 }
+
+export const DISCARD_MESSAGE = "Discard your unsaved changes?";
 
 const RELOAD_MESSAGE =
   "This package changed since you opened it. Reload to see the latest version; your edits were not saved.";
@@ -112,10 +118,14 @@ function Field({
 export default function EditForm({
   detail,
   onClose,
+  onDirtyChange,
 }: {
   detail: PackageDetail;
   onClose: () => void;
+  // Lets the page guard what the form cannot see (the version selector).
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const formRef = useRef<HTMLFormElement>(null);
   const router = useRouter();
   const pkg = detail.package;
   const original = useMemo<EditValues>(
@@ -135,9 +145,7 @@ export default function EditForm({
   const [conflict, setConflict] = useState(false);
 
   const leaves = useMemo(() => (cv ? collectCvLeaves(cv) : []), [cv]);
-  const cvChanged =
-    cv !== originalCv &&
-    JSON.stringify(cv) !== JSON.stringify(originalCv);
+  const cvChanged = JSON.stringify(cv) !== JSON.stringify(originalCv);
   const changed = (Object.keys(values) as (keyof EditValues)[]).filter(
     (k) => values[k] !== original[k],
   );
@@ -149,19 +157,49 @@ export default function EditForm({
     [values.letterMd],
   );
 
-  // Browser-level guard for reload / tab close; Cancel asks below.
+  // Entering edit mode swaps the form in: put focus on its first field.
+  useEffect(() => {
+    formRef.current?.querySelector<HTMLElement>("input, textarea")?.focus();
+  }, []);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
+
+  // Guards while there are unsaved edits. Reload / tab close: beforeunload.
+  // In-app navigation (back link, sidebar, "Open vN" link) does not unload the
+  // page: a capture-phase click listener asks before a same-origin link is
+  // followed. (The browser back button is not guarded.)
   useEffect(() => {
     if (!dirty) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as Element | null)?.closest?.("a[href]");
+      if (!(a instanceof HTMLAnchorElement)) return;
+      if (a.target && a.target !== "_self") return;
+      if (a.hasAttribute("download") || a.origin !== window.location.origin) return;
+      if (a.pathname === window.location.pathname && a.search === window.location.search) return;
+      if (!window.confirm(DISCARD_MESSAGE)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
     window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
   }, [dirty]);
 
   const set = (k: keyof EditValues) => (v: string) =>
     setValues((s) => ({ ...s, [k]: v }));
 
   function cancel() {
-    if (dirty && !window.confirm("Discard your unsaved changes?")) return;
+    if (dirty && !window.confirm(DISCARD_MESSAGE)) return;
     onClose();
   }
 
@@ -184,7 +222,7 @@ export default function EditForm({
         toastError(r.message);
       }
     } catch {
-      toastError("Request failed. Check your connection and try again.");
+      toastError(REQUEST_FAILED);
     } finally {
       setBusy(false);
     }
@@ -192,6 +230,7 @@ export default function EditForm({
 
   return (
     <form
+      ref={formRef}
       aria-label="Edit package"
       className="flex flex-col gap-4 py-4"
       onSubmit={(e) => {
@@ -206,7 +245,16 @@ export default function EditForm({
           className="flex flex-wrap items-center gap-2 rounded-md border border-destructive p-3 text-sm"
         >
           <span>{RELOAD_MESSAGE}</span>
-          <Button type="button" variant="outline" onClick={() => router.refresh()}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              // Leave edit mode first: the form would keep the stale values
+              // and this banner after the refresh.
+              onClose();
+              router.refresh();
+            }}
+          >
             Reload
           </Button>
         </div>
@@ -221,6 +269,7 @@ export default function EditForm({
             maxLength={254}
             placeholder="Empty means apply via link"
             aria-invalid={!!errors.emailTo}
+            aria-describedby={errors.emailTo ? "edit-emailTo-error" : undefined}
             onChange={(e) => set("emailTo")(e.target.value)}
           />
         </Field>
@@ -230,6 +279,7 @@ export default function EditForm({
             value={values.emailSubject}
             maxLength={300}
             aria-invalid={!!errors.emailSubject}
+            aria-describedby={errors.emailSubject ? "edit-emailSubject-error" : undefined}
             onChange={(e) => set("emailSubject")(e.target.value)}
           />
         </Field>
@@ -239,6 +289,7 @@ export default function EditForm({
             rows={10}
             value={values.emailBody}
             aria-invalid={!!errors.emailBody}
+            aria-describedby={errors.emailBody ? "edit-emailBody-error" : undefined}
             onChange={(e) => set("emailBody")(e.target.value)}
           />
         </Field>
@@ -253,6 +304,7 @@ export default function EditForm({
               rows={14}
               value={values.letterMd}
               aria-invalid={!!errors.letterMd}
+            aria-describedby={errors.letterMd ? "edit-letterMd-error" : undefined}
               onChange={(e) => set("letterMd")(e.target.value)}
             />
           </Field>
