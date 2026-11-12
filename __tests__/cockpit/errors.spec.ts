@@ -31,6 +31,7 @@ const SPEC_CODES: CockpitErrorCode[] = [
   "GMAIL_SEND",
   "GMAIL_RECONNECT_REQUIRED",
   "GMAIL_TIMEOUT",
+  "HISTORY_NOT_RECORDED",
 ];
 
 describe("cockpit errors", () => {

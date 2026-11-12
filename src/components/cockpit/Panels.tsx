@@ -361,13 +361,13 @@ const ATTEMPT_LABELS: Record<string, string> = {
   failed: "Not sent: Gmail or the app refused before the message left",
   ambiguous: "Result unknown: the message may or may not have gone out",
   record_failed:
-    "Gmail accepted the message, but the app could not record it. The package stayed locked",
+    "Gmail accepted the message, but the app could not record it. Sending is blocked until you check your Gmail Sent folder",
   late_recorded:
-    "Gmail accepted the message after the package had left Approved. It was recorded as sent",
+    "Gmail accepted the message after this application was no longer waiting to be sent. It was recorded as sent",
   lock_lost:
-    "Gmail accepted the message after the lock was cleared. Check the package state",
+    "Gmail accepted the message after you had released the block on sending. Check your Gmail Sent folder before sending again",
   marked_sent: "You marked it as sent (manual)",
-  lock_released: "You released the lock (the email was not in Gmail)",
+  lock_released: "You released the block on sending (the email was not in Gmail)",
 };
 
 // Read-only history of every send attempt on this package, oldest first

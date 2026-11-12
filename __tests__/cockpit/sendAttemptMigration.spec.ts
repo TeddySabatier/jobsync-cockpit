@@ -84,7 +84,7 @@ describe(`migration ${NEW}: upgrade keeps existing rows`, () => {
           data: { userId: u.id, packageId: "missing", outcome: "sent" },
         }),
       ).rejects.toMatchObject({ code: "P2003" });
-      // The D-026 restriction is still in place on the redefined table.
+      // The D-026 restriction is still in place after this additive migration.
       await expect(client.job.delete({ where: { id: jobId } })).rejects.toMatchObject({
         code: "P2003",
       });

@@ -58,6 +58,7 @@ const attempts = (packageId: string) =>
   });
 const outcomes = async (packageId: string) =>
   (await attempts(packageId)).map((a) => a.outcome);
+const jobOf = (jobId: string) => prisma.job.findUniqueOrThrow({ where: { id: jobId } });
 const ago = (ms: number) => new Date(Date.now() - ms);
 // The Gmail call outlived the stale-lock window and the owner used a recovery
 // action while it was still in flight (D-022).
@@ -338,6 +339,32 @@ describe("send history: recovery decisions are part of the history", () => {
     await rejection(send(b.id, b.updatedAt));
     await releaseSendLock(s.userA.id, b.id);
     expect(await outcomes(b.id)).toEqual(["ambiguous", "lock_released"]);
+  });
+
+  it.each([
+    ["Mark as sent", markSendUnknownAsSent],
+    ["Release lock", releaseSendLock],
+  ])("%s: a failed history insert refuses with a clear code and changes nothing", async (_n, action) => {
+    const pkg = await s.mkApproved();
+    gmail.sendRaw.mockRejectedValueOnce(new CockpitError("GMAIL_TIMEOUT", { definitive: false }));
+    await rejection(send(pkg.id, pkg.updatedAt));
+    const before = await row(pkg.id);
+    await prisma.$executeRawUnsafe(
+      `CREATE TRIGGER block_hist BEFORE INSERT ON SendAttempt
+       BEGIN SELECT RAISE(ABORT, 'blocked'); END`,
+    );
+    const err = await rejection(action(s.userA.id, pkg.id));
+    await prisma.$executeRawUnsafe("DROP TRIGGER block_hist");
+    expect(err).toMatchObject({
+      code: "HISTORY_NOT_RECORDED",
+      message: "Could not record the history, nothing changed, try again",
+    });
+    // Rolled back: still locked and unknown, job untouched, history unchanged.
+    expect(await row(pkg.id)).toEqual(before);
+    expect((await jobOf(pkg.jobId)).applied).toBe(false);
+    expect(await outcomes(pkg.id)).toEqual(["ambiguous"]);
+    // And the owner can retry once the write works.
+    await action(s.userA.id, pkg.id);
   });
 
   it("a refused recovery (not recoverable) appends nothing", async () => {

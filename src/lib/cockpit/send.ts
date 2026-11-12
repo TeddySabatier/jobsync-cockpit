@@ -470,9 +470,12 @@ export async function markSendUnknownAsSent(
     // In the same transaction: the decision and its history stand or fall
     // together. A failed history write rolls the recovery back, which is safe
     // (the lock stays and the owner can retry).
-    await tx.sendAttempt.create({
-      data: { userId, packageId: id, outcome: "marked_sent" },
-    });
+    await tx.sendAttempt
+      .create({ data: { userId, packageId: id, outcome: "marked_sent" } })
+      .catch(() => {
+        // Rolls the recovery back: nothing changed (D-028 d).
+        throw new CockpitError("HISTORY_NOT_RECORDED");
+      });
   });
   return { id, sentAt: now };
 }
@@ -488,9 +491,12 @@ export async function releaseSendLock(
       data: { sendStartedAt: null, sendOutcome: null },
     });
     if (res.count === 0) throw await notRecoverable(userId, id);
-    await tx.sendAttempt.create({
-      data: { userId, packageId: id, outcome: "lock_released" },
-    });
+    await tx.sendAttempt
+      .create({ data: { userId, packageId: id, outcome: "lock_released" } })
+      .catch(() => {
+        // Rolls the recovery back: nothing changed (D-028 d).
+        throw new CockpitError("HISTORY_NOT_RECORDED");
+      });
   });
   return { id };
 }
