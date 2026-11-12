@@ -171,7 +171,7 @@ function ResumeContainer({
   const isEmptyResume =
     !ContactInfo && (!ResumeSections || ResumeSections.length === 0);
   const showStructureWithAI =
-    isEmptyResume && !!resume.File?.filePath && aiReady && !importMode;
+    isEmptyResume && !!resume.File && aiReady && !importMode;
 
   const handleSetDefault = async () => {
     if (!resume?.id) return;

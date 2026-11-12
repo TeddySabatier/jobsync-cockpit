@@ -11,6 +11,23 @@ export function safeDownloadName(
   return clean && clean !== "." && clean !== ".." ? clean : fallback;
 }
 
+// The file name a Content-Disposition header carries (the UTF-8 filename*
+// first, then the plain filename), or "" when there is none. The download
+// button uses it as the fallback name: the client never sees the stored path.
+export function nameFromContentDisposition(header: string | null | undefined): string {
+  if (!header) return "";
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (star) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      // Malformed encoding: fall through to the plain filename.
+    }
+  }
+  const plain = /filename="([^"]*)"/i.exec(header);
+  return plain ? plain[1] : "";
+}
+
 // Content-Disposition for a download: an ASCII filename for old clients plus
 // the UTF-8 name (RFC 6266 / 5987). Header values must be ByteStrings, so a
 // raw non-Latin-1 name would throw.

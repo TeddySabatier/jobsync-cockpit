@@ -20,7 +20,8 @@ export interface Resume {
 export interface File {
   id?: string;
   fileName: string;
-  filePath: string;
+  // Server side only: queries sent to the client leave it out (issue #78).
+  filePath?: string;
   fileType: string;
   uploadedAt?: Date;
   Resume?: Resume;
