@@ -200,6 +200,40 @@ describe("renderLetterPdf: embedded Noto Sans (D-026)", () => {
     expect(text).toContain("Zażółć zz");
   });
 
+  it("leaves the process-wide font registry as it found it, after a render and after a failed one", async () => {
+    const before = Object.keys(Font.getRegisteredFonts()).sort();
+    await renderLetterPdf({ letterMd: "Zażółć **x**", cvJson: CV_JSON });
+    expect(Object.keys(Font.getRegisteredFonts()).sort()).toEqual(before);
+    await expect(renderLetterPdf({ letterMd: null as unknown as string })).rejects.toThrow();
+    expect(Object.keys(Font.getRegisteredFonts()).sort()).toEqual(before);
+  });
+
+  it("embeds the matching face for regular, bold, italic and bold italic text", async () => {
+    const faces = async (letterMd: string) => {
+      // The embedded subset font names are plain text in the PDF (ABCDEF+NotoSans-Bold).
+      const raw = (await renderLetterPdf({ letterMd })).toString("latin1");
+      return [...new Set([...raw.matchAll(/[A-Z]{6}\+(NotoSans-[A-Za-z]+)/g)].map((m) => m[1]))].sort();
+    };
+    expect(await faces("plain")).toEqual(["NotoSans-Regular"]);
+    expect(await faces("**bold**")).toEqual(["NotoSans-Bold"]);
+    expect(await faces("*italic*")).toEqual(["NotoSans-Italic"]);
+    expect(await faces("***both***")).toEqual(["NotoSans-BoldItalic"]);
+  });
+
+  it("keeps every letter intact when renders overlap (preview and send at once)", async () => {
+    const samples = [POLISH, CZECH, GREEK, CYRILLIC, "Café d’été « oui » 12 €"];
+    for (let round = 0; round < 3; round++) {
+      const texts = await Promise.all(
+        samples.map(async (s, i) =>
+          textOf(await renderLetterPdf({ letterMd: `**${s}**\n\n*${samples[(i + 1) % 5]}*`, cvJson: JSON.stringify({ name: samples[(i + 2) % 5] }) })),
+        ),
+      );
+      texts.forEach((t, i) => {
+        for (const s of [samples[i], samples[(i + 1) % 5], samples[(i + 2) % 5]]) expect(t.replace(/\s+/g, " ")).toContain(s);
+      });
+    }
+  });
+
   it("registers all four faces, and the shipped font covers every code point the filter lets through", () => {
     for (const f of ["Regular", "Bold", "Italic", "BoldItalic"]) {
       const font = fontkit.openSync(path.join(FONT_DIR, `NotoSans-${f}.ttf`)) as unknown as {
