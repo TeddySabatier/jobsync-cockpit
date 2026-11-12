@@ -195,6 +195,29 @@ describe("the review queue lists follow-up drafts (kind all)", () => {
     expect((await listPackagesByTab(userA, "todo", "all", later)).map((r) => r.id)).toContain(draft.id);
   });
 
+  // A JobFollowUp row with snoozedUntil null (a cleared outcome, or a skip of
+  // step 1 before a step 2 draft) must not hide the draft: SQL `NULL > now` is
+  // NULL and NOT(NULL) drops the row unless the filter excludes null first.
+  it.each([
+    ["a cleared outcome", "outcome"],
+    ["a follow-up row with no snooze", "row"],
+  ])("a draft stays in To do after %s (snoozedUntil null)", async (_n, how) => {
+    const { jobId, app } = await appliedJob();
+    if (how === "outcome") {
+      await setApplicationOutcome(userA, jobId, "replied", DAY9);
+      await setApplicationOutcome(userA, jobId, null, DAY9);
+    } else {
+      await prisma.jobFollowUp.create({ data: { userId: userA, jobId, skippedThrough: 0 } });
+    }
+    expect((await prisma.jobFollowUp.findUniqueOrThrow({ where: { jobId } })).snoozedUntil).toBeNull();
+    const before = await countTodo(userA, DAY9);
+    const tabBefore = (await countPackagesByTab(userA, "all", DAY9)).todo;
+    const draft = await mk(jobId, "follow_up", 1, "pending", { replyToPackageId: app.id });
+    expect((await listPackagesByTab(userA, "todo", "all", DAY9)).map((r) => r.id)).toContain(draft.id);
+    expect(await countTodo(userA, DAY9)).toBe(before + 1);
+    expect((await countPackagesByTab(userA, "all", DAY9)).todo).toBe(tabBefore + 1);
+  });
+
   it("a locked follow-up draft stays visible while snoozed (its send must be resolved)", async () => {
     const { jobId, app } = await appliedJob();
     const draft = await mk(jobId, "follow_up", 1, "approved", {

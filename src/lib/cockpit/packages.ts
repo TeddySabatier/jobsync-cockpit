@@ -452,7 +452,10 @@ function notSnoozedFollowUp(now: Date): Prisma.ApplicationPackageWhereInput {
       kind: "follow_up",
       status: { in: ["pending", "approved"] },
       sendStartedAt: null,
-      job: { followUp: { is: { snoozedUntil: { gt: now } } } },
+      // `not: null` is load-bearing: SQL `NULL > now` is NULL and NOT(NULL)
+      // drops the row, which would hide every draft of a job whose follow-up
+      // row has no snooze (after a skip of step 1 or a cleared outcome).
+      job: { followUp: { is: { snoozedUntil: { not: null, gt: now } } } },
     },
   };
 }

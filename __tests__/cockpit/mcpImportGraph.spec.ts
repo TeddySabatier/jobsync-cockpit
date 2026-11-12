@@ -141,7 +141,7 @@ describe("MCP import graph (AC-35)", () => {
     ];
     expect(violations(entries, SRC)).toEqual([]);
     const forbidden =
-      /\b(sendApplicationPackage|sendRaw|buildMimeMessage|approvePackage|setFollowUpOutcome|undoFollowUpOutcome|stopFollowUps|skipFollowUpStep|snoozeFollowUp|markJobApplied|markPackageAppliedManually)\b|status:\s*"approved"/;
+      /\b(sendApplicationPackage|sendRaw|buildMimeMessage|approvePackage|setFollowUpOutcome|setApplicationOutcome|undoFollowUpOutcome|stopFollowUps|skipFollowUpStep|snoozeFollowUp|markJobApplied|markPackageAppliedManually)\b|status:\s*"approved"/;
     for (const e of entries) {
       expect(fs.readFileSync(e, "utf8").replace(/\/\/.*$/gm, ""), e).not.toMatch(forbidden);
     }
