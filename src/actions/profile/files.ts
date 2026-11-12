@@ -1,19 +1,11 @@
 "use server";
 import prisma from "@/lib/db";
-import fs from "fs";
-import { writeFile } from "fs/promises";
+import { log } from "@/lib/telemetry";
+import { FILE_OUTSIDE_UPLOADS, removeStoredFile } from "@/lib/uploadedFile";
 import { requireUser } from "./shared";
 
-export const uploadFile = async (file: File, dir: string, path: string) => {
-  const bytes = await file.arrayBuffer();
-  const buffer = new Uint8Array(bytes);
-
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  await writeFile(path, buffer);
-};
+// Uploads are written by storeResumeUpload (resumeWrite.ts, not an action):
+// no exported action takes a path (issue #78, D-024).
 
 export const deleteFile = async (fileId: string) => {
   const user = await requireUser();
@@ -29,8 +21,15 @@ export const deleteFile = async (fileId: string) => {
     throw new Error("File not found or access denied");
   }
 
-  if (fs.existsSync(file.filePath)) {
-    fs.unlinkSync(file.filePath);
+  // Only a regular file inside the resumes dir after realpath is removed
+  // (issue #78, D-024). A stored path outside it (a legacy row, a symlink
+  // pointing out) keeps its file: only the row goes. The log carries a code,
+  // never the path.
+  const outcome = await removeStoredFile(user.id, file.filePath, false);
+  if (outcome === "kept") {
+    log.warn("[Resume] Stored file outside the resumes dir kept; row deleted", {
+      code: FILE_OUTSIDE_UPLOADS,
+    });
   }
 
   await prisma.file.delete({ where: { id: fileId } });

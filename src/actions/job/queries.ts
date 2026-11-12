@@ -4,6 +4,7 @@ import { handleError } from "@/lib/utils";
 import { JOB_TYPES } from "@/models/job.model";
 import { APP_CONSTANTS } from "@/lib/constants";
 import { requireUser } from "../shared";
+import { clientFileSelect } from "@/lib/jobs/resumeDetailInclude";
 
 const JOB_LIST_SELECT = {
   id: true,
@@ -47,7 +48,8 @@ const JOB_DETAILS_INCLUDE = {
   Location: true,
   Resume: {
     include: {
-      File: true,
+      // No filePath for the client (issue #78).
+      File: { select: clientFileSelect },
     },
   },
   CoverLetter: true,

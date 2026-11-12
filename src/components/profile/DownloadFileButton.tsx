@@ -1,20 +1,17 @@
 import { Paperclip } from "lucide-react";
-import { safeDownloadName } from "@/lib/downloadName";
+import { nameFromContentDisposition, safeDownloadName } from "@/lib/downloadName";
 
+// Downloads a stored file by its File id (issue #78, D-024): the server looks
+// the path up for the signed-in user, so no path ever leaves the client.
 export function DownloadFileButton(
-  filePath: any,
+  fileId: string,
   fileTitle: string,
   fileName: string
 ) {
   const handleDownload = async () => {
     const response = await fetch(
-      `/api/profile/resume?filePath=${encodeURIComponent(filePath)}`,
-      {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
+      `/api/profile/resume?fileId=${encodeURIComponent(fileId)}`,
+      { method: "GET" }
     );
 
     if (response.ok) {
@@ -23,7 +20,11 @@ export function DownloadFileButton(
       const link = document.createElement("a");
       link.href = url;
       // The display name: a restored backup names files <id>.<ext> on disk.
-      link.download = safeDownloadName(fileName, filePath.split(/[\\/]/).pop());
+      // Fallback: the name the server sent, then a generic one.
+      const served = nameFromContentDisposition(
+        response.headers?.get("Content-Disposition"),
+      );
+      link.download = safeDownloadName(fileName, safeDownloadName(served, "resume"));
       link.target = "_blank";
       link.click();
       window.URL.revokeObjectURL(url); // Clean up

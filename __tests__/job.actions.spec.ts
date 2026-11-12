@@ -761,7 +761,10 @@ describe("jobActions", () => {
         Location: true,
         Resume: {
           include: {
-            File: true,
+            // Issue #78: the stored path is not sent to the client.
+            File: {
+              select: { id: true, fileName: true, fileType: true, uploadedAt: true },
+            },
           },
         },
         tags: true,

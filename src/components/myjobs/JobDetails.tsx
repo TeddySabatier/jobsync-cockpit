@@ -392,9 +392,9 @@ function JobDetails({
                   )}
                 </div>
               )}
-              {job?.Resume && job?.Resume?.File && job.Resume?.File?.filePath
+              {job?.Resume?.FileId && job.Resume.File
                 ? DownloadFileButton(
-                    job?.Resume?.File?.filePath,
+                    job.Resume.FileId,
                     job?.Resume?.title,
                     job?.Resume?.File?.fileName,
                   )

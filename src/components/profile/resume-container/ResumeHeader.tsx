@@ -44,9 +44,9 @@ export function ResumeHeader({
           <ArrowLeft />
         </Button>
         <CardTitle>
-          {resume.FileId && resume.File?.filePath
+          {resume.FileId && resume.File
             ? DownloadFileButton(
-                resume.File?.filePath,
+                resume.FileId,
                 title,
                 resume.File?.fileName,
               )

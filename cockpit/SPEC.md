@@ -2,7 +2,7 @@
 
 Status: **v2 — FROZEN (2026-11-04). Changes require a DECISIONS.md entry.** The Security, Data, UX and Next.js review rulings are logged in `DECISIONS.md` (D-004..D-007).
 
-**Amended after the freeze.** The text below is the V0 wording; later decisions amend it. Each affected section or AC carries an *Amended by* line. Index: D-008 (§2.2 step 2), D-010 (§6.2), D-011 (§4, §6.4, AC-16, AC-25, AC-33), D-012 (§6.2 backup, §11, AC-39), D-013 (§3 quota, AC-38), D-014 (job-page Claude prompt button, no section of its own), D-015 (§3 file serving, §5.3, §6.3, §6.4), D-016 (§3 MCP tools), D-022 (§6.4 steps 2 and 6, AC-25, AC-33). When the text and a DECISIONS entry disagree, the DECISIONS entry wins.
+**Amended after the freeze.** The text below is the V0 wording; later decisions amend it. Each affected section or AC carries an *Amended by* line. Index: D-008 (§2.2 step 2), D-010 (§6.2), D-011 (§4, §6.4, AC-16, AC-25, AC-33), D-012 (§6.2 backup, §11, AC-39), D-013 (§3 quota, AC-38), D-014 (job-page Claude prompt button, no section of its own), D-015 (§3 file serving, §5.3, §6.3, §6.4), D-016 (§3 MCP tools), D-022 (§6.4 steps 2 and 6, AC-25, AC-33), D-024 (§4 and §11, upstream resume download). When the text and a DECISIONS entry disagree, the DECISIONS entry wins.
 
 A review cockpit inside JobSync. An external bot submits **application packages** (tailored CV PDF + CV JSON, cover letter, draft email, fit analysis) through MCP. The single user reviews, edits, approves and sends each one from the UI. V0 scope only. V1/V2 items from the design are out of scope.
 
@@ -212,6 +212,8 @@ There is **no MCP tool for approve, send, edit or reject.** Two checks:
 **Framing headers.** `next.config.mjs` sets a global `X-Frame-Options: DENY` (source `/(.*)`), which also blocks same-origin framing and would break the `<iframe>`. The global rule is **not** narrowed or loosened. A second entry scoped to `/api/cockpit/files/:packageId`, with `X-Frame-Options: SAMEORIGIN` only, is **appended after** the global entry in the `headers()` array (Next applies the last matching entry per header key; this comes from the Next docs and is not yet verified in this repo). C-05 adds a unit test on the `headers()` output asserting order and values; the real response (exactly one `X-Frame-Options: SAMEORIGIN`) is checked with `curl -I` in Phase 4, and the real-browser render stays AC-30. The CSP is not in the config (the handler sets it, above). `next.config.mjs` is added to §9.
 
 The upstream `/api/profile/resume?filePath=` route is not used (it has no path confinement; upstream gap, logged in §11, not fixed here).
+
+> *Amended by D-024:* the gap is fixed. `GET /api/profile/resume` takes `?fileId=`, never a path; it serves the user's own resume file or the CV of one of the user's packages, realpath-confined, and answers an empty 404 otherwise. The cockpit UI still uses its own file route.
 
 ## 5. UI
 Everything is under the dashboard layout, but **every page and query authenticates itself** (P5, AC-40): the layout is not a guard. It uses the existing shadcn components, react-hook-form + zod, and the `@/lib/toast` helpers. UI strings are hard-coded English literals, as in the rest of the app; there are no locale files and no message catalog.
@@ -459,7 +461,7 @@ Verification types:
 
 ## 11. Handoff notes carried from the reviews
 - Create a **dedicated MCP token for the bot** (default scopes apply to every new token).
-- Upstream `/api/profile/resume?filePath=` has no path confinement (no resolve-and-prefix check, no ownership check). The cockpit does not use it and does not fix it: it is an upstream gap, logged here only.
+- Upstream `/api/profile/resume?filePath=` has no path confinement (no resolve-and-prefix check, no ownership check). The cockpit does not use it and does not fix it: it is an upstream gap, logged here only. *Amended by D-024:* fixed (issue #78).
 - Known risk: some browsers' built-in PDF viewers refuse a PDF served with `Content-Security-Policy: sandbox` inside an `<iframe>`. AC-30 checks this in a real browser. If it fails, record a decision (e.g. drop `sandbox`, keep `nosniff` and the scoped frame rules, or offer download-only).
 - Google OAuth client type (Web vs Desktop) is the user's choice.
 - V1 hook: including `ApplicationPackage` / `SentEmail` in backups (V0 only guarantees `GmailAccount` is never exported, §6.2). **Done by D-012** (packages, sent emails and their CV files travel in backups).
