@@ -437,7 +437,8 @@ export async function markPackageAppliedManually(userId: string, id: string) {
       id,
       ["pending", "approved"],
       { status: "sent", sentVia: "manual", sentAt: now },
-      { OR: [{ emailTo: null }, { emailTo: "" }] },
+      // Applications only until F-4 (D-030): a follow-up never marks a job applied.
+      { kind: "application", OR: [{ emailTo: null }, { emailTo: "" }] },
     );
     const { jobId } = await tx.applicationPackage.findFirstOrThrow({
       where: { id, userId },
