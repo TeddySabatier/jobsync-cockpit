@@ -13,6 +13,8 @@ export async function runAction<T>(
     setBusy: (busy: boolean) => void;
     // Success only.
     onSuccess?: () => void;
+    // Replaces the plain success toast (e.g. one with an Undo button).
+    showSuccess?: () => void;
     // Any returned result (not a throw), after the toast.
     onSettled?: () => void;
   },
@@ -21,7 +23,8 @@ export async function runAction<T>(
   try {
     const r = await fn();
     if (r.success) {
-      toastSuccess(opts.success);
+      if (opts.showSuccess) opts.showSuccess();
+      else toastSuccess(opts.success);
       opts.onSuccess?.();
     } else {
       toastError(r.message);

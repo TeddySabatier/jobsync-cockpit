@@ -520,12 +520,19 @@ describe("lifecycle (SPEC §2.1)", () => {
     expect(back).toMatchObject({ status: "pending", approvedAt: null });
   });
 
-  it("reject stores the trimmed reason and rejectedAt; blank reason is VALIDATION", async () => {
+  it("reject: the reason is optional (blank stores null); too long is VALIDATION", async () => {
     const pkg = await mk("approved");
-    await expect(rejectPackage(userA, pkg.id, "   ")).rejects.toMatchObject(
-      code("VALIDATION"),
-    );
+    await expect(
+      rejectPackage(userA, pkg.id, "r".repeat(2001)),
+    ).rejects.toMatchObject(code("VALIDATION"));
     expect((await row(pkg.id)).status).toBe("approved");
+    const blank = await mk("pending");
+    expect(await rejectPackage(userA, blank.id, "   ")).toMatchObject({
+      status: "rejected",
+      rejectReason: null,
+    });
+    const none = await mk("pending");
+    expect(await rejectPackage(userA, none.id)).toMatchObject({ rejectReason: null });
     const res = await rejectPackage(userA, pkg.id, "  Not a fit ");
     expect(res).toMatchObject({
       status: "rejected",

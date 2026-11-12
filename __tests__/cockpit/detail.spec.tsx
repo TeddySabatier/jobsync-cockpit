@@ -57,6 +57,7 @@ const detailFixture = (
     version: 2,
     status: "pending",
     emailTo: "jobs@acme.example",
+    contactSource: null,
     emailSubject: "Application: Staff Engineer",
     emailBody: "Hello,\n\nPlease find my CV.\n<script>alert(1)</script>",
     letterMd: "Dear team,\n\n![x](http://a.example/b.png)",
@@ -363,13 +364,13 @@ describe("action bar: one primary CTA per state (AC-48)", () => {
   it("pending: Approve is the primary CTA, others are secondary", async () => {
     getPackageDetail.mockResolvedValue(ok(detailFixture()));
     await renderPage();
-    const approve = within(bar()).getByRole("button", { name: "Approve" });
+    const approve = within(bar()).getByRole("button", { name: "Approve and send…" });
     expect(approve).toBeInTheDocument();
     expect(names()).toEqual(
-      expect.arrayContaining(["Approve", "Reject", "Request changes", "More"]),
+      expect.arrayContaining(["Approve and send…", "Reject", "Request changes", "More"]),
     );
     expect(names()).not.toContain("Unapprove");
-    expect(names()).not.toContain("Send");
+    expect(names()).not.toContain("Send…");
     await userEvent.click(approve);
     expect(approvePackage).toHaveBeenCalledWith("p2");
   });
@@ -378,11 +379,13 @@ describe("action bar: one primary CTA per state (AC-48)", () => {
     getPackageDetail.mockResolvedValue(ok(detailFixture({ status: "approved" })));
     await renderPage();
     expect(
-      within(bar()).getByRole("button", { name: "Send" }),
+      within(bar()).getByRole("button", { name: "Send…" }),
     ).toBeInTheDocument();
+    // Unapprove is a menu item, away from Send (D-041).
     expect(names()).toEqual(
-      expect.arrayContaining(["Send", "Unapprove", "Reject", "Request changes"]),
+      expect.arrayContaining(["Send…", "Reject", "Request changes"]),
     );
+    expect(names()).not.toContain("Unapprove");
     expect(names()).not.toContain("Approve");
     expect(screen.queryByRole("link", { name: "Open job posting" })).toBeNull();
   });
@@ -445,10 +448,20 @@ describe("action bar: one primary CTA per state (AC-48)", () => {
     await userEvent.click(within(bar()).getByRole("button", { name: "Reject" }));
     const dialog = await screen.findByRole("dialog");
     const submit = within(dialog).getByRole("button", { name: "Reject" });
-    expect(submit).toBeDisabled();
-    await userEvent.type(within(dialog).getByLabelText("Reject reason"), "Not a fit");
+    // The reason is optional (D-041): the submit is enabled, chips fill it.
+    expect(submit).toBeEnabled();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Not a fit" }));
     await userEvent.click(submit);
     expect(rejectPackage).toHaveBeenCalledWith("p2", "Not a fit");
+  });
+
+  it("reject without a reason calls the action with none", async () => {
+    getPackageDetail.mockResolvedValue(ok(detailFixture()));
+    await renderPage();
+    await userEvent.click(within(bar()).getByRole("button", { name: "Reject" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Reject" }));
+    expect(rejectPackage).toHaveBeenCalledWith("p2", undefined);
   });
 
   it("request changes passes the instruction", async () => {
@@ -470,31 +483,29 @@ describe("action bar: one primary CTA per state (AC-48)", () => {
     const sheet = await screen.findByRole("dialog");
     expect(
       within(sheet).getAllByRole("button").map((b) => b.textContent),
-    ).toEqual(
-      expect.arrayContaining(["Reject", "Request changes", "Mark applied manually"]),
-    );
+    ).toEqual(expect.arrayContaining(["Reject", "Request changes"]));
   });
 });
 
-describe("mark applied manually (AC-29, AC-48)", () => {
-  it("is in the overflow menu only when emailTo is empty", async () => {
+describe("mark applied manually (AC-29, AC-48, D-041)", () => {
+  it("'I applied' is a direct button, from pending, only when emailTo is empty", async () => {
     getPackageDetail.mockResolvedValue(ok(detailFixture()));
     const { unmount } = await renderPage();
-    expect(screen.queryByRole("button", { name: "Overflow menu" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "I applied" })).toBeNull();
     unmount();
 
     getPackageDetail.mockResolvedValue(ok(detailFixture({ emailTo: "  " })));
     await renderPage();
-    expect(screen.getByRole("button", { name: "Overflow menu" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "I applied" })).toBeInTheDocument();
+    // No Approve step for a link application.
+    expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "Open job posting" })).toBeInTheDocument();
   });
 
   it("confirm text names the company, the role and the URL, then calls the action", async () => {
     getPackageDetail.mockResolvedValue(ok(detailFixture({ emailTo: null })));
     await renderPage();
-    await userEvent.click(screen.getByRole("button", { name: "Overflow menu" }));
-    await userEvent.click(
-      await screen.findByRole("menuitem", { name: "Mark applied manually" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "I applied" }));
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent(
       "Mark your application to Staff Engineer at Acme Corp (https://acme.example/jobs/1) as applied? No email will be sent.",

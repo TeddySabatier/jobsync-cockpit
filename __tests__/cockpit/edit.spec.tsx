@@ -55,6 +55,7 @@ const fixture = (
     version: 2,
     status: "pending",
     emailTo: "jobs@acme.example",
+    contactSource: null,
     emailSubject: "Application: Staff Engineer",
     emailBody: "Hello,\n\nPlease find my CV.",
     letterMd: "Dear team,",

@@ -41,6 +41,7 @@ const fixture = (over: Partial<PackageDetail["package"]> = {}): PackageDetail =>
     version: 2,
     status: "pending",
     emailTo: "jobs@acme.example",
+    contactSource: null,
     emailSubject: "Application: Staff Engineer",
     emailBody: "Hello,",
     letterMd: "Dear team,",

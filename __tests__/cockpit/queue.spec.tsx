@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 const getReviewQueue = vi.hoisted(() => vi.fn());
 vi.mock("@/actions/cockpit.actions", () => ({ getReviewQueue }));
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
   redirect: vi.fn((to: string) => {
     throw new Error(`REDIRECT:${to}`);
   }),
@@ -111,10 +112,10 @@ describe("review queue page", () => {
   });
 
   it.each([
-    ["todo", /Nothing to review/],
-    ["changes", /No packages are waiting/],
+    ["todo", /All done: nothing to review/],
+    ["changes", /No changes requested/],
     ["sent", /Nothing sent yet/],
-    ["rejected", /No rejected packages/],
+    ["rejected", /No rejected applications/],
   ])("shows the %s empty state with no list and no j / k hint", async (tab, msg) => {
     getReviewQueue.mockResolvedValue(ok([]));
     await renderPage(tab);

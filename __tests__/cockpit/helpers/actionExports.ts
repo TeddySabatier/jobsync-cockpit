@@ -11,6 +11,8 @@ export const ALLOWED: Record<string, string[]> = {
     "getReviewQueue",
     "getPackageDetail",
     "getAdjacentPackageIds",
+    "reopenPackage",
+    "getTodoCount",
   ],
   "cockpitGmail.actions.ts": ["getGmailSettings", "disconnectGmail"],
   "cockpitSend.actions.ts": [

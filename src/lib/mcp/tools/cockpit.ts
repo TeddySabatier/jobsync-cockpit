@@ -230,6 +230,7 @@ export function registerCockpitTools(
                 cvJson: true,
                 cvFile: { select: { id: true, fileName: true } },
                 sourceFolder: true,
+                contactSource: true,
                 rejectReason: true,
                 changeRequest: true,
                 changeRequestedAt: true,
@@ -293,6 +294,7 @@ export function registerCockpitTools(
               fitGrade: true,
               fitAnalysis: true,
               sourceFolder: true,
+              contactSource: true,
               job: {
                 select: {
                   JobTitle: { select: { label: true } },

@@ -38,6 +38,7 @@ const detail = (over: Partial<PackageDetail["package"]> = {}): PackageDetail => 
     version: 1,
     status: "approved",
     emailTo: "jobs@acme.example",
+    contactSource: null,
     emailSubject: "Application – Staff Engineer",
     emailBody: LONG_BODY,
     letterMd: null,
@@ -131,7 +132,7 @@ describe("recipientWarning (AC-45)", () => {
 describe("Send button and dialog (AC-45)", () => {
   it("shows To large, From, Subject, attachment name and size, and the FULL scrollable body", async () => {
     render(<ActionBar detail={detail()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByTestId("send-to")).toHaveTextContent("jobs@acme.example");
     expect(within(dialog).getByTestId("send-to").className).toMatch(/text-2xl/);
@@ -148,7 +149,7 @@ describe("Send button and dialog (AC-45)", () => {
 
   it("shows a warning for a domain mismatch", async () => {
     render(<ActionBar detail={detail({ emailTo: "hr@other.example" })} />);
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent(
       /does not match/,
     );
@@ -156,7 +157,7 @@ describe("Send button and dialog (AC-45)", () => {
 
   it("shows a warning for a free-mail recipient", async () => {
     render(<ActionBar detail={detail({ emailTo: "hr@gmail.com" })} />);
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent(
       /free-mail/,
     );
@@ -166,7 +167,7 @@ describe("Send button and dialog (AC-45)", () => {
     let resolve: (v: unknown) => void = () => {};
     sendPackage.mockReturnValue(new Promise((r) => (resolve = r)));
     render(<ActionBar detail={detail()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     const confirm = screen.getByRole("button", { name: "Send now" });
     await userEvent.dblClick(confirm);
     expect(sendPackage).toHaveBeenCalledTimes(1);
@@ -175,7 +176,7 @@ describe("Send button and dialog (AC-45)", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
 
     await act(async () => resolve({ success: true, data: {} }));
-    expect(toast.toastSuccess).toHaveBeenCalledWith("Email sent");
+    expect(toast.toastSuccess).toHaveBeenCalledWith("Email sent. All done: nothing left to review.");
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -186,7 +187,7 @@ describe("Send button and dialog (AC-45)", () => {
       message: "The send result is unknown; check your Gmail Sent folder",
     });
     render(<ActionBar detail={detail()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     await userEvent.click(screen.getByRole("button", { name: "Send now" }));
     expect(toast.toastError).toHaveBeenCalledWith(
       "The send result is unknown; check your Gmail Sent folder",
@@ -202,7 +203,7 @@ describe("Send button and dialog (AC-45)", () => {
   ])("%s keeps the dialog open with an inline alert and Send enabled", async (code, message) => {
     sendPackage.mockResolvedValue({ success: false, code, message });
     render(<ActionBar detail={detail()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     await userEvent.click(screen.getByRole("button", { name: "Send now" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByTestId("send-failure")).toHaveTextContent(message);
@@ -219,14 +220,14 @@ describe("Send button and dialog (AC-45)", () => {
     }
     // closing and reopening clears the old failure
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     expect(screen.queryByTestId("send-failure")).toBeNull();
   });
 
   it("VALIDATION tells the owner what to check and to use Edit", async () => {
     sendPackage.mockResolvedValue({ success: false, code: "VALIDATION", message: "The input is invalid" });
     render(<ActionBar detail={detail()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     await userEvent.click(screen.getByRole("button", { name: "Send now" }));
     expect(screen.getByTestId("send-failure")).toHaveTextContent(
       /Check the recipient, subject and body.*Edit/,
@@ -237,7 +238,7 @@ describe("Send button and dialog (AC-45)", () => {
     let resolve: (v: unknown) => void = () => {};
     sendPackage.mockReturnValue(new Promise((r) => (resolve = r)));
     render(<ActionBar detail={detail()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     const confirm = screen.getByRole("button", { name: "Send now" });
     // Both clicks inside one act(): React has not re-rendered the button as
     // disabled in between, exactly like two clicks in one tick.
@@ -257,7 +258,7 @@ describe("Send button and dialog (AC-45)", () => {
     ["pending", {}, { status: "pending" }],
   ])("no Send button: %s", (_n, extra, over) => {
     render(<ActionBar detail={{ ...detail(over), ...extra }} />);
-    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send…" })).toBeNull();
   });
 });
 
@@ -335,17 +336,17 @@ describe("rejected action requests show an error toast", () => {
   it("ActionBar: Approve rejects -> toast, button re-enabled", async () => {
     vi.mocked(approvePackage).mockRejectedValue(new Error("network"));
     render(<ActionBar detail={detail({ status: "pending" })} />);
-    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await userEvent.click(screen.getByRole("button", { name: "Approve and send…" }));
     expect(toast.toastError).toHaveBeenCalledWith(
       "Request failed. Check your connection and try again.",
     );
-    expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Approve and send…" })).toBeEnabled();
   });
 
   it("SendDialog: sendPackage throws -> toast, dialog closed (no second Send click) and the page refreshed", async () => {
     sendPackage.mockRejectedValue(new Error("network"));
     render(<ActionBar detail={detail()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
     await userEvent.click(screen.getByRole("button", { name: "Send now" }));
     expect(toast.toastError).toHaveBeenCalledWith(
       "Could not confirm the send. Reload and check the package state before retrying.",
@@ -379,7 +380,7 @@ describe("rejected action requests show an error toast", () => {
 describe("Gmail connected as a different address than the allowed one", () => {
   it("shows a dedicated reason with a settings link and no Send button", () => {
     render(<ActionBar detail={{ ...detail(), gmailSendAllowed: false }} />);
-    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send…" })).toBeNull();
     expect(
       screen.getByText(/Sending is only allowed from the address configured for the cockpit\. Connect that address in settings\./),
     ).toBeInTheDocument();
@@ -391,7 +392,7 @@ describe("Gmail connected as a different address than the allowed one", () => {
 
   it("allowed: no reason, Send is offered", () => {
     render(<ActionBar detail={detail()} />);
-    expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send…" })).toBeInTheDocument();
     expect(screen.queryByText(/only allowed from/)).toBeNull();
   });
 });

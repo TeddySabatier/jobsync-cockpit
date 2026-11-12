@@ -79,6 +79,8 @@ export const SubmitApplicationPackageInputShape = {
   cvJson: jsonObject(200_000).optional(),
   cvFileId: z.string().min(1).optional(),
   sourceFolder: z.string().max(300).optional(),
+  // Where the recipient address was found (a URL or a short note, D-041).
+  contactSource: z.string().trim().max(300).optional(),
   idempotencyKey: z
     .string()
     .regex(/^[A-Za-z0-9._:-]{1,100}$/)
@@ -125,7 +127,8 @@ export const MarkChangeRequestDoneSchema = z.object(
 );
 
 // ---- review actions (UI side, used by the service) ------------------------
-export const RejectPackageInputShape = { reason: shortText };
+// The reason is optional (D-041): quick triage should not need typing. Blank = none.
+export const RejectPackageInputShape = { reason: z.string().trim().max(2_000).optional() };
 export const RejectPackageSchema = z.object(RejectPackageInputShape);
 
 export const RequestPackageChangesInputShape = { instruction: shortText };

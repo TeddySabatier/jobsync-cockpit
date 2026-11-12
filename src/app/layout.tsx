@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,14 @@ export const metadata: Metadata = {
     default: "JobSync",
   },
   description: "Job Application Tracking System",
+};
+
+// viewport-fit=cover lets the sticky action bar pad itself with
+// env(safe-area-inset-bottom) on phones with a home indicator (D-041).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 interface Props {

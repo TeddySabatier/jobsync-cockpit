@@ -150,7 +150,8 @@ describe(tag("schema properties"), () => {
           const r = schema.safeParse({ [key]: s, packageId: "p1" });
           if (!r.success) continue;
           const out = (r.data as Record<string, string>)[key];
-          expect(out.length).toBeGreaterThanOrEqual(1);
+          // The reject reason is optional (D-041): blank is allowed there.
+          expect(out.length).toBeGreaterThanOrEqual(key === "reason" ? 0 : 1);
           expect(out.length).toBeLessThanOrEqual(2_000);
           expect(out).toBe(out.trim());
         }

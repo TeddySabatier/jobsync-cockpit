@@ -201,9 +201,9 @@ describe("other schemas", () => {
   it("trims and bounds reason / response (1-2000)", () => {
     const r = RejectPackageSchema.parse({ reason: "  not a fit  " });
     expect(r.reason).toBe("not a fit");
-    expect(RejectPackageSchema.safeParse({ reason: "   " }).success).toBe(
-      false,
-    );
+    // D-041: the reject reason is optional; blank becomes "".
+    expect(RejectPackageSchema.parse({ reason: "   " }).reason).toBe("");
+    expect(RejectPackageSchema.safeParse({}).success).toBe(true);
     expect(
       RejectPackageSchema.safeParse({ reason: "r".repeat(2_001) }).success,
     ).toBe(false);

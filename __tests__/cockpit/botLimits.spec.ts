@@ -67,6 +67,7 @@ describe("cockpit_limits.json matches the real schemas (issue #83)", () => {
         "listLimitMax",
         "listLimitMin",
         "sourceFolderMax",
+        "contactSourceMax",
         "subjectMax",
       ].sort(),
     );
@@ -87,6 +88,11 @@ describe("cockpit_limits.json matches the real schemas (issue #83)", () => {
   it("letterMd: at most letterMdMax", () => {
     expect(submit({ letterMd: "l".repeat(num("letterMdMax")) })).toBe(true);
     expect(submit({ letterMd: "l".repeat(num("letterMdMax") + 1) })).toBe(false);
+  });
+
+  it("contactSource: at most contactSourceMax (D-041)", () => {
+    expect(submit({ contactSource: "c".repeat(num("contactSourceMax")) })).toBe(true);
+    expect(submit({ contactSource: "c".repeat(num("contactSourceMax") + 1) })).toBe(false);
   });
 
   it("sourceFolder: at most sourceFolderMax", () => {
@@ -162,7 +168,7 @@ describe("cockpit_limits.json matches the real schemas (issue #83)", () => {
           "print(json.dumps(dict(base64Max=cs.MAX_BASE64_CHARS, cvJsonMax=cs.MAX_CV_JSON,",
           "emailAddressMax=cs.MAX_ADDRESS, emailBodyMax=cs.MAX_TEXT, fileNameMax=cs.MAX_FILE_NAME,",
           "fitAnalysisMax=cs.MAX_FIT_ANALYSIS, listLimitMax=cs.MAX_CHANGE_REQUESTS,",
-          "listLimitMin=cs.MIN_LIST_LIMIT, sourceFolderMax=cs.MAX_SOURCE_FOLDER, subjectMax=cs.MAX_SUBJECT)))",
+          "listLimitMin=cs.MIN_LIST_LIMIT, sourceFolderMax=cs.MAX_SOURCE_FOLDER, contactSourceMax=cs.MAX_CONTACT_SOURCE, subjectMax=cs.MAX_SUBJECT)))",
         ].join("\n"),
       ],
       { cwd: botDir, encoding: "utf8" },

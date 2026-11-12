@@ -10,18 +10,30 @@ import { usePathname } from "next/navigation";
 import { useSidebar } from "@/context/SidebarContext";
 import { cn } from "@/lib/utils";
 import { CurrentUser } from "@/models/user.model";
+import { useReviewCount } from "./cockpit/useReviewCount";
 
 interface SidebarProps {
   user: CurrentUser | null;
   signOutAction: () => void;
   // Read from COCKPIT_ENABLED by the server layout: a client component cannot.
   cockpitEnabled?: boolean;
+  // To do applications in Review at render time, and the action that re-counts
+  // them (passed from the server layout so this file imports no server code).
+  reviewCount?: number;
+  todoCountAction?: () => Promise<{ success: boolean; data?: number }>;
 }
 
-function Sidebar({ user, signOutAction, cockpitEnabled = false }: SidebarProps) {
+function Sidebar({
+  user,
+  signOutAction,
+  cockpitEnabled = false,
+  reviewCount,
+  todoCountAction,
+}: SidebarProps) {
   const path = usePathname();
   const { expanded } = useSidebar();
   const isOnDashboard = path === "/dashboard";
+  const todo = useReviewCount(cockpitEnabled ? reviewCount : undefined, todoCountAction, path);
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -75,6 +87,7 @@ function Sidebar({ user, signOutAction, cockpitEnabled = false }: SidebarProps) 
                 route={item.route}
                 pathname={path}
                 expanded={expanded}
+                badge={item.cockpitOnly ? todo : undefined}
               />
             );
           })}

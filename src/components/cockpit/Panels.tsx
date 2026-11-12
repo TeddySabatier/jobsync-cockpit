@@ -1,5 +1,7 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
+import PdfFrame from "./PdfFrame";
 import { format } from "date-fns";
 import { Download, ExternalLink } from "lucide-react";
 import { TipTapContentViewer } from "@/components/TipTapContentViewer";
@@ -134,6 +136,9 @@ export function humanizeKey(key: string): string {
 
 export function PostingPanel({ pkg }: { pkg: PackageDetail["package"] }) {
   const { jobUrl, description } = pkg.job;
+  // Below md the posting is a short preview until opened (D-041): the owner
+  // reads the email and the letter first. From md up it is always in full.
+  const [expanded, setExpanded] = useState(false);
   return (
     <Panel title="Posting" testId="panel-posting">
       {jobUrl && (
@@ -148,9 +153,30 @@ export function PostingPanel({ pkg }: { pkg: PackageDetail["package"] }) {
           </a>
         </p>
       )}
-      <ScrollRegion label="Posting text">
-        <TipTapContentViewer content={description} label="Job posting" />
-      </ScrollRegion>
+      <div
+        data-testid="posting-text"
+        data-expanded={expanded}
+        className={expanded ? undefined : "relative max-md:max-h-28 max-md:overflow-hidden"}
+      >
+        <ScrollRegion label="Posting text">
+          <TipTapContentViewer content={description} label="Job posting" />
+        </ScrollRegion>
+        {!expanded && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent md:hidden"
+          />
+        )}
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        className="mt-2 h-11 w-full md:hidden"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((e) => !e)}
+      >
+        {expanded ? "Show less" : "Show the full posting"}
+      </Button>
     </Panel>
   );
 }
@@ -175,10 +201,10 @@ export function CvPanel({ detail }: { detail: PackageDetail }) {
       )}
       {detail.attachment ? (
         <>
-          <iframe
+          <PdfFrame
             src={fileUrl}
             title="CV PDF"
-            className="h-[480px] w-full rounded border"
+            sizeLabel={formatBytes(detail.attachment.size)}
           />
           <PdfLinks href={fileUrl} download />
         </>
@@ -263,6 +289,18 @@ export function EmailPanel({ detail }: { detail: PackageDetail }) {
         <dd className="break-all">{detail.gmail?.email ?? "Not connected"}</dd>
         <dt className="text-muted-foreground">To</dt>
         <dd className="break-all">{pkg.emailTo?.trim() || "Apply via link"}</dd>
+        {pkg.emailTo?.trim() && (
+          <>
+            <dt className="text-muted-foreground">Found at</dt>
+            <dd className="break-all" data-testid="email-contact-source">
+              {pkg.contactSource?.trim() || (
+                <span className="text-amber-700 dark:text-amber-400">
+                  No source recorded: check the address
+                </span>
+              )}
+            </dd>
+          </>
+        )}
         <dt className="text-muted-foreground">Subject</dt>
         <dd className="[overflow-wrap:anywhere]">{pkg.emailSubject}</dd>
         <dt className="text-muted-foreground">Attachment</dt>
@@ -300,12 +338,7 @@ export function LetterPanel({
           <p className="mb-1 text-xs text-muted-foreground">
             PDF as it will be attached to the email:
           </p>
-          <iframe
-            src={pdfUrl}
-            title="Cover letter PDF"
-            data-testid="letter-pdf-preview"
-            className="h-[560px] w-full rounded border"
-          />
+          <PdfFrame src={pdfUrl} title="Cover letter PDF" testId="letter-pdf-preview" />
           <PdfLinks href={pdfUrl} download={fileName ?? true} />
           <p className="mb-1 mt-4 text-xs text-muted-foreground">Letter text:</p>
           <ScrollRegion label="Letter text">

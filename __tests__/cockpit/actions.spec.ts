@@ -39,6 +39,8 @@ vi.mock("@/lib/cockpit/packages", async (importOriginal) => {
     requestPackageChanges: vi.fn(),
     updatePackageContent: vi.fn(),
     markPackageAppliedManually: vi.fn(),
+    reopenPackage: vi.fn(),
+    countTodo: vi.fn(),
     listPackagesByTab: vi.fn(),
     getPackageWithJob: vi.fn(),
     listJobVersions: vi.fn(),
@@ -87,6 +89,14 @@ const mutations: [string, () => Promise<unknown>, ReturnType<typeof vi.fn>, unkn
     m(svc.markPackageAppliedManually),
     ["u1", "p1"],
   ],
+  // D-041
+  ["reopenPackage", () => actions.reopenPackage("p1"), m(svc.reopenPackage), ["u1", "p1"]],
+  [
+    "rejectPackage without a reason",
+    () => actions.rejectPackage("p1"),
+    m(svc.rejectPackage),
+    ["u1", "p1", undefined],
+  ],
 ];
 
 describe.each(mutations)("%s", (_name, call, service, args) => {
@@ -99,12 +109,13 @@ describe.each(mutations)("%s", (_name, call, service, args) => {
     expect(service).toHaveBeenCalledWith(...args);
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard/review");
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard/review/p1");
-    // Only the action that changes the job (applied) refreshes the job list.
+    // Only the actions that change what the job list shows (applied; the
+    // reopened package's status, D-041) refresh the job list.
     expect(
       (revalidatePath as ReturnType<typeof vi.fn>).mock.calls.some(
         ([p]) => p === "/dashboard/myjobs",
       ),
-    ).toBe(_name === "markPackageAppliedManually");
+    ).toBe(_name === "markPackageAppliedManually" || _name === "reopenPackage");
   });
 
   it("returns COCKPIT_DISABLED when the flag is off, without calling the service", async () => {
@@ -155,6 +166,7 @@ const everyAction: [string, () => Promise<unknown>][] = [
   ["getReviewQueue", () => actions.getReviewQueue("todo")],
   ["getPackageDetail", () => actions.getPackageDetail("p1")],
   ["getAdjacentPackageIds", () => actions.getAdjacentPackageIds("p1")],
+  ["getTodoCount", () => actions.getTodoCount()],
 ];
 
 describe.each(everyAction)("%s auth and flag order", (_n, call) => {
@@ -220,10 +232,11 @@ describe("getReviewQueue", () => {
 describe("getAdjacentPackageIds", () => {
   const rows = [{ id: "a" }, { id: "b" }, { id: "c" }];
   it.each([
-    ["a", { previousId: null, nextId: "b" }],
-    ["b", { previousId: "a", nextId: "c" }],
-    ["c", { previousId: "b", nextId: null }],
-    ["zzz", { previousId: null, nextId: null }],
+    // todoLeft: the other To do items besides this one (D-041, auto-advance toast).
+    ["a", { previousId: null, nextId: "b", todoLeft: 2 }],
+    ["b", { previousId: "a", nextId: "c", todoLeft: 2 }],
+    ["c", { previousId: "b", nextId: null, todoLeft: 2 }],
+    ["zzz", { previousId: null, nextId: null, todoLeft: 3 }],
   ])("%s", async (id, expected) => {
     m(svc.listPackagesByTab).mockResolvedValue(rows);
     expect(await actions.getAdjacentPackageIds(id)).toEqual({
@@ -231,6 +244,14 @@ describe("getAdjacentPackageIds", () => {
       data: expected,
     });
     expect(svc.listPackagesByTab).toHaveBeenCalledWith("u1", "todo");
+  });
+});
+
+describe("getTodoCount (D-041)", () => {
+  it("returns the To do count for the session user", async () => {
+    m(svc.countTodo).mockResolvedValue(4);
+    expect(await actions.getTodoCount()).toEqual({ success: true, data: 4 });
+    expect(svc.countTodo).toHaveBeenCalledWith("u1");
   });
 });
 

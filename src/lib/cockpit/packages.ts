@@ -206,6 +206,7 @@ async function submitInTransaction(
       cvJson: input.cvJson ? JSON.stringify(input.cvJson) : null,
       cvFileId: input.cvFileId ?? null,
       sourceFolder: input.sourceFolder ?? null,
+      contactSource: input.contactSource?.trim() || null,
       idempotencyKey: input.idempotencyKey ?? null,
     },
   });
@@ -286,15 +287,55 @@ export async function unapprovePackage(userId: string, id: string) {
 export async function rejectPackage(
   userId: string,
   id: string,
-  reason: string,
+  reason?: string,
 ) {
-  const { reason: rejectReason } = parse(RejectPackageSchema, { reason });
+  const { reason: text } = parse(RejectPackageSchema, { reason });
   await transition(prisma, userId, id, ["pending", "approved"], {
     status: "rejected",
-    rejectReason,
+    rejectReason: text || null,
     rejectedAt: new Date(),
   });
   return reload(userId, id);
+}
+
+// Undo a reject (D-041): back to pending, as if it had never been rejected.
+// The reject reason and time are cleared (a later reject writes its own). The
+// job needs no change: Reject never touched it. The bot's JOB_REJECTED guard
+// looks at the job's active package, so once this one is pending again the
+// bot may resubmit like for any open application. Refused (INVALID_STATE) when
+// the job has another live package, which the submit rules should prevent.
+export async function reopenPackage(userId: string, id: string) {
+  await prisma.$transaction(async (tx) => {
+    const pkg = await tx.applicationPackage.findFirst({
+      where: { id, userId },
+      select: { jobId: true },
+    });
+    if (!pkg) throw new CockpitError("NOT_FOUND");
+    const other = await tx.applicationPackage.findFirst({
+      where: {
+        jobId: pkg.jobId,
+        userId,
+        id: { not: id },
+        status: { in: ["pending", "approved", "changes_requested", "sent"] },
+      },
+      select: { id: true },
+    });
+    if (other) throw new CockpitError("INVALID_STATE");
+    await transition(tx, userId, id, ["rejected"], {
+      status: "pending",
+      rejectReason: null,
+      rejectedAt: null,
+      approvedAt: null,
+    });
+  });
+  return reload(userId, id);
+}
+
+// Number of To do applications (pending and approved), for the sidebar badge.
+export function countTodo(userId: string): Promise<number> {
+  return prisma.applicationPackage.count({
+    where: { userId, status: { in: QUEUE_TAB_STATUSES.todo } },
+  });
 }
 
 // A later request overwrites the previous one and resets the bot's response.

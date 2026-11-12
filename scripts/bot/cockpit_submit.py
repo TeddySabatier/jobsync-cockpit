@@ -55,7 +55,7 @@ TIMEOUT_SECONDS = 90
 _FALLBACK_LIMITS = {
     "base64Max": 7000000, "fileNameMin": 1, "fileNameMax": 120, "emailAddressMax": 254,
     "subjectMax": 300, "emailBodyMax": 20000, "letterMdMax": 20000, "fitAnalysisMax": 20000,
-    "cvJsonMax": 200000, "sourceFolderMax": 300, "listLimitMin": 1, "listLimitMax": 100,
+    "cvJsonMax": 200000, "sourceFolderMax": 300, "contactSourceMax": 300, "listLimitMin": 1, "listLimitMax": 100,
     "idempotencyKeyPattern": "^[A-Za-z0-9._:-]{1,100}$",
 }
 
@@ -81,6 +81,7 @@ MAX_FIT_ANALYSIS = LIMITS["fitAnalysisMax"]
 MAX_FILE_NAME = LIMITS["fileNameMax"]
 MAX_ADDRESS = LIMITS["emailAddressMax"]
 MAX_SOURCE_FOLDER = LIMITS["sourceFolderMax"]
+MAX_CONTACT_SOURCE = LIMITS["contactSourceMax"]
 MIN_LIST_LIMIT = LIMITS["listLimitMin"]
 MAX_CHANGE_REQUESTS = LIMITS["listLimitMax"]  # the server's own maximum for list_jobs / list_change_requests
 LOOPBACK = ("localhost", "127.0.0.1", "::1")
@@ -93,6 +94,10 @@ EMAIL_RE = re.compile(
 )
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.~+/=-]+$")
 META_KEYS = ("company", "role", "subject", "fit", "track", "url", "to", "location", "source", "reasons")
+# Optional extras, kept OUT of META_KEYS on purpose: the content digest and the idempotency key are built
+# from META_KEYS, so adding a key there would flip every existing marker to CONTENT_CHANGED. They are
+# only part of the digest when given. contact_source: where the recipient address was found (D-041).
+OPTIONAL_META_KEYS = ("contact_source",)
 
 
 class CockpitError(Exception):
@@ -441,7 +446,7 @@ def load_meta(path):
         raise CockpitError("VALIDATION", "The meta file is not valid JSON: %s" % path)
     if not isinstance(data, dict):
         raise CockpitError("VALIDATION", "The meta file must be a JSON object: %s" % path)
-    return {k: str(v) for k, v in data.items() if k in META_KEYS and v is not None}
+    return {k: str(v) for k, v in data.items() if (k in META_KEYS or k in OPTIONAL_META_KEYS) and v is not None}
 
 
 def as_dict(value):
@@ -556,6 +561,9 @@ def cmd_submit(args, url, token):
     for k in META_KEYS:
         v = getattr(args, k)
         values[k] = v if v is not None else meta.get(k)
+    for k in OPTIONAL_META_KEYS:
+        v = getattr(args, k)
+        values[k] = v if v is not None else meta.get(k)
 
     folder = Path(args.folder)
     if not folder.is_dir():
@@ -589,7 +597,8 @@ def cmd_submit(args, url, token):
     # never silently ignored. The digest covers every value that ends up in the package.
     digest = content_digest(
         [letter, body_override, json.dumps(cv_json, sort_keys=True),
-         json.dumps({k: values[k] for k in META_KEYS}, sort_keys=True)],
+         json.dumps({k: values[k] for k in META_KEYS}, sort_keys=True)]
+        + (["contact_source=" + values["contact_source"]] if values["contact_source"] else []),
         data,
     )
     marker = read_marker(folder, key)
@@ -625,6 +634,9 @@ def cmd_submit(args, url, token):
         analysis = as_dict(item.get("fitAnalysis"))
         subject = values["subject"] or item.get("emailSubject") or ""
         to = values["to"] if values["to"] is not None else (item.get("emailTo") or "")
+        # Keep the source of the recipient the owner already saw unless a new one is given.
+        if not values["contact_source"] and item.get("contactSource"):
+            values["contact_source"] = str(item["contactSource"])
         fit = values["fit"] or item.get("fitGrade") or analysis.get("verdict") or ""
         previous = (item.get("emailBody") or "").strip().splitlines()[:1]
         carry = previous[0] if previous and previous[0].startswith("Apply via:") else ""
@@ -687,6 +699,9 @@ def cmd_submit(args, url, token):
                 "cvFileId": uploaded[0],
                 "sourceFolder": truncate16(folder.resolve().name or "application", MAX_SOURCE_FOLDER),
                 "idempotencyKey": key,
+                # Only sent when there is one: an older server refuses unknown keys.
+                **({"contactSource": truncate16(values["contact_source"].strip(), MAX_CONTACT_SOURCE)}
+                   if (values["contact_source"] or "").strip() else {}),
             })
         )
 
@@ -775,9 +790,11 @@ def build_parser():
 
     submit = sub.add_parser("submit", help="create or find the job, upload the CV, submit the package")
     submit.add_argument("--folder", required=True, help="application folder (letter.md, cv.json, posting.md, the PDF)")
-    submit.add_argument("--meta", default="", help="JSON file with company, role, subject, fit, track, url, to, location, source, reasons")
+    submit.add_argument("--meta", default="", help="JSON file with company, role, subject, fit, track, url, to, location, source, reasons, contact_source")
     for name in META_KEYS:
         submit.add_argument("--" + name, default=None)
+    submit.add_argument("--contact-source", dest="contact_source", default=None,
+                        help="where the recipient address was found: a URL or a short note (shown in Review)")
     submit.add_argument("--revision", default="", help="the packageId of the change request you are answering")
     submit.add_argument("--resubmit", action="store_true",
                         help="send corrected content for a posting already submitted (replaces the version still waiting)")
