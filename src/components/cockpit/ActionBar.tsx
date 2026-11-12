@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { MoreHorizontal } from "lucide-react";
 import {
@@ -11,9 +11,7 @@ import {
 } from "@/actions/cockpit.actions";
 import type { CockpitResult } from "@/lib/cockpit/errors";
 import { formatUrl } from "@/lib/utils";
-import { toastError, toastSuccess } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,14 +22,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -50,6 +40,8 @@ import EditRerender from "./EditRerender";
 import type { PackageDetail } from "./Panels";
 import SendDialog from "./SendDialog";
 import SendOutcomePanel from "./SendOutcomePanel";
+import { runAction } from "./runAction";
+import TextDialog from "./TextDialog";
 
 type DialogKind = "reject" | "changes" | "applied" | null;
 
@@ -59,60 +51,11 @@ export function sendBlockedReason(detail: PackageDetail): string | null {
   if (pkg.cvPdfStale) return "The CV PDF is out of date. Ask the bot to re-render.";
   if (!pkg.cvFileId || !detail.attachment) return "No CV file is attached.";
   if (!detail.gmail) return "Gmail is not connected. Connect it in settings.";
+  // Send would refuse with "Reconnect Gmail" for this (D-023): say why instead.
+  if (!detail.gmailSendAllowed) {
+    return `Gmail is connected as ${detail.gmail.email}, but sending is only allowed from the address set for the cockpit (COCKPIT_GMAIL_ALLOWED_ADDRESS), which is a different address or not configured. Connect that account in settings.`;
+  }
   return null;
-}
-
-function TextDialog({
-  open,
-  onOpenChange,
-  title,
-  description,
-  label,
-  submitLabel,
-  busy,
-  onSubmit,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  description: string;
-  label: string;
-  submitLabel: string;
-  busy: boolean;
-  onSubmit: (text: string) => void;
-}) {
-  const [text, setText] = useState("");
-  const trimmed = text.trim();
-  useEffect(() => {
-    if (!open) setText("");
-  }, [open]);
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        <Textarea
-          aria-label={label}
-          value={text}
-          maxLength={2000}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            disabled={busy || trimmed.length === 0}
-            onClick={() => onSubmit(trimmed)}
-          >
-            {submitLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 // Sticky action bar (SPEC §5.3). Hidden entirely on non-active versions by the
@@ -121,9 +64,12 @@ function TextDialog({
 export default function ActionBar({
   detail,
   onEdit,
+  focusEditOnMount,
 }: {
   detail: PackageDetail;
   onEdit?: () => void;
+  // Set when the bar comes back after leaving edit mode: focus goes to Edit.
+  focusEditOnMount?: boolean;
 }) {
   const pkg = detail.package;
   const [dialog, setDialog] = useState<DialogKind>(null);
@@ -131,8 +77,17 @@ export default function ActionBar({
   const [busy, setBusy] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
 
-  const locked = !!pkg.sendStartedAt;
-  const open = pkg.status === "pending" || pkg.status === "approved";
+  const editRef = useRef<HTMLButtonElement>(null);
+  const regionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focusEditOnMount) return;
+    // Edit is not visible at narrow widths (it is in the sheet): fall back to
+    // the region so focus is not left on <body>.
+    editRef.current?.focus();
+    if (document.activeElement !== editRef.current) regionRef.current?.focus();
+  }, [focusEditOnMount]);
+
+  const isOpenStatus = pkg.status === "pending" || pkg.status === "approved";
 
   if (pkg.status === "changes_requested") {
     return (
@@ -141,8 +96,8 @@ export default function ActionBar({
       </p>
     );
   }
-  if (!open) return null;
-  if (locked && pkg.sendStartedAt) {
+  if (!isOpenStatus) return null;
+  if (pkg.sendStartedAt) {
     return (
       <SendOutcomePanel
         packageId={pkg.id}
@@ -157,26 +112,15 @@ export default function ActionBar({
   const jobUrl = pkg.job.jobUrl?.trim() || null;
   const linkApply = !pkg.emailTo?.trim();
 
-  async function run(
-    fn: () => Promise<CockpitResult<unknown>>,
-    success: string,
-  ) {
-    setBusy(true);
-    try {
-      const r = await fn();
-      if (r.success) {
-        toastSuccess(success);
+  const run = (fn: () => Promise<CockpitResult<unknown>>, success: string) =>
+    runAction(fn, {
+      success,
+      setBusy,
+      onSuccess: () => {
         setDialog(null);
         setSheetOpen(false);
-      } else {
-        toastError(r.message);
-      }
-    } catch {
-      toastError("Request failed. Check your connection and try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
+      },
+    });
 
   const pickDialog = (kind: Exclude<DialogKind, null>) => {
     setSheetOpen(false);
@@ -210,7 +154,7 @@ export default function ActionBar({
       reason = (
         <p className="text-sm text-muted-foreground">
           {blocked}
-          {!detail.gmail && (
+          {(!detail.gmail || !detail.gmailSendAllowed) && (
             <>
               {" "}
               <Link href="/dashboard/review/settings" className="underline">
@@ -241,7 +185,7 @@ export default function ActionBar({
         </Button>
       )}
       {onEdit && (
-        <Button variant="outline" disabled={busy} onClick={onEdit}>
+        <Button ref={editRef} variant="outline" disabled={busy} onClick={onEdit}>
           Edit
         </Button>
       )}
@@ -258,6 +202,8 @@ export default function ActionBar({
     <div
       role="region"
       aria-label="Actions"
+      ref={regionRef}
+      tabIndex={-1}
       className="sticky bottom-0 z-10 flex flex-col gap-2 border-t bg-background py-3"
     >
       {reason}

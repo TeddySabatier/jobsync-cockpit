@@ -7,6 +7,18 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toastError, toastSuccess } from "@/lib/toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { REQUEST_FAILED } from "./runAction";
 
 // Props are display data only: the account arrives with an explicit select of
 // email and scopes, never the token or iv (SPEC §5.5, AC-43).
@@ -36,7 +48,7 @@ export default function GmailCard({
           toastError(result.message);
         }
       } catch {
-        toastError("Request failed. Check your connection and try again.");
+        toastError(REQUEST_FAILED);
       }
     });
 
@@ -51,7 +63,8 @@ export default function GmailCard({
             <AlertDescription>{errorMessage}</AlertDescription>
           </Alert>
         )}
-        {justConnected && !errorMessage && (
+        {/* ?connected=1 survives router.refresh(): not after a Disconnect. */}
+        {justConnected && account && !errorMessage && (
           <Alert role="status">
             <AlertDescription>Gmail connected.</AlertDescription>
           </Alert>
@@ -83,9 +96,25 @@ export default function GmailCard({
                 ))}
             </ul>
             <div>
-              <Button variant="outline" onClick={disconnect} disabled={pending}>
-                Disconnect
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" disabled={pending}>
+                    Disconnect
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Disconnect Gmail?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {`This revokes the access of the cockpit to ${account.email}. Sending is not possible until you connect again and approve the access on the Google consent screen.`}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={disconnect}>Disconnect</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </>
         ) : (

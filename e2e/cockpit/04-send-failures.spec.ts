@@ -8,9 +8,6 @@ import { approve, expect, openDetail, openSendDialog, test, type Bot } from "../
 const DEFINITIVE: SendMode[] = ["400", "401", "403"];
 const AMBIGUOUS: SendMode[] = ["429", "500", "timeout", "network", "badbody"];
 
-// Sonner error toast (the success toast of the earlier Approve may still show).
-const errorToast = (page: Page) => page.locator('[data-sonner-toast][data-type="error"]');
-
 async function trySend(page: Page, bot: Bot, mode: SendMode, delayMs = 0) {
   const pkg = await bot.seed();
   await openDetail(page, pkg.packageId);
@@ -25,7 +22,11 @@ test.describe("send failures", () => {
   for (const mode of DEFINITIVE) {
     test(`Gmail ${mode}: definitive, lock cleared, package stays approved`, async ({ page, bot }) => {
       await trySend(page, bot, mode);
-      await expect(errorToast(page)).toContainText("Gmail rejected the message");
+      // Review 07 finding 4: the reason stays in the open dialog (a toast vanishes).
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByRole("alert").filter({ hasText: "Gmail rejected the message" })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Send now" })).toBeEnabled();
+      await dialog.getByRole("button", { name: "Cancel" }).click();
       await expect(page.getByRole("region", { name: "Send outcome" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Unapprove" })).toBeVisible();
@@ -42,7 +43,10 @@ test.describe("send failures", () => {
     setFakeMode({ token: "invalid_grant" });
     const dialog = await openSendDialog(page);
     await dialog.getByRole("button", { name: "Send now" }).click();
-    await expect(errorToast(page)).toContainText("Reconnect Gmail in the cockpit settings");
+    await expect(
+      dialog.getByRole("alert").filter({ hasText: "Reconnect Gmail in the cockpit settings" }),
+    ).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("region", { name: "Send outcome" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Send", exact: true })).toBeVisible();
     expect(fakeSends()).toHaveLength(0);

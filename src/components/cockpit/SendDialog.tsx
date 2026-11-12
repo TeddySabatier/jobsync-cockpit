@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { sendPackage } from "@/actions/cockpitSend.actions";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
@@ -13,31 +14,65 @@ import {
 } from "@/components/ui/dialog";
 import { formatBytes, type PackageDetail } from "./Panels";
 
+// Free-mail providers (international and the common French ones). Matched on
+// the registrable domain, so mail.gmail.com is caught as well.
 const FREE_MAIL = new Set([
   "gmail.com",
   "googlemail.com",
   "outlook.com",
+  "outlook.fr",
   "hotmail.com",
+  "hotmail.fr",
   "live.com",
+  "live.fr",
+  "msn.com",
   "yahoo.com",
+  "yahoo.fr",
   "icloud.com",
   "me.com",
   "aol.com",
   "proton.me",
   "protonmail.com",
+  "protonmail.ch",
+  "pm.me",
   "gmx.com",
   "gmx.net",
+  "gmx.fr",
   "mail.com",
   "yandex.com",
   "zoho.com",
+  "orange.fr",
+  "wanadoo.fr",
+  "free.fr",
+  "sfr.fr",
+  "neuf.fr",
+  "laposte.net",
+  "bbox.fr",
+  "numericable.fr",
+  "club-internet.fr",
+  "aliceadsl.fr",
+  "voila.fr",
 ]);
 
-const GENERIC_LABELS = new Set(["co", "com", "org", "net", "ac", "gov", "www"]);
+// Second-level labels that are part of the public suffix: acme.co.uk.
+const SUFFIX_LABELS = new Set(["co", "com", "org", "net", "ac", "gov", "edu"]);
 
-// Name labels of a host without its TLD: "jobs.acme.co.uk" -> ["jobs", "acme"].
-function nameLabels(host: string): string[] {
-  const labels = host.toLowerCase().split(".").slice(0, -1);
-  return labels.filter((l) => l.length >= 3 && !GENERIC_LABELS.has(l));
+// Labels that say nothing about who owns the domain: never a match on their own.
+const GENERIC_LABELS = new Set([
+  "www", "jobs", "job", "careers", "career", "mail", "hr", "recruiting",
+  "recruitment", "talent", "apply", "inc", "corp", "corporation", "llc", "ltd",
+  "gmbh", "sas", "sarl", "group", "company", "the",
+]);
+
+// Registrable part of a host: "careers.acme.co.uk" -> { label: "acme", domain: "acme.co.uk" }.
+// Subdomains are never part of it: the owner of evil.example controls
+// careers.evil.example, so those labels prove nothing.
+function registrable(host: string): { label: string; domain: string } {
+  const labels = host.toLowerCase().split(".").filter(Boolean);
+  if (labels.length < 2) return { label: labels[0] ?? "", domain: labels[0] ?? "" };
+  const n = labels.length >= 3 && SUFFIX_LABELS.has(labels[labels.length - 2]) ? 3 : 2;
+  const tail = labels.slice(-n);
+  return { label: tail[0], domain: tail.join(".") };
 }
 
 function hostOf(url: string | null): string | null {
@@ -50,11 +85,13 @@ function hostOf(url: string | null): string | null {
   }
 }
 
-// SPEC §5.3: warn when the recipient is a free-mail address, or its domain
-// matches neither the company name nor the posting's domain. The bot picks the
-// recipient from untrusted postings, so this is a hint, not a proof.
-// shortcut: name-substring heuristic; false warnings are possible (ATS
-// domains) and are acceptable, since the user confirms anyway.
+// SPEC §5.3: warn when the recipient is a free-mail address, or when its
+// registrable domain matches neither the company name nor the posting's
+// registrable domain. The bot picks the recipient from untrusted postings, so
+// this is a hint, not a proof; the comparison therefore ignores subdomains and
+// generic words (careers.evil.example, inc.evil.example), which an attacker
+// controls. False warnings are possible (ATS domains) and are acceptable:
+// the user confirms anyway.
 export function recipientWarning(
   to: string,
   company: string,
@@ -62,20 +99,31 @@ export function recipientWarning(
 ): string | null {
   const domain = to.split("@").pop()?.trim().toLowerCase() ?? "";
   if (!domain) return null;
-  if (FREE_MAIL.has(domain)) {
+  const mine = registrable(domain);
+  if (FREE_MAIL.has(domain) || FREE_MAIL.has(mine.domain)) {
     return `${domain} is a free-mail domain. Check that this is the right recipient.`;
   }
-  const mine = nameLabels(domain);
-  const companyKey = company.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const words = company
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !GENERIC_LABELS.has(w));
+  const companyKey = words.join("");
   const postingHost = hostOf(jobUrl);
-  const theirs = postingHost ? nameLabels(postingHost) : [];
-  const matches = mine.some(
-    (l) => theirs.includes(l) || (companyKey.length >= 3 && companyKey.includes(l)),
-  );
+  const posting = postingHost ? registrable(postingHost).label : null;
+  const label = mine.label;
+  const usable = label.length >= 3 && !GENERIC_LABELS.has(label);
+  const matches =
+    usable &&
+    (label === posting ||
+      words.includes(label) ||
+      label === companyKey);
   return matches
     ? null
     : `The recipient domain (${domain}) does not match the company (${company}) or the job posting. Check that this is the right recipient.`;
 }
+
+// Failure codes after which the page state changed: close the dialog.
+const CLOSE_ON = new Set<string>(["SEND_OUTCOME_UNKNOWN", "CONFLICT", "INVALID_STATE", "NOT_FOUND"]);
 
 export default function SendDialog({
   detail,
@@ -86,12 +134,18 @@ export default function SendDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const router = useRouter();
   const pkg = detail.package;
   const [busy, setBusy] = useState(false);
   // A ref too: two clicks in the same tick both see busy === false.
   const inFlight = useRef(false);
+  // Persistent explanation of a definitive failure (a toast alone vanishes).
+  const [failure, setFailure] = useState<string | null>(null);
   useEffect(() => {
-    if (!open) setBusy(false);
+    if (!open) {
+      setBusy(false);
+      setFailure(null);
+    }
   }, [open]);
 
   const to = pkg.emailTo?.trim() ?? "";
@@ -101,15 +155,28 @@ export default function SendDialog({
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
+    setFailure(null);
     try {
       const r = await sendPackage(pkg.id, pkg.updatedAt);
-      if (r.success) toastSuccess("Email sent");
-      else toastError(r.message);
-      // On success the package is sent; on an unknown outcome the page now
-      // shows the send-outcome panel; on a conflict the user must reopen.
-      onOpenChange(false);
+      if (r.success) {
+        toastSuccess("Email sent");
+        onOpenChange(false);
+      } else if (CLOSE_ON.has(r.code)) {
+        // The page now shows the new state (send-outcome panel, a changed or
+        // locked package): the dialog has nothing left to offer.
+        toastError(r.message);
+        onOpenChange(false);
+      } else {
+        // Nothing was sent (Gmail refused, token, validation): keep the dialog
+        // open with the reason; the user can fix it or retry.
+        setFailure(r.message);
+      }
     } catch {
+      // Unknown outcome: close, so a second click cannot send twice, and
+      // refresh to show what the server recorded (the lock or the sent state).
       toastError("Could not confirm the send. Reload and check the package state before retrying.");
+      onOpenChange(false);
+      router.refresh();
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -135,6 +202,15 @@ export default function SendDialog({
             className="rounded border border-amber-500 p-2 text-sm font-medium text-amber-700 dark:text-amber-400"
           >
             {warning}
+          </p>
+        )}
+        {failure && (
+          <p
+            role="alert"
+            data-testid="send-failure"
+            className="rounded border border-destructive p-2 text-sm font-medium text-destructive"
+          >
+            {`Not sent: ${failure}`}
           </p>
         )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
