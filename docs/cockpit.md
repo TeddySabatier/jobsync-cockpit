@@ -83,7 +83,7 @@ Messages come from a fixed map (never raw Google/Prisma text). Common MCP codes:
 
 ## Cover letter as a PDF
 
-When a package has letter text, the sent email carries two PDFs: the CV and a cover letter PDF (named after the CV: `..._CV_...` becomes `..._Cover_Letter_...`). The cockpit makes the letter PDF itself from the letter text, at the moment you press Send, so it always matches your last edit. Review shows the same PDF in an iframe above the letter text ("PDF as it will be attached to the email"), and the Send dialog lists it. A package without letter text sends the CV only.
+When a package has letter text, the sent email carries two PDFs: the CV and a cover letter PDF (named after the CV: `..._CV_...` becomes `..._Cover_Letter_...`). The cockpit makes the letter PDF itself from the letter text, at the moment you press Send, so it always matches your last edit. Review shows the same PDF in an iframe above the letter text ("PDF as it will be attached to the email"), with **Open in new tab** and **Download PDF** links under it (the CV panel has the same two links; use Open in new tab where an inline PDF is poor, such as iOS Safari), and the Send dialog lists it. On the detail page, **j** / **k** move to the next / previous package of the To do queue. A package without letter text sends the CV only.
 
 The letterhead (name, title, contact line) comes from the package's CV data. The layout is a plain A4 letter (Helvetica 11 pt, paragraphs, bullets, bold, italic), not the Word design of the CV. Typographic spaces and hyphens become plain ones, and Latin letters with an unusual mark keep their base letter (`ł` becomes `l`). **Letters of other alphabets (Greek, Cyrillic, Chinese) show as `?`** because the standard PDF fonts cannot draw them: check the preview before sending such a letter. Emoji and other symbols are dropped. A very long web link may be broken across lines with a hyphen added at the break. The email body is separate: if it repeats the whole letter, shorten it in Review.
 
@@ -161,6 +161,8 @@ A send (Gmail or manual) moves the job status to **Applied** only when it is sti
 | `NOT_FOUND` | Wrong id or not your job/package |
 
 ### UI actions (`success: false`, `code`)
+
+After any failure except `UNAUTHENTICATED` and `COCKPIT_DISABLED` the page is refreshed, so a stale button disappears.
 
 | Code | Meaning / action |
 |------|------------------|

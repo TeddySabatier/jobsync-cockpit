@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { updatePackageContent } from "@/actions/cockpit.actions";
 import { TipTapContentViewer } from "@/components/TipTapContentViewer";
+import { ScrollRegion } from "./Panels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -259,10 +260,12 @@ export default function EditForm({
             <span className="text-sm font-medium">Preview</span>
             <div
               data-testid="letter-preview"
-              className="max-h-96 min-h-24 overflow-auto rounded-md border p-2"
+              className="min-h-24 rounded-md border p-2"
             >
               {letterHtml ? (
-                <TipTapContentViewer content={letterHtml} />
+                <ScrollRegion label="Letter preview text">
+                  <TipTapContentViewer content={letterHtml} label="Letter preview" />
+                </ScrollRegion>
               ) : (
                 <p className="text-sm text-muted-foreground">No cover letter.</p>
               )}

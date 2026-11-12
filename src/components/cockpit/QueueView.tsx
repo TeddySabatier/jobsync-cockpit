@@ -3,7 +3,7 @@ import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import QueueRow from "./QueueRow";
 import QueueTabs from "./QueueTabs";
-import type { QUEUE_TABS, QueueTabValue } from "./queueTabs";
+import type { QueueTabValue } from "./queueTabs";
 import type { getReviewQueue } from "@/actions/cockpit.actions";
 
 type QueueData = Extract<
@@ -21,18 +21,16 @@ const EMPTY_MESSAGES: Record<QueueTabValue, string> = {
 
 export default function QueueView({
   tab,
-  tabs,
   data,
 }: {
   tab: QueueTabValue;
-  tabs: typeof QUEUE_TABS;
   data: QueueData;
 }) {
   const { rows, gmail, gmailCalloutNeeded } = data;
   return (
     <div className="flex flex-col gap-4 py-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <QueueTabs tab={tab} tabs={tabs} />
+        <QueueTabs tab={tab} />
         <Link
           href="/dashboard/review/settings"
           className="text-sm text-muted-foreground hover:text-foreground"
@@ -68,12 +66,6 @@ export default function QueueView({
             <QueueRow key={row.id} row={row} gmailConnected={!!gmail} />
           ))}
         </ul>
-      )}
-
-      {tab === "todo" && (
-        <p className="text-xs text-muted-foreground">
-          j / k: next / previous in To do
-        </p>
       )}
     </div>
   );

@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getReviewQueue } from "@/actions/cockpit.actions";
 import QueueView from "@/components/cockpit/QueueView";
-import { QUEUE_TABS, parseQueueTab } from "@/components/cockpit/queueTabs";
+import { parseQueueTab } from "@/components/cockpit/queueTabs";
 
 // The page authenticates itself through the action (requireUser runs first
 // inside it); the dashboard layout is not a guard (SPEC §5, AC-40).
@@ -24,5 +24,5 @@ export default async function ReviewQueuePage({
     );
   }
 
-  return <QueueView tab={tab} tabs={QUEUE_TABS} data={result.data} />;
+  return <QueueView tab={tab} data={result.data} />;
 }

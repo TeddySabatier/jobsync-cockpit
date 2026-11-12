@@ -6,6 +6,7 @@ import { decrypt } from "@/lib/encryption";
 import { log } from "@/lib/telemetry";
 import { letterAttachmentName, sanitizePdfName } from "./attachments";
 import { renderLetterPdf } from "./letterPdf";
+import { isGmailSendAllowed } from "./config";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
 import { markJobApplied } from "./packages";
@@ -177,9 +178,8 @@ export async function sendApplicationPackage(
     where: { userId },
     select: { email: true, encryptedRefreshToken: true, iv: true },
   });
-  const allowed = process.env.COCKPIT_GMAIL_ALLOWED_ADDRESS?.trim().toLowerCase();
   // Not connected, allow-list unset or different address: nothing is sent.
-  if (!account || !allowed || account.email.trim().toLowerCase() !== allowed) {
+  if (!account || !isGmailSendAllowed(account.email)) {
     throw new CockpitError("GMAIL_RECONNECT_REQUIRED");
   }
 

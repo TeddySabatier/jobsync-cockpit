@@ -25,12 +25,25 @@ vi.mock("@/lib/telemetry", () => ({
 
 import { getCurrentUser } from "@/utils/user.utils";
 import * as actions from "@/actions/cockpit.actions";
+import { ALLOWED } from "./helpers/actionExports";
 
 const exported = Object.entries(actions) as [string, (...a: unknown[]) => Promise<unknown>][];
 
 describe("cockpit actions with a null user (AC-40)", () => {
-  it("covers every export", () => {
-    expect(exported.length).toBe(9);
+  it("covers exactly the allow-listed exports (a swapped name is caught)", () => {
+    expect(exported.map(([n]) => n).sort()).toEqual(
+      [...ALLOWED["cockpit.actions.ts"]].sort(),
+    );
+  });
+
+  it.each(exported)("%s with the flag off and no session: UNAUTHENTICATED, no prisma", async (_n, fn) => {
+    vi.stubEnv("COCKPIT_ENABLED", "false");
+    dbCalls.length = 0;
+    expect(await fn("p1", "x", "x")).toMatchObject({
+      success: false,
+      code: "UNAUTHENTICATED",
+    });
+    expect(dbCalls).toEqual([]);
   });
 
   it.each(exported)("%s fails and does not touch prisma", async (_n, fn) => {

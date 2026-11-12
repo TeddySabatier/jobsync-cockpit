@@ -228,6 +228,34 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 - **Scope:** `scripts/bot/cockpit_submit.py`, its tests, `src/lib/mcp/tools/cockpit.ts` (one select field), `.gitignore`, docs.
 - **Not changed:** schema, Send, the other MCP tools.
 
+## D-021 Review UI read-side fixes (issue #58)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The "j / k: next / previous in To do" hint is shown on the **detail** page, only when a neighbour exists; the queue list no longer shows it | **Accept.** The keys are only bound on the detail page (SPEC §5.3). | The hint on the queue promised keys that did nothing there. |
+| (b) | One shared `STATUS_LABELS` / `statusLabel()` (`src/components/cockpit/statusLabels.ts`) for queue row, detail header, version selector, banner and the job page card. The "not the active version" banner is an informational Alert with its own sentence for superseded, sent and rejected | **Accept.** | Raw values such as `changes_requested` and a red error style for a normal state. |
+| (c) | The CV and cover-letter PDF iframes stay (the sandbox CSP is unchanged: owner decision 2026-11-11, they render in desktop Chrome). Both panels get an "Open in new tab" link next to Download | **Accept.** Iframes are not hidden on narrow viewports. | iOS Safari shows only page 1 of an inline PDF. |
+| (d) | Read-only TipTap viewers render as `role="document"` with a name only when a `label` prop is passed; the **default is neutral** (no role, no aria-label) so the other 12 call sites keep their accessibility tree. Cockpit Posting, Letter and the edit preview pass labels; scrollable boxes are focusable named regions | **Accept.** The axe waiver for `aria-input-field-name` is removed. | Unnamed textbox and keyboard-unreachable scroll areas. |
+
+- **Scope:** `src/components/cockpit/*`, `TipTapContentViewer.tsx`, the cockpit card in `JobDetails.tsx`, `__tests__/cockpit/*`, e2e 01/07/08.
+- **Not changed:** finding 2 (PDF sandbox) and finding 10 (tab counts, pagination, send-time column), which belong to the decisions issue.
+
+## D-020 Server actions review fixes (issue #57)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The cockpit actions share **one** run/mutate wrapper, `src/lib/cockpit/actionRunner.ts` (not a `"use server"` module) | **Accept.** `cockpit.actions.ts`, `cockpitSend.actions.ts` and `cockpitGmail.actions.ts` all use it; the `actionsExports` allow-list test stays. | The three copies had already diverged. |
+| (b) | A mutation **revalidates after success and after a state failure** (`CONFLICT`, `INVALID_STATE`, `SEND_OUTCOME_UNKNOWN`, `GMAIL_*`, `INTERNAL`), but not after `UNAUTHENTICATED`, `COCKPIT_DISABLED` or `VALIDATION`; `NOT_FOUND` refreshes only the list page, never a path built from the client id | **Accept (was: success only for the review actions).** | A refused action (e.g. the bot superseded the package) means the page showed stale state and must refresh; an input error changes no state and a refresh would only flicker. |
+| (c) | An action that changes a job also revalidates `/dashboard/myjobs`: mark applied manually, send, mark unknown as sent, release lock | **Accept.** | The job list shows the job status. |
+| (d) | `requireUser()` throws a typed `RequireUserError` (`src/lib/authError.ts`); `toActionResult` matches the type (or, across duplicated modules, its name plus the message), not the text alone. Not named `AuthError`: next-auth has a class of that name | **Accept.** The message text is unchanged. | A reworded message must not turn an anonymous call into `INTERNAL`. |
+| (e) | `getPackageDetail` returns an **explicit view** of the package (`toPackageView`): no `idempotencyKey`, `sourceFolder`, `userId`, `jobId`, the file row, the approved, rejected, edited, sent and created timestamps, `sentVia`; it keeps `sendStartedAt`, `sendOutcome` and `updatedAt` for the UI and the Send dialog | **Accept.** | Same policy as the Gmail account select (AC-43). |
+| (f) | `getPackageDetail` also returns `gmailSendAllowed`: the connected Gmail address matches `COCKPIT_GMAIL_ALLOWED_ADDRESS` (same check as Send, `isGmailSendAllowed`) | **Accept.** No component reads it yet; it is kept for the edit/send UI change (#59), which shows a dedicated reason. | Send refuses with `GMAIL_RECONNECT_REQUIRED` otherwise; the owner should know before pressing it. |
+| (g) | `sendPackage` accepts only a `Date` or a string for `expectedUpdatedAt`; anything else is `VALIDATION` | **Accept.** | `null` became the epoch and failed as `CONFLICT`. |
+| (h) | `getReviewQueue` runs its three queries in parallel. `getAdjacentPackageIds` still loads the To do queue | **Accept.** Personal scale. | |
+
+- **Not changed:** `updatedAt` concurrency on the review actions (last write wins, owner decision, review finding 1).
+- **Scope:** `src/actions/cockpit*.actions.ts`, `src/actions/shared.ts`, `src/lib/{authError.ts,cockpit/{actionRunner,packageView,config,errors,send}.ts}`, `__tests__/cockpit/*`.
+
 ## D-022 Send path review fixes (review 02, issue #54)
 
 The lost-lock cases below need a recovery action (allowed only on a lock older than 60 s or an unknown outcome) to run while the Gmail call is still in flight (20 s timeout): unreachable today, closed anyway because the cost is a double send.
