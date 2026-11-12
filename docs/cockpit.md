@@ -196,3 +196,12 @@ Further detail: `cockpit/SPEC.md` and `cockpit/DECISIONS.md` (e.g. D-010 reconne
 ## Archive instead of delete (D-026)
 
 A job that has an application package cannot be deleted: the Delete action is hidden for it, a direct delete is refused with "Archive it instead", and the database itself refuses (`ApplicationPackage.job` is `ON DELETE RESTRICT`), so the history of what was sent is never lost. Use **Archive** (job page, jobs list menu, or "Change status" to Archived). Archived jobs are hidden from the default jobs list; pick **Archived** in the filter to see them. Their Review history is untouched, and changing the status back restores them. A job with no package can still be deleted. Archived jobs still count in the dashboard stats and charts and in MCP `list_jobs` (their history is real); only the jobs list hides them. The archive toast has an **Undo** that restores the previous status. Backup and restore are unaffected. Deleting a whole user account that owns jobs with packages is not supported until those packages are removed first.
+
+## Follow-ups: data model and due rules (D-031 to D-033, V1 part 1 of 4)
+
+Only the foundation is in place: **no follow-up can be drafted, sent or seen yet** (MCP tools, send and UI come in the next parts, `cockpit/V1-FOLLOWUPS-PLAN.md`).
+
+- A package has a **kind**: `application` (everything that exists today) or `follow_up`. Versions are numbered per job **and kind**; a follow-up never counts as the job's application (one helper, `src/lib/cockpit/activePackage.ts`, owns that rule).
+- A follow-up is **derived, not scheduled** (`src/lib/cockpit/followUpDue.ts`): a sent application with a recipient, job status `applied`, no outcome, not stopped. Step 1 is due 7 days after the application was sent, step 2 14 days after follow-up 1 (sent or skipped), on a weekday (Saturday and Sunday move to Monday), computed in `COCKPIT_TIMEZONE` (default `UTC`), and is suggested until `COCKPIT_FOLLOWUP_WINDOW_DAYS` (default 30) after that day. Snooze (3 or 7 days), skip step, stop, and the outcome (replied, interview, rejected, closed, with undo) live in a `JobFollowUp` row per job. Rejecting a follow-up draft skips its step.
+- **Backups are format version 2.** A version 1 backup still imports (everything in it is an application). An older build refuses a version 2 file instead of importing follow-up drafts as applications.
+- Apply the migration `20261114120000_follow_ups_foundation` before use.
