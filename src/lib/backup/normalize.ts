@@ -21,21 +21,13 @@ export function safeEntryName(entryName: string): string {
 
 // The column is always rebuilt server-side. The path in the backup is read only
 // to locate the zip entry: UPLOADS_DIR differs between dev and prod, and the
-// resume download route reads whatever path it is handed. The extension comes
-// from the sniffed bytes rather than the carried name, so a payload cannot pick
-// what lands in the uploads directory — resume.pdf.exe becomes <id>-resume.pdf.
-export function importedFilePath(
-  newFileId: string,
-  entryName: string,
-  kind: "pdf" | "docx",
-): string {
-  const base = safeEntryName(entryName).replace(/\.[^.]+$/, "");
-  return path.join(
-    APP_CONSTANTS.UPLOADS_DIR,
-    "files",
-    "resumes",
-    `${newFileId}-${base}.${kind}`,
-  );
+// resume download route reads whatever path it is handed. The name is the new
+// id plus the sniffed extension and nothing from the payload: the carried name
+// cannot pick what lands in the uploads directory, and a name kept from the
+// entry would grow by one id prefix per export/import cycle until the write
+// fails with ENAMETOOLONG. File.fileName keeps the display name.
+export function importedFilePath(newFileId: string, kind: "pdf" | "docx"): string {
+  return path.join(APP_CONSTANTS.UPLOADS_DIR, "files", "resumes", `${newFileId}.${kind}`);
 }
 
 // The same gate the upload route applies, on the same helper: size, then magic
