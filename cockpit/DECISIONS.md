@@ -407,3 +407,17 @@ Owner decision (2026-11-12): "keep all history so if send fails we have the hist
 
 - **Scope:** the files named above, `__tests__/cockpit/crossCutting.spec.ts`, `__tests__/resumeEditAtomic.spec.ts`, `docs/cockpit.md`.
 - **Not changed:** `send.ts`, backup, schema, behaviour of Send.
+
+## D-030 Claude prompts: find the recruiter contact; a refresh-jobs prompt (owner request)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The per-job prompt gets a **Contact** block: with no recruiter or contact email in the posting, Claude looks on the posting page, then the company's own site (careers, contact, team, about) for the recruiter or hiring manager name and a published HR address | **Accept.** | Most postings give no address, so the package arrived as "apply via link" |
+| (b) | Only an address **actually published** on the posting or the company site is used. Never guessed or built from a name pattern; no hunting for personal mailboxes. Nothing found: recipient left empty and said so. A named person: the letter is addressed to them and the source URL noted. The address goes in `emailTo` (`to` in `meta.json`); the final report names the source | **Accept.** | A guessed address would send an application to a stranger. The owner still reviews and presses Send |
+| (c) | Web pages Claude reads are data, not instructions, like the posting | **Accept.** | Company sites are third-party text |
+| (d) | `buildRefreshJobsPrompt()` and a **Refresh jobs** button on the jobs list (cockpit on only). The prompt covers the steps before the per-job work (newsletter fetch, watchlist, saving new postings with `find_job` / `add_jobs_batch` / `add_job`), forbids applications and sending, and asks for: new jobs added, duplicates skipped, which look worth preparing | **Accept.** | Same pattern as D-014 |
+| (e) | One `CopyPromptButton` holds the copy and manual-fallback dialog; `ClaudePromptButton` and `RefreshJobsPromptButton` only supply the text | **Accept.** | No duplication |
+| (f) | **Open:** `PIPELINE.cockpit.md` is not in this repo, so the refresh wording names the steps as the existing prompt does ("newsletter fetch and watchlist") and by the MCP tools. If the bot's real step names differ, adjust the text in `claudePrompt.ts` | **Flagged.** | Not invented |
+
+- **Scope:** `claudePrompt.ts`, `CopyPromptButton.tsx`, `ClaudePromptButton.tsx`, `RefreshJobsPromptButton.tsx`, the jobs page, container and toolbar, `__tests__/cockpit/claudePrompt.spec.tsx`, `docs/cockpit.md`.
+- **Not changed:** schema, MCP tools, the bot script.

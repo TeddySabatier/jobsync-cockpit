@@ -91,6 +91,10 @@ The letterhead (name, title, contact line) comes from the package's CV data. The
 
 With the cockpit on, a job page has a **Claude prompt** button next to Match with AI. One click copies a ready-made prompt for Claude: the job (company, role, location, link, JobSync id), the posting text, and the instructions to run the bot's cockpit pipeline for this one job (see [cockpit-bot.md](cockpit-bot.md)). Paste it into Claude (a session that can read the bot folder); the package then appears in Review. If a package already exists for the job, the prompt says so and asks Claude not to resubmit. If the browser refuses to copy (plain http on a phone), the prompt opens in a box to copy by hand.
 
+The prompt also tells Claude how to find a contact when the posting has none: look on the posting, then the company's own site (careers, contact, team, about) for the recruiter name and a published HR address. It never guesses an address; if none is published the recipient stays empty (apply via link) and the report says where any contact came from (D-030).
+
+**Refresh jobs:** with the cockpit on, the jobs list has a **Refresh jobs** button. It copies a prompt that makes Claude run only the bot's refresh steps (newsletter fetch, watchlist, save new postings in JobSync), prepare nothing and send nothing, and report new jobs, duplicates skipped and which look worth preparing. Same copy-or-box behaviour as above.
+
 The built-in **Cover Letter** and **Match with AI** buttons are JobSync's own AI feature and use the model set in the agent panel; they do not create the cockpit package.
 
 ## Review UI
