@@ -134,7 +134,7 @@ describe("Send button and dialog (AC-45)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByTestId("send-to")).toHaveTextContent("jobs@acme.example");
-    expect(within(dialog).getByTestId("send-to").className).toMatch(/text-2xl/);
+    expect(within(dialog).getByTestId("send-to").className).toMatch(/text-xl/);
     expect(within(dialog).getByText("you@example.com")).toBeInTheDocument();
     expect(within(dialog).getByText("Application – Staff Engineer")).toBeInTheDocument();
     expect(within(dialog).getByText("0000-uuid.pdf (12.0 KB)")).toBeInTheDocument();
@@ -267,11 +267,17 @@ describe("send-outcome panel (AC-33)", () => {
 
   it("outcome unknown: Gmail Sent folder hint, both actions, nothing else offered", () => {
     render(<ActionBar detail={unknown()} />);
-    expect(screen.getByRole("alert")).toHaveTextContent(
+    // Static message: role=status, never alert (it is on screen at every visit).
+    expect(screen.getByRole("status")).toHaveTextContent(
       "Check your Gmail Sent folder — the send result is unknown.",
     );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("link", { name: "Open Gmail Sent" })).toHaveAttribute(
+      "href",
+      "https://mail.google.com/mail/u/0/#sent",
+    );
     expect(screen.getByRole("button", { name: "Mark as sent (manual)" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Release lock" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Not sent: unblock" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^(Send|Approve|Unapprove|Reject|Edit)/ })).toBeNull();
   });
 
@@ -289,13 +295,13 @@ describe("send-outcome panel (AC-33)", () => {
   it("Release lock needs a confirm and then calls releaseSendLock; Cancel does nothing", async () => {
     releaseSendLock.mockResolvedValue({ success: true, data: {} });
     render(<ActionBar detail={unknown()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Release lock" }));
+    await userEvent.click(screen.getByRole("button", { name: "Not sent: unblock" }));
     await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
     expect(releaseSendLock).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole("button", { name: "Release lock" }));
+    await userEvent.click(screen.getByRole("button", { name: "Not sent: unblock" }));
     await userEvent.click(
-      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Release lock" }),
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Unblock sending" }),
     );
     expect(releaseSendLock).toHaveBeenCalledExactlyOnceWith("p1");
   });
@@ -308,7 +314,7 @@ describe("send-outcome panel (AC-33)", () => {
 
   it("a lock older than 60 s with no outcome shows the panel", () => {
     render(<ActionBar detail={detail({ sendStartedAt: new Date(Date.now() - 61_000) })} />);
-    expect(screen.getByRole("button", { name: "Release lock" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Not sent: unblock" })).toBeInTheDocument();
   });
 
   it("a fresh lock turns into the panel once 60 s have passed", () => {
@@ -363,14 +369,14 @@ describe("rejected action requests show an error toast", () => {
         detail={detail({ sendStartedAt: new Date(Date.now() - 5_000), sendOutcome: "unknown" })}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "Release lock" }));
+    await userEvent.click(screen.getByRole("button", { name: "Not sent: unblock" }));
     await userEvent.click(
-      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Release lock" }),
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Unblock sending" }),
     );
     expect(toast.toastError).toHaveBeenCalledWith(
       "Request failed. Check your connection and try again.",
     );
-    expect(screen.getByRole("button", { name: "Release lock" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Unblock sending" })).toBeEnabled();
   });
 });
 

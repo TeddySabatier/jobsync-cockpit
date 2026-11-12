@@ -46,6 +46,7 @@ export function JobActionsMenu({
           aria-haspopup="true"
           size="icon"
           variant="ghost"
+          className="max-md:h-11 max-md:w-11"
           data-testid="job-actions-menu-btn"
         >
           <MoreVertical className="h-4 w-4" />

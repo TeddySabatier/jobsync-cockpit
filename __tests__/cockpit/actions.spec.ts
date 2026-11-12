@@ -40,6 +40,7 @@ vi.mock("@/lib/cockpit/packages", async (importOriginal) => {
     updatePackageContent: vi.fn(),
     markPackageAppliedManually: vi.fn(),
     listPackagesByTab: vi.fn(),
+    countPackagesByTab: vi.fn(),
     getPackageWithJob: vi.fn(),
     listJobVersions: vi.fn(),
     listSendHistory: vi.fn(),
@@ -181,13 +182,19 @@ describe.each(everyAction)("%s auth and flag order", (_n, call) => {
 describe("getReviewQueue", () => {
   it("returns rows, the gmail email only, and the callout flag", async () => {
     m(svc.listPackagesByTab).mockResolvedValue([{ id: "p1" }]);
+    m(svc.countPackagesByTab).mockResolvedValue({ todo: 1, changes: 0, sent: 0, rejected: 0 });
     gmailFind.mockResolvedValue(null);
     pkgCount.mockResolvedValue(2);
     const r = await actions.getReviewQueue("todo");
     expect(svc.listPackagesByTab).toHaveBeenCalledWith("u1", "todo");
     expect(r).toEqual({
       success: true,
-      data: { rows: [{ id: "p1" }], gmail: null, gmailCalloutNeeded: true },
+      data: {
+        rows: [{ id: "p1" }],
+        counts: { todo: 1, changes: 0, sent: 0, rejected: 0 },
+        gmail: null,
+        gmailCalloutNeeded: true,
+      },
     });
     expect(gmailFind).toHaveBeenCalledWith({
       where: { userId: "u1" },

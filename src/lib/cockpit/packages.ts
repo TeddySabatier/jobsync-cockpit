@@ -5,6 +5,7 @@ import { ACTIVE_PACKAGE_ORDER, activePackageWhere } from "./activePackage";
 import { walkCvLeaves } from "./cvLeaves";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
+import { sortTodoRows, tabCounts } from "./queueOrder";
 import {
   MarkChangeRequestDoneSchema,
   RejectPackageSchema,
@@ -474,8 +475,8 @@ export async function updatePackageContent(
 // §2.2 a job never has two non-superseded packages (a submit supersedes the
 // open ones; sent/rejected block further submits), so filtering on the tab
 // statuses is enough. Newest first.
-export function listPackagesByTab(userId: string, tab: QueueTab) {
-  return prisma.applicationPackage.findMany({
+export async function listPackagesByTab(userId: string, tab: QueueTab) {
+  const rows = await prisma.applicationPackage.findMany({
     where: { userId, status: { in: QUEUE_TAB_STATUSES[tab] } },
     orderBy: { createdAt: "desc" },
     select: {
@@ -487,6 +488,8 @@ export function listPackagesByTab(userId: string, tab: QueueTab) {
       emailTo: true,
       cvFileId: true,
       cvPdfStale: true,
+      sendOutcome: true,
+      sendStartedAt: true,
       createdAt: true,
       job: {
         select: {
@@ -497,6 +500,23 @@ export function listPackagesByTab(userId: string, tab: QueueTab) {
       },
     },
   });
+  // To do: send-unknown first, then approved, then pending (D-040).
+  return tab === "todo" ? sortTodoRows(rows) : rows;
+}
+
+// One count per tab, from a single groupBy (no rows are loaded).
+export async function countPackagesByTab(
+  userId: string,
+): Promise<Record<QueueTab, number>> {
+  const groups = await prisma.applicationPackage.groupBy({
+    by: ["status"],
+    where: { userId },
+    _count: { _all: true },
+  });
+  return tabCounts(
+    groups.map((g) => ({ status: g.status, count: g._count._all })),
+    QUEUE_TAB_STATUSES,
+  );
 }
 
 // Full package with its job and CV file row, scoped to the user.

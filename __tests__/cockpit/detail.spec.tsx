@@ -205,7 +205,9 @@ describe("review detail page: panels (AC-18, AC-41)", () => {
     await renderPage();
     const fit = screen.getByTestId("panel-fit");
     expect(within(fit).getByText("Strong match")).toBeInTheDocument();
-    expect(within(fit).getByText("87")).toBeInTheDocument();
+    expect(within(fit).getByText("87 / 100")).toBeInTheDocument();
+    expect(within(fit).getByRole("progressbar", { name: "Match score" })).toBeInTheDocument();
+    expect(within(fit).getByText("Strengths")).toBeInTheDocument();
     expect(within(fit).getAllByRole("listitem").map((l) => l.textContent)).toEqual([
       "Go",
       "SQL",

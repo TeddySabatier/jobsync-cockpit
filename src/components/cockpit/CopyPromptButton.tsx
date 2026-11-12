@@ -72,13 +72,13 @@ export function CopyPromptButton({
       <Button
         size="sm"
         variant="outline"
-        className="h-8 gap-1 cursor-pointer"
+        className="h-8 gap-1 cursor-pointer max-sm:h-11 max-sm:min-w-11"
         data-testid={testId}
         title={title}
         onClick={onClick}
       >
         <ClipboardCopy className="h-3.5 w-3.5" />
-        <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">{label}</span>
+        <span className="whitespace-nowrap">{label}</span>
       </Button>
       <Dialog open={manualText !== null} onOpenChange={(open) => !open && setManualText(null)}>
         <DialogContent className="max-w-2xl">
