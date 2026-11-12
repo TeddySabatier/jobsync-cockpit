@@ -222,25 +222,23 @@ export const editResume = async (
   filePath?: string,
 ): Promise<any | undefined> => {
   try {
+    const user = await requireUser();
     let resolvedFileId = fileId;
 
-    if (!fileId && fileName && filePath) {
+    if (fileId) {
+      // A given File id must already be this resume's own file (issue #78,
+      // D-024): the download route, the AI import, deleteFile and the backup
+      // export all trust the Resume -> File link, so a caller must not be able
+      // to link its resume to another user's File by id. One message for a
+      // missing id and someone else's.
+      const own = await prisma.file.findFirst({
+        where: { id: fileId, Resume: { id, profile: { userId: user.id } } },
+        select: { id: true },
+      });
+      if (!own) throw new Error("File not found or access denied");
+    } else if (fileName && filePath) {
       resolvedFileId = await createFileEntry(fileName, filePath);
     }
-
-    if (resolvedFileId) {
-      const isValidFileId = await prisma.file.findFirst({
-        where: { id: resolvedFileId },
-      });
-
-      if (!isValidFileId) {
-        throw new Error(
-          `The provided FileId "${resolvedFileId}" does not exist.`,
-        );
-      }
-    }
-
-    const user = await requireUser();
 
     const res = await prisma.resume.update({
       where: { id, profile: { userId: user.id } },
