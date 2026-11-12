@@ -357,7 +357,7 @@ export function EmailPanel({ detail }: { detail: PackageDetail }) {
         {pkg.emailTo?.trim() && (
           <>
             <dt className="text-muted-foreground">Found at</dt>
-            <dd className="break-all" data-testid="email-contact-source">
+            <dd className="[overflow-wrap:anywhere]" data-testid="email-contact-source">
               {pkg.contactSource?.trim() || (
                 <span className="text-amber-700 dark:text-amber-400">
                   No source recorded: check the address

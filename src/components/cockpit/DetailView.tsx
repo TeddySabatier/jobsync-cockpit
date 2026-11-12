@@ -49,7 +49,7 @@ export type Adjacent = AdjacentIds;
 
 const SHORTCUTS: [string, string][] = [
   ["j / k", "Next / previous application in To do"],
-  ["a", "Approve and send (opens the Send dialog)"],
+  ["a", "The main action: Approve and send, Send or I applied (never sends by itself)"],
   ["e", "Edit"],
   ["x", "Reject"],
   ["?", "This help"],
@@ -226,7 +226,7 @@ export default function DetailView({
             </p>
           )}
           <p className="hidden text-xs text-muted-foreground md:block" data-testid="keys-hint">
-            {isActive ? "a: approve and send, e: edit, x: reject, " : ""}?: all shortcuts
+            {isActive ? "a: main action, e: edit, x: reject, " : ""}?: all shortcuts
           </p>
 
           <SendHistoryPanel history={detail.sendHistory} />
