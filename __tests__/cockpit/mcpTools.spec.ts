@@ -77,7 +77,7 @@ afterAll(async () => {
 });
 
 describe("registered tools", () => {
-  it("are exactly the six cockpit tools, none for send / approve / reject (AC-13)", async () => {
+  it("are exactly the eight cockpit tools, none for send / approve / reject (AC-13)", async () => {
     const { client, close } = await asUser(userA);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     await close();
@@ -85,9 +85,11 @@ describe("registered tools", () => {
       "attach_file",
       "get_job",
       "list_change_requests",
+      "list_due_follow_ups",
       "list_jobs",
       "mark_change_request_done",
       "submit_application_package",
+      "submit_follow_up",
     ]);
     expect(names.filter((n) => /send|approve|reject/.test(n))).toEqual([]);
   });
@@ -114,7 +116,7 @@ describe("registered tools", () => {
     expect([...schema.required].sort()).toEqual(
       ["emailBody", "emailSubject", "fitGrade", "jobId"].sort(),
     );
-    // The other five tools keep their published descriptions.
+    // The other tools keep their published descriptions.
     for (const t of tools.filter((x) => x.name !== submit?.name)) {
       expect(t.description).toBe(
         COCKPIT_TOOL_DESCRIPTIONS[t.name as keyof typeof COCKPIT_TOOL_DESCRIPTIONS],

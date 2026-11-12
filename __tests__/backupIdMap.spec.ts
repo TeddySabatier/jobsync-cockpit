@@ -131,3 +131,65 @@ describe("buildCreateData", () => {
     expect(JSON.stringify(data)).not.toContain("old-");
   });
 });
+
+describe("buildCreateData: replyToPackageId only remaps package ids", () => {
+  const pkgRow = (replyTo: string | null) => ({
+    id: "old-pkg-2",
+    jobId: "old-job",
+    cvFileId: null,
+    replyToPackageId: replyTo,
+    kind: "follow_up",
+  });
+  function typedMap(): IdMap {
+    const map = new IdMap();
+    map.mint("old-job", "Job");
+    map.mint("old-pkg-1", "ApplicationPackage");
+    map.mint("old-pkg-2", "ApplicationPackage");
+    return map;
+  }
+
+  it("remaps an id of the ApplicationPackage map", () => {
+    const map = typedMap();
+    const data = buildCreateData("ApplicationPackage", pkgRow("old-pkg-1"), map, "u");
+    expect(data.replyToPackageId).toBe(map.get("old-pkg-1"));
+  });
+
+  it("an id that belongs to another model (a Job id) is unknown: null, never the job's new id", () => {
+    const map = typedMap();
+    const data = buildCreateData("ApplicationPackage", pkgRow("old-job"), map, "u");
+    expect(data.replyToPackageId).toBeNull();
+    expect(data.jobId).toBe(map.get("old-job"));
+  });
+
+  it("an id that is nowhere in the file is null", () => {
+    const data = buildCreateData("ApplicationPackage", pkgRow("ghost"), typedMap(), "u");
+    expect(data.replyToPackageId).toBeNull();
+  });
+
+  // Review of PR #93: ids are unique per table only, so an old file may hold the
+  // same id in two tables. Both must keep resolving (the global map always
+  // allowed it): a model check must not turn a legal file into an abort.
+  it("an id used by two models resolves for both (cross-table collision in an old file)", () => {
+    for (const order of [["Job", "ApplicationPackage"], ["ApplicationPackage", "Job"]]) {
+      const map = new IdMap();
+      for (const model of order) map.mint("dup", model);
+      map.mint("old-pkg-2", "ApplicationPackage");
+      const data = buildCreateData(
+        "ApplicationPackage",
+        { ...pkgRow("dup"), jobId: "dup" },
+        map,
+        "u",
+      );
+      expect(data.jobId, order.join(">")).toBe(map.get("dup"));
+      expect(data.replyToPackageId, order.join(">")).toBe(map.get("dup"));
+      expect(map.get("dup", "Company")).toBeUndefined();
+    }
+  });
+
+  it("a required key to the wrong model still aborts", () => {
+    const map = typedMap();
+    expect(() =>
+      buildCreateData("ApplicationPackage", { ...pkgRow(null), jobId: "old-pkg-1" }, map, "u"),
+    ).toThrow(/ApplicationPackage\.jobId/);
+  });
+});

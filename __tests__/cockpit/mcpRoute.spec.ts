@@ -15,9 +15,11 @@ const COCKPIT_TOOLS = [
   "attach_file",
   "get_job",
   "list_change_requests",
+  "list_due_follow_ups",
   "list_jobs",
   "mark_change_request_done",
   "submit_application_package",
+  "submit_follow_up",
 ];
 
 async function listTools(): Promise<string[]> {

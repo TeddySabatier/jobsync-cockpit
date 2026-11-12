@@ -21,6 +21,7 @@ const SPEC_CODES: CockpitErrorCode[] = [
   "JOB_REJECTED",
   "INVALID_STATE",
   "CONFLICT",
+  "FOLLOW_UP_NOT_DUE",
   "TOO_LARGE",
   "RATE_LIMITED",
   "UNAUTHENTICATED",
