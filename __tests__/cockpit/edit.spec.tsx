@@ -79,6 +79,7 @@ const fixture = (
     },
     ...over,
   },
+  sendHistory: [],
   versions: [
     { id: "p2", version: 2, status: over.status ?? "pending" },
     { id: "p1", version: 1, status: "superseded" },

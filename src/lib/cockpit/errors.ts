@@ -27,6 +27,8 @@ export const COCKPIT_ERROR_MESSAGES = {
   GMAIL_SEND: "Gmail rejected the message",
   GMAIL_RECONNECT_REQUIRED: "Reconnect Gmail in the cockpit settings",
   GMAIL_TIMEOUT: "Gmail did not answer in time",
+  HISTORY_NOT_RECORDED:
+    "Could not record the history, nothing changed, try again",
 } as const;
 
 export type CockpitErrorCode = keyof typeof COCKPIT_ERROR_MESSAGES;

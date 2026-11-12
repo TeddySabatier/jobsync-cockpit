@@ -5,7 +5,7 @@ import prisma from "@/lib/db";
 import { isGmailSendAllowed } from "@/lib/cockpit/config";
 import { mutate, reviewPaths, run } from "@/lib/cockpit/actionRunner";
 import { CockpitError } from "@/lib/cockpit/errors";
-import { toPackageView } from "@/lib/cockpit/packageView";
+import { toPackageView, toSendHistoryView } from "@/lib/cockpit/packageView";
 import { letterPdfName, sanitizePdfName } from "@/lib/cockpit/letterName";
 import { resolveCockpitFile } from "@/lib/cockpit/files";
 import { pickActive } from "@/lib/cockpit/activePackage";
@@ -16,6 +16,7 @@ import {
   getPackageWithJob,
   listJobVersions,
   listPackagesByTab,
+  listSendHistory,
   markPackageAppliedManually as markPackageAppliedManuallySvc,
   rejectPackage as rejectPackageSvc,
   requestPackageChanges as requestPackageChangesSvc,
@@ -97,9 +98,10 @@ export async function getReviewQueue(tab: QueueTab) {
 export async function getPackageDetail(id: string) {
   return run(async (userId) => {
     const { cvFile, ...row } = await getPackageWithJob(userId, id);
-    const [versions, gmail] = await Promise.all([
+    const [versions, gmail, history] = await Promise.all([
       listJobVersions(userId, row.jobId),
       findGmailPublic(userId),
+      listSendHistory(userId, row.id),
     ]);
     // Attachment name and size come from disk, through the confinement helper.
     // The stored filePath itself is not sent to the client.
@@ -121,6 +123,7 @@ export async function getPackageDetail(id: string) {
     return {
       package: toPackageView(row),
       versions,
+      sendHistory: toSendHistoryView(history),
       activePackageId: activeId,
       isActive: activeId === row.id,
       attachment,

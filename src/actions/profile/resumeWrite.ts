@@ -171,12 +171,15 @@ export const createResumeProfileWith = async (
     }
     // The resume exists when only the default flag failed: say so (the upload
     // stays, it is linked).
-    return failure(
-      error,
-      createdResumeId
-        ? "Resume created, but it could not be set as your default resume."
-        : "Failed to create resume.",
-    );
+    // `created: true` tells the client to reload its list and close the form,
+    // so a retry cannot create a duplicate.
+    if (createdResumeId) {
+      return {
+        ...failure(error, "Resume created, but it could not be set as your default resume."),
+        created: true,
+      };
+    }
+    return failure(error, "Failed to create resume.");
   }
 };
 

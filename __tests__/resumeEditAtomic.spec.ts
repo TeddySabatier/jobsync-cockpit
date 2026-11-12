@@ -144,6 +144,7 @@ describe("createResumeProfileWith", () => {
     expect(res.success).toBe(false);
     expect(res.message).toMatch(/created/i);
     expect(res.message).not.toBe("Failed to create resume.");
+    expect(res.created).toBe(true);
     expect(await prisma.resume.count({ where: { profile: { userId: other } } })).toBe(1);
     state.userId = userId;
   });
@@ -152,5 +153,6 @@ describe("createResumeProfileWith", () => {
     vi.spyOn(prisma.profile, "findFirst").mockRejectedValueOnce(new Error("boom"));
     const res = await createResumeProfileWith("Second");
     expect(res).toEqual({ success: false, message: "Failed to create resume." });
+    expect(res.created).toBeUndefined();
   });
 });

@@ -88,3 +88,41 @@ describe("CreateResume Component", () => {
     });
   });
 });
+
+describe("CreateResume: created but default not set", () => {
+  const post = (body: unknown) => {
+    global.fetch = vi.fn().mockResolvedValue({ json: async () => body }) as never;
+  };
+  const submit = async () => {
+    const reload = vi.fn();
+    const close = vi.fn();
+    render(
+      <CreateResume
+        resumeDialogOpen={true}
+        setResumeDialogOpen={close}
+        reloadResumes={reload}
+        setNewResumeId={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("resume-title-input"), { target: { value: "My CV" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: /save/i })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    return { reload, close };
+  };
+
+  it("closes the dialog and reloads the list so a retry cannot duplicate", async () => {
+    post({ success: false, created: true, message: "Resume created, but x" });
+    const { reload, close } = await submit();
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(close).toHaveBeenCalledWith(false);
+  });
+
+  it("a plain failure keeps the dialog open", async () => {
+    post({ success: false, message: "Failed to create resume." });
+    const { reload, close } = await submit();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(reload).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+  });
+});

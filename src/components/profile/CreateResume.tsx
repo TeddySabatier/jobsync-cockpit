@@ -147,6 +147,13 @@ function CreateResume({
       const response = await res.json();
       if (!response.success) {
         toastError(response?.message);
+        // The resume exists (only the default flag failed): close and reload,
+        // so a second submit does not create a duplicate.
+        if (response?.created && !resumeToEdit) {
+          reset();
+          setResumeDialogOpen(false);
+          reloadResumes();
+        }
         return;
       }
 

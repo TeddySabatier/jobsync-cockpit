@@ -28,7 +28,7 @@ vi.mock("@/lib/db", () => {
     "workExperience", "education", "licenseOrCertification", "otherSection",
     "skill", "coverLetter", "automation", "job", "note", "interview",
     "contact", "task", "activity", "question", "userSettings",
-    "chatConversation", "applicationPackage", "sentEmail",
+    "chatConversation", "applicationPackage", "sentEmail", "sendAttempt",
   ]) {
     mock[key] = counted();
   }

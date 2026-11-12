@@ -20,6 +20,7 @@ vi.mock("@/lib/db", () => {
       automation: counted(),
       applicationPackage: counted(),
       sentEmail: counted(),
+      sendAttempt: counted(),
       file: counted(),
     },
   };

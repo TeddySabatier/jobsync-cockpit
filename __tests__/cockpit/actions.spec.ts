@@ -42,6 +42,7 @@ vi.mock("@/lib/cockpit/packages", async (importOriginal) => {
     listPackagesByTab: vi.fn(),
     getPackageWithJob: vi.fn(),
     listJobVersions: vi.fn(),
+    listSendHistory: vi.fn(),
   };
 });
 
@@ -238,6 +239,7 @@ describe("getPackageDetail", () => {
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), "cockpit-detail-"));
     state.uploads = root;
+    m(svc.listSendHistory).mockResolvedValue([]);
   });
   afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -291,6 +293,33 @@ describe("getPackageDetail", () => {
     ...over,
   });
   const versions = (id = "p2") => [{ id, version: 2, status: "pending" }];
+
+  it("returns the send history scoped to the user, with fixed reasons only (D-028)", async () => {
+    m(svc.getPackageWithJob).mockResolvedValue(row());
+    m(svc.listJobVersions).mockResolvedValue(versions());
+    m(svc.listSendHistory).mockResolvedValue([
+      {
+        id: "a1",
+        outcome: "failed",
+        errorCode: "GMAIL_SEND",
+        gmailMessageId: null,
+        createdAt: new Date("2026-11-01T08:00:00Z"),
+        threadId: "must-not-leak",
+        userId: "must-not-leak",
+      },
+    ]);
+    const res = await actions.getPackageDetail("p2");
+    expect(svc.listSendHistory).toHaveBeenCalledWith("u1", "p2");
+    expect(res).toMatchObject({
+      success: true,
+      data: {
+        sendHistory: [
+          { id: "a1", outcome: "failed", reason: "Gmail rejected the message" },
+        ],
+      },
+    });
+    expect(JSON.stringify(res)).not.toContain("must-not-leak");
+  });
 
   it("returns the attachment name and size, versions, the active id and a safe gmail view (AC-43)", async () => {
     const filePath = stored();

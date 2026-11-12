@@ -520,6 +520,22 @@ export async function getPackageWithJob(userId: string, id: string) {
   return pkg;
 }
 
+// The send history of one package, oldest first (D-028). Read only; scoped to
+// the user.
+export function listSendHistory(userId: string, packageId: string) {
+  return prisma.sendAttempt.findMany({
+    where: { packageId, userId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: {
+      id: true,
+      outcome: true,
+      errorCode: true,
+      gmailMessageId: true,
+      createdAt: true,
+    },
+  });
+}
+
 // All versions of a job, newest first (version selector).
 export function listJobVersions(userId: string, jobId: string) {
   return prisma.applicationPackage.findMany({
