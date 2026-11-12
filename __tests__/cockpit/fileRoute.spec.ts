@@ -121,6 +121,15 @@ describe("GET /api/cockpit/files/[packageId] (AC-16)", () => {
     expect((await call()).status).toBe(404);
   });
 
+  it("stored path is a directory inside the user's dir → empty 404 (issue #78)", async () => {
+    const dir = path.join(root, "files", "cockpit", "u1", "a-dir.pdf");
+    fs.mkdirSync(dir, { recursive: true });
+    find.mockResolvedValue({ cvFile: { filePath: dir } });
+    const res = await call();
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe("");
+  });
+
   it("owned file → 200 PDF with the generated name and one CSP value", async () => {
     const p = store("u1", "0a1b2c3d-generated.pdf", "%PDF-1.4 hello");
     find.mockResolvedValue({

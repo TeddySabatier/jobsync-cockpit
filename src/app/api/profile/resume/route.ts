@@ -1,19 +1,19 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
+import { deleteFile } from "@/actions/profile.actions";
 import {
-  createResumeProfile,
-  deleteFile,
-  editResume,
-  uploadFile,
-} from "@/actions/profile.actions";
+  createResumeProfileWith,
+  editResumeWith,
+  storeResumeUpload,
+  type StoredUpload,
+} from "@/actions/profile/resumeWrite";
 import path from "path";
 import fsp from "fs/promises";
-import { getTimestampedFileName } from "@/lib/utils";
 import { APP_CONSTANTS } from "@/lib/constants";
 import { PDF_MAGIC, ZIP_MAGIC } from "@/lib/ai/import/extract-text";
 import { log } from "@/lib/telemetry";
 import { contentDisposition, safeDownloadName } from "@/lib/downloadName";
-import { findDownloadableFile, resumesDir } from "@/lib/uploadedFile";
+import { findDownloadableFile } from "@/lib/uploadedFile";
 
 const ALLOWED_MIME = new Set<string>(APP_CONSTANTS.RESUME_ALLOWED_MIME_TYPES);
 
@@ -38,8 +38,6 @@ function validateFileBytes(buf: Buffer, mimeType: string): boolean {
 
 export const POST = async (req: NextRequest) => {
   const session = await auth();
-  const userId = session?.user?.id;
-  let filePath;
 
   try {
     if (!session || !session.user) {
@@ -54,11 +52,14 @@ export const POST = async (req: NextRequest) => {
     }
     const formData = await req.formData();
     const title = formData.get("title") as string;
-    const file = formData.get("file") as File;
+    const file = formData.get("file") as File | null;
     const resumeId = (formData.get("id") as string) ?? null;
     let fileId: string | undefined =
       (formData.get("fileId") as string) ?? undefined;
 
+    // The stored path is made here, server side (issue #78, D-024): no
+    // action takes a path from the client.
+    let upload: StoredUpload | undefined;
     if (file && file.name && file.size > 0) {
       // Server-side validation: size, MIME type, and magic bytes
       if (file.size > APP_CONSTANTS.MAX_RESUME_FILE_SIZE_BYTES) {
@@ -72,46 +73,32 @@ export const POST = async (req: NextRequest) => {
         return NextResponse.json({ error: "File content does not match declared type" }, { status: 400 });
       }
 
-      const uploadDir = resumesDir();
-      const timestampedFileName = getTimestampedFileName(file.name);
-      filePath = path.join(uploadDir, timestampedFileName);
-      await uploadFile(file, uploadDir, filePath);
+      upload = await storeResumeUpload(file);
     }
 
     if (resumeId && title) {
-      if (fileId && file?.name) {
+      if (fileId && upload) {
         await deleteFile(fileId);
         fileId = undefined;
       }
 
-      const res = await editResume(
-        resumeId,
-        title,
-        fileId,
-        file?.name,
-        filePath
-      );
+      const res = await editResumeWith(resumeId, title, fileId, upload);
       return NextResponse.json(res, { status: 200 });
     }
 
-    const response = await createResumeProfile(
-      title,
-      file.name ?? null,
-      filePath
-    );
+    const response = await createResumeProfileWith(title, upload);
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
-    log.error("[Resume] Upload failed", { error: String(error) });
-    if (error instanceof Error) {
-      return NextResponse.json(
-        {
-          error: error.message ?? "Resume update or File upload failed",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
+    // A fixed message: the error text can carry a path. The log carries a
+    // code (and the errno code, never a message).
+    log.error("[Resume] Upload failed", {
+      code: "RESUME_UPLOAD_FAILED",
+      errno: String((error as NodeJS.ErrnoException)?.code ?? "none"),
+    });
+    return NextResponse.json(
+      { error: "Resume update or File upload failed" },
+      { status: 500 },
+    );
   }
 };
 

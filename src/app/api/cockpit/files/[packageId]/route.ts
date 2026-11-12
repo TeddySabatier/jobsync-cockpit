@@ -29,9 +29,13 @@ export async function GET(
   const real = await resolveCockpitFile(userId, pkg.cvFile);
   if (!real) return notFound();
 
+  // Only a regular file is served (issue #78, D-024): a directory, FIFO or
+  // device inside the dir is the same 404.
   let size: number;
   try {
-    size = (await fs.stat(real)).size;
+    const st = await fs.stat(real);
+    if (!st.isFile()) return notFound();
+    size = st.size;
   } catch {
     return notFound();
   }

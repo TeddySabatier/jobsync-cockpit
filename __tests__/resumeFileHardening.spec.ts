@@ -52,6 +52,9 @@ vi.mock("@/lib/ai/import/extract-text", async (importOriginal) => {
 
 import { deleteFile } from "@/actions/profile/files";
 import { POST as importResume } from "@/app/api/ai/resume/import/route";
+import { POST as uploadResume } from "@/app/api/profile/resume/route";
+import * as profileActions from "@/actions/profile.actions";
+import { createResumeProfile, editResume } from "@/actions/profile/resume";
 import { log } from "@/lib/telemetry";
 
 const prisma = db.prisma;
@@ -161,6 +164,17 @@ describe("deleteFile: only files inside the resumes dir are removed", () => {
     expect(await fileRow(fileId)).toBeNull();
   });
 
+  it("does not delete another user's file through a symlink that stays inside the resumes dir", async () => {
+    const theirs = write(fresh(resumes), SECRET);
+    await resumeWithFile(userB, theirs);
+    const link = fresh(resumes);
+    fs.symlinkSync(theirs, link);
+    const { fileId } = await resumeWithFile(userA, link);
+    await deleteFile(fileId);
+    expect(fs.readFileSync(theirs)).toEqual(SECRET);
+    expect(await fileRow(fileId)).toBeNull();
+  });
+
   it("refuses another user's file id and leaves file and row alone", async () => {
     const p = write(fresh(resumes));
     const { fileId } = await resumeWithFile(userB, p);
@@ -224,5 +238,110 @@ describe("POST /api/ai/resume/import: the stored file is realpath-confined", () 
     const a = await (await callImport(outside.resumeId)).json();
     const b = await (await callImport(missing.resumeId)).json();
     expect(a).toEqual(b);
+  });
+});
+
+const upload = (fields: Record<string, string>, name = "cv.pdf", body: Buffer = PDF) => {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.set(k, v);
+  form.set("file", new File([new Uint8Array(body)], name, { type: "application/pdf" }));
+  return uploadResume(
+    new NextRequest("http://localhost/api/profile/resume", { method: "POST", body: form }),
+  );
+};
+
+const fileOf = async (resumeId: string) =>
+  (await prisma.resume.findUnique({ where: { id: resumeId }, include: { File: true } }))!.File;
+
+describe("POST /api/profile/resume: the server makes the stored path", () => {
+  it("stores a new resume's upload inside the resumes dir (normal case)", async () => {
+    const res = await upload({ title: `New ${crypto.randomUUID()}` });
+    expect(res!.status).toBe(201);
+    const { data } = await res!.json();
+    const file = await fileOf(data.id);
+    expect(path.dirname(path.resolve(file!.filePath))).toBe(resumes);
+    expect(fs.readFileSync(file!.filePath)).toEqual(PDF);
+    expect(file!.fileName).toBe("cv.pdf");
+  });
+
+  it("never overwrites an upload of the same name in the same second", async () => {
+    const a = await (await upload({ title: `Twin ${crypto.randomUUID()}` }, "twin.pdf", PDF))!.json();
+    const b = await (await upload({ title: `Twin ${crypto.randomUUID()}` }, "twin.pdf", SECRET))!.json();
+    const fa = await fileOf(a.data.id);
+    const fb = await fileOf(b.data.id);
+    expect(fa!.filePath).not.toBe(fb!.filePath);
+    expect(fs.readFileSync(fa!.filePath)).toEqual(PDF);
+    expect(fs.readFileSync(fb!.filePath)).toEqual(SECRET);
+  });
+
+  it("keeps a hostile upload name inside the resumes dir", async () => {
+    const res = await upload({ title: `Evil ${crypto.randomUUID()}` }, "../../../evil.pdf");
+    const { data } = await res!.json();
+    const file = await fileOf(data.id);
+    expect(path.dirname(path.resolve(file!.filePath))).toBe(resumes);
+    expect(fs.existsSync(path.join(tmp, "evil.pdf"))).toBe(false);
+  });
+
+  it("replaces the file of the user's own resume on edit", async () => {
+    const old = write(fresh(resumes));
+    const { fileId, resumeId } = await resumeWithFile(userA, old);
+    const res = await upload({ id: resumeId, title: "Edited", fileId });
+    expect(res!.status).toBe(200);
+    const file = await fileOf(resumeId);
+    expect(file!.id).not.toBe(fileId);
+    expect(path.dirname(path.resolve(file!.filePath))).toBe(resumes);
+    expect(fs.existsSync(old)).toBe(false);
+  });
+
+  it("answers a fixed 500 message without the error text (it can carry a path), code-only log", async () => {
+    const saved = state.uploads;
+    // UPLOADS_DIR is a regular file: mkdir fails with a message naming the path.
+    const blocker = path.join(tmp, `blocker-${crypto.randomUUID()}`);
+    fs.writeFileSync(blocker, "x");
+    state.uploads = blocker;
+    const err = vi.spyOn(log, "error");
+    try {
+      const res = await upload({ title: `Fail ${crypto.randomUUID()}` });
+      expect(res!.status).toBe(500);
+      const text = await res!.text();
+      expect(JSON.parse(text)).toEqual({ error: "Resume update or File upload failed" });
+      expect(text).not.toContain(tmp);
+      expect(err).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ code: "RESUME_UPLOAD_FAILED" }),
+      );
+      expect(JSON.stringify(err.mock.calls)).not.toContain(tmp);
+    } finally {
+      state.uploads = saved;
+    }
+  });
+});
+
+describe("no exported action accepts a path", () => {
+  it("the actions barrel no longer exports uploadFile", () => {
+    expect((profileActions as Record<string, unknown>).uploadFile).toBeUndefined();
+  });
+
+  it("createResumeProfile ignores a file name and path passed by a caller", async () => {
+    const outside = write(fresh(tmp), SECRET);
+    const create = createResumeProfile as unknown as (...a: unknown[]) => Promise<{
+      success: boolean;
+      data: { id: string };
+    }>;
+    const res = await create(`Forged ${crypto.randomUUID()}`, "x.pdf", outside);
+    expect(res.success).toBe(true);
+    expect(await fileOf(res.data.id)).toBeNull();
+    expect(await prisma.file.findFirst({ where: { filePath: outside } })).toBeNull();
+  });
+
+  it("editResume ignores a file name and path passed by a caller", async () => {
+    const outside = write(fresh(tmp), SECRET);
+    const { resumeId } = await resumeWithFile(userA, write(fresh(resumes)));
+    await prisma.resume.update({ where: { id: resumeId }, data: { FileId: null } });
+    const edit = editResume as unknown as (...a: unknown[]) => Promise<{ success: boolean }>;
+    const res = await edit(resumeId, "Forged", undefined, "x.pdf", outside);
+    expect(res.success).toBe(true);
+    expect(await fileOf(resumeId)).toBeNull();
+    expect(await prisma.file.findFirst({ where: { filePath: outside } })).toBeNull();
   });
 });

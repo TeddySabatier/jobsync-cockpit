@@ -3,7 +3,8 @@ import prisma from "@/lib/db";
 import { handleError } from "@/lib/utils";
 import { APP_CONSTANTS } from "@/lib/constants";
 import { resumeDetailInclude } from "@/lib/jobs/resumeDetailInclude";
-import { createFileEntry, requireUser, resumeListSelect } from "./shared";
+import { requireUser, resumeListSelect } from "./shared";
+import { createResumeProfileWith, editResumeWith } from "./resumeWrite";
 import { deleteFile } from "./files";
 
 export const getResumeList = async (
@@ -134,125 +135,18 @@ export const saveResumeReviewResult = async (
   }
 };
 
+// The actions take no upload and no path (issue #78, D-024): a file is only
+// attached through the upload route, which stores it server side and calls
+// the *With variants in resumeWrite.ts (not a "use server" module).
 export const createResumeProfile = async (
   title: string,
-  fileName: string,
-  filePath?: string,
-): Promise<any | undefined> => {
-  try {
-    const user = await requireUser();
-
-    // Build a unique title: if base title is taken, append (2), (3), …
-    const existingTitles = await prisma.resume.findMany({
-      where: { profile: { userId: user.id } },
-      select: { title: true },
-    });
-    const taken = new Set(existingTitles.map((r) => r.title.toLowerCase()));
-    const base = title.trim();
-    let uniqueTitle = base;
-    let counter = 2;
-    while (taken.has(uniqueTitle.toLowerCase())) {
-      uniqueTitle = `${base} (${counter++})`;
-    }
-
-    // Count before creating so we can auto-default the user's first resume.
-    const resumeCount = await prisma.resume.count({
-      where: { profile: { userId: user.id } },
-    });
-
-    const profile = await prisma.profile.findFirst({
-      where: {
-        userId: user.id,
-      },
-    });
-
-    let res: any;
-    let createdResumeId: string;
-    if (profile && profile.id) {
-      res = await prisma.resume.create({
-        data: {
-          profileId: profile!.id,
-          title: uniqueTitle,
-          FileId: fileName ? await createFileEntry(fileName, filePath) : null,
-        },
-      });
-      createdResumeId = res.id;
-    } else {
-      // No profile yet: profile.create returns the profile, so pull the
-      // created resume's id from the nested include.
-      res = await prisma.profile.create({
-        data: {
-          userId: user.id,
-          resumes: {
-            create: [
-              {
-                title: uniqueTitle,
-                FileId: fileName
-                  ? await createFileEntry(fileName, filePath)
-                  : null,
-              },
-            ],
-          },
-        },
-        include: { resumes: { select: { id: true } } },
-      });
-      createdResumeId = res.resumes[0].id;
-    }
-
-    // Auto-default only the user's very first resume (decision #4/#5).
-    if (resumeCount === 0) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { defaultResumeId: createdResumeId },
-      });
-    }
-    // revalidatePath("/dashboard/myjobs", "page");
-    return { success: true, data: res };
-  } catch (error) {
-    const msg = "Failed to create resume.";
-    return handleError(error, msg);
-  }
-};
+): Promise<any | undefined> => createResumeProfileWith(title);
 
 export const editResume = async (
   id: string,
   title: string,
   fileId?: string,
-  fileName?: string,
-  filePath?: string,
-): Promise<any | undefined> => {
-  try {
-    const user = await requireUser();
-    let resolvedFileId = fileId;
-
-    if (fileId) {
-      // A given File id must already be this resume's own file (issue #78,
-      // D-024): the download route, the AI import, deleteFile and the backup
-      // export all trust the Resume -> File link, so a caller must not be able
-      // to link its resume to another user's File by id. One message for a
-      // missing id and someone else's.
-      const own = await prisma.file.findFirst({
-        where: { id: fileId, Resume: { id, profile: { userId: user.id } } },
-        select: { id: true },
-      });
-      if (!own) throw new Error("File not found or access denied");
-    } else if (fileName && filePath) {
-      resolvedFileId = await createFileEntry(fileName, filePath);
-    }
-
-    const res = await prisma.resume.update({
-      where: { id, profile: { userId: user.id } },
-      data: {
-        title,
-        FileId: resolvedFileId || null,
-      },
-    });
-    return { success: true, data: res };
-  } catch (error) {
-    const msg = "Failed to update resume or file.";
-    return handleError(error, msg);
-  }
-};
+): Promise<any | undefined> => editResumeWith(id, title, fileId);
 
 export const deleteResumeById = async (
   resumeId: string,

@@ -5,6 +5,18 @@ import db from "@/lib/db";
 import { INSERT_ORDER, MODEL_SPECS, type BackupModel } from "./ordering";
 import { BackupDataSchema, type BackupData } from "./schema";
 import { buildManifest } from "./manifest";
+import { log } from "@/lib/telemetry";
+import { FILE_OUTSIDE_UPLOADS, resolveStoredFile } from "@/lib/uploadedFile";
+
+// Whether anything (a file, a link, even a dangling one) is at the path.
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.lstat(path.resolve(p));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 type Row = Record<string, unknown>;
 
@@ -103,10 +115,29 @@ export async function buildBackupZip(
 
   // File bytes are read outside the read transaction. A row committed inside
   // the snapshot whose bytes land later is covered by the fileMissing marker.
+  // Each file is read only through the confinement of its kind (issue #78,
+  // D-024): a package CV from the user's cockpit dir, anything else from the
+  // resumes dir. A stored path elsewhere (a legacy row, a symlink out) is
+  // never read: it travels as missing, with a code-only warning.
+  const cockpitFileIds = new Set(
+    data.ApplicationPackage.map((p) => p.cvFileId).filter(
+      (v): v is string => typeof v === "string" && v.length > 0,
+    ),
+  );
   const zip = new JSZip();
   for (const file of data.File) {
+    const real = await resolveStoredFile(userId, file.filePath, cockpitFileIds.has(file.id));
+    if (!real) {
+      if (await pathExists(file.filePath)) {
+        log.warn("[Backup] Stored file outside its folder skipped", {
+          code: FILE_OUTSIDE_UPLOADS,
+        });
+      }
+      file.fileMissing = true;
+      continue;
+    }
     try {
-      const bytes = await fs.readFile(file.filePath);
+      const bytes = await fs.readFile(real);
       zip.file(`files/${file.id}/${path.basename(file.filePath)}`, bytes);
     } catch {
       file.fileMissing = true;

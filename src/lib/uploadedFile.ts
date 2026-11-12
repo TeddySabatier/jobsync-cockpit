@@ -2,7 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { APP_CONSTANTS } from "@/lib/constants";
 import { isCockpitEnabled } from "@/lib/cockpit/config";
-import { resolveCockpitFile } from "@/lib/cockpit/files";
+import { cockpitUserDir, resolveCockpitFile } from "@/lib/cockpit/files";
 import db from "@/lib/db";
 
 // Downloads of stored files (issue #78, D-024). The caller names a File id;
@@ -34,6 +34,60 @@ export async function resolveInsideDir(
     return null;
   }
 }
+
+// The folder a stored file of `userId` must live in: the user's cockpit dir
+// for a package CV, the resumes dir for anything else. Null when the user id
+// cannot name a cockpit dir.
+function storedFileDir(userId: string, isCockpitCv: boolean): string | null {
+  if (!isCockpitCv) return resumesDir();
+  try {
+    return cockpitUserDir(userId);
+  } catch {
+    return null;
+  }
+}
+
+// The real path of a stored file of `userId`, confined to the folder for its
+// kind (see storedFileDir) and to the uploads dir, or null.
+export async function resolveStoredFile(
+  userId: string,
+  filePath: string,
+  isCockpitCv: boolean,
+): Promise<string | null> {
+  const dir = storedFileDir(userId, isCockpitCv);
+  return dir ? resolveInsideDir(dir, filePath) : null;
+}
+
+// Removes a stored file from disk only when it is confined (resolveStoredFile)
+// and the stored path is not itself a symlink (removing the target would
+// touch a file the row never named). "kept": something exists there but it was
+// left alone; the caller logs a code, never the path.
+export async function removeStoredFile(
+  userId: string,
+  filePath: string,
+  isCockpitCv: boolean,
+): Promise<"removed" | "kept" | "missing"> {
+  let isLink: boolean;
+  try {
+    isLink = (await fs.lstat(path.resolve(filePath))).isSymbolicLink();
+  } catch {
+    return "missing";
+  }
+  const real = await resolveStoredFile(userId, filePath, isCockpitCv);
+  if (!real || isLink) return "kept";
+  try {
+    await fs.unlink(real);
+  } catch (error) {
+    // Gone in between: nothing to remove. Anything else is the caller's.
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return "missing";
+    throw error;
+  }
+  return "removed";
+}
+
+// Code of the warning logged when a stored file is skipped or kept because it
+// is not where its kind of file lives. No path goes in the log.
+export const FILE_OUTSIDE_UPLOADS = "FILE_OUTSIDE_UPLOADS";
 
 export type DownloadableFile = { realPath: string; fileName: string };
 
