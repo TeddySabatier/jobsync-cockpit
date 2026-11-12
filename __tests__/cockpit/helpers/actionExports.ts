@@ -12,6 +12,13 @@ export const ALLOWED: Record<string, string[]> = {
     "getPackageDetail",
     "getAdjacentPackageIds",
   ],
+  "cockpitFollowUps.actions.ts": [
+    "snoozeFollowUp",
+    "skipFollowUpStep",
+    "stopFollowUps",
+    "setFollowUpOutcome",
+    "undoFollowUpOutcome",
+  ],
   "cockpitGmail.actions.ts": ["getGmailSettings", "disconnectGmail"],
   "cockpitSend.actions.ts": [
     "sendPackage",

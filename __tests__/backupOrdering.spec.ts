@@ -22,6 +22,10 @@ describe("backup ordering", () => {
     );
     for (const model of INSERT_ORDER) {
       for (const [field, target] of Object.entries(MODEL_SPECS[model].fks)) {
+        // The one self-reference (D-030): a column without a database foreign
+        // key, whose target id is minted before any insert, so row order inside
+        // the model does not matter.
+        if (model === "ApplicationPackage" && field === "replyToPackageId") continue;
         expect(
           position.get(target)! < position.get(model)!,
           `${model}.${field} -> ${target} is inserted too late`,
@@ -95,7 +99,11 @@ describe("backup ordering", () => {
 describe("cockpit models", () => {
   it("owns packages and sent emails by the session user and chains their FKs", () => {
     expect(MODEL_SPECS.ApplicationPackage.owner).toBe("userId");
-    expect(MODEL_SPECS.ApplicationPackage.fks).toEqual({ jobId: "Job", cvFileId: "File" });
+    expect(MODEL_SPECS.ApplicationPackage.fks).toEqual({
+      jobId: "Job",
+      cvFileId: "File",
+      replyToPackageId: "ApplicationPackage",
+    });
     expect(MODEL_SPECS.ApplicationPackage.scope("u1")).toEqual({ userId: "u1" });
     expect(MODEL_SPECS.SentEmail.owner).toBe("userId");
     expect(MODEL_SPECS.SentEmail.fks).toEqual({ packageId: "ApplicationPackage" });
@@ -121,6 +129,16 @@ describe("cockpit models", () => {
       DELETE_ORDER.indexOf("ApplicationPackage"),
     );
     expect(REPLACED_MODELS).toContain("SendAttempt");
+  });
+
+  // D-030: follow-up state, one row per job.
+  it("owns follow-up state by the session user, inserts it after its job and replaces it on restore", () => {
+    expect(MODEL_SPECS.JobFollowUp.owner).toBe("userId");
+    expect(MODEL_SPECS.JobFollowUp.fks).toEqual({ jobId: "Job" });
+    expect(MODEL_SPECS.JobFollowUp.scope("u1")).toEqual({ userId: "u1" });
+    expect(INSERT_ORDER.indexOf("Job")).toBeLessThan(INSERT_ORDER.indexOf("JobFollowUp"));
+    expect(DELETE_ORDER.indexOf("JobFollowUp")).toBeLessThan(DELETE_ORDER.indexOf("Job"));
+    expect(REPLACED_MODELS).toContain("JobFollowUp");
   });
 
   it("never lists a Gmail account model, so refresh tokens cannot be exported", () => {

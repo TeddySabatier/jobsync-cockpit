@@ -1,5 +1,10 @@
 // Cockpit configuration (cockpit/SPEC.md §1 P4, §3).
 
+import {
+  DEFAULT_FOLLOW_UP_WINDOW_DAYS,
+  resolveTimezone,
+} from "./followUpDue";
+
 // Read per call, never cached: the flag is checked per request.
 export function isCockpitEnabled(): boolean {
   return process.env.COCKPIT_ENABLED === "true";
@@ -29,3 +34,19 @@ export const COCKPIT_RATE_LIMITS = {
   cockpit: { bucket: "cockpit", max: 120, windowMs: HOUR_MS },
   attach: { bucket: "cockpit-attach", max: 30, windowMs: HOUR_MS },
 } as const;
+
+// Follow-ups (D-030). Read per call. COCKPIT_TIMEZONE: IANA name the due day and
+// the weekday rule are computed in (default UTC; an invalid name also gives UTC).
+export function getFollowUpTimezone(): string {
+  return resolveTimezone(process.env.COCKPIT_TIMEZONE);
+}
+
+// COCKPIT_FOLLOWUP_WINDOW_DAYS: how long after its due day a step is still
+// suggested (default 30). A whole number from 1 to 365; anything else gives the
+// default.
+export function getFollowUpWindowDays(): number {
+  const raw = process.env.COCKPIT_FOLLOWUP_WINDOW_DAYS?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return DEFAULT_FOLLOW_UP_WINDOW_DAYS;
+  const n = Number(raw);
+  return n >= 1 && n <= 365 ? n : DEFAULT_FOLLOW_UP_WINDOW_DAYS;
+}

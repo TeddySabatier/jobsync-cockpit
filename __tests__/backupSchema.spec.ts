@@ -1,5 +1,6 @@
 import {
   BACKUP_FORMAT_VERSION,
+  SUPPORTED_BACKUP_FORMAT_VERSIONS,
   ManifestSchema,
   BackupDataSchema,
 } from "@/lib/backup/schema";
@@ -14,8 +15,11 @@ const validManifest = {
 };
 
 describe("manifest schema", () => {
-  it("pins the format version at 1", () => {
-    expect(BACKUP_FORMAT_VERSION).toBe(1);
+  it("writes format version 2 and still reads 1 (D-030)", () => {
+    expect(BACKUP_FORMAT_VERSION).toBe(2);
+    expect([...SUPPORTED_BACKUP_FORMAT_VERSIONS]).toEqual([1, 2]);
+    expect(ManifestSchema.safeParse({ ...validManifest, formatVersion: 1 }).success).toBe(true);
+    expect(ManifestSchema.safeParse({ ...validManifest, formatVersion: 2 }).success).toBe(true);
   });
 
   it("accepts a well-formed manifest", () => {
@@ -23,7 +27,7 @@ describe("manifest schema", () => {
   });
 
   it("rejects a different formatVersion", () => {
-    const res = ManifestSchema.safeParse({ ...validManifest, formatVersion: 2 });
+    const res = ManifestSchema.safeParse({ ...validManifest, formatVersion: 3 });
     expect(res.success).toBe(false);
   });
 

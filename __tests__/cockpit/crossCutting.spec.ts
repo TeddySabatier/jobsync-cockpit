@@ -66,6 +66,14 @@ describe("active package helper", () => {
     expect(activePackageWhere({ userId: "u", jobId: "j" })).toEqual({
       userId: "u",
       jobId: "j",
+      kind: "application",
+      status: { not: "superseded" },
+    });
+  });
+  it("activePackageWhere is per kind and defaults to the application (D-030)", () => {
+    expect(activePackageWhere({ jobId: "j" }, "follow_up")).toEqual({
+      jobId: "j",
+      kind: "follow_up",
       status: { not: "superseded" },
     });
   });

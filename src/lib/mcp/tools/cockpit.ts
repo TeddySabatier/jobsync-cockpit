@@ -212,7 +212,9 @@ export function registerCockpitTools(
             Location: { select: { label: true } },
             Status: { select: { value: true } },
             applicationPackages: {
-              where: { userId },
+              // The application versions only (D-030); follow-ups have their own
+              // numbering and their own tool.
+              where: { userId, kind: "application" },
               orderBy: { version: "desc" },
               select: {
                 id: true,

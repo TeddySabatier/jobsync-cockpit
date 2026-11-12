@@ -125,8 +125,8 @@ describe("active package: new helper vs the old hand-written queries", () => {
   it("the helper does not mutate or share state between calls", () => {
     const s1 = activePackageWhere({ jobId: "x" });
     const s2 = activePackageWhere({ jobId: "y" });
-    expect(s1).toEqual({ jobId: "x", status: { not: "superseded" } });
-    expect(s2).toEqual({ jobId: "y", status: { not: "superseded" } });
+    expect(s1).toEqual({ jobId: "x", kind: "application", status: { not: "superseded" } });
+    expect(s2).toEqual({ jobId: "y", kind: "application", status: { not: "superseded" } });
   });
 });
 

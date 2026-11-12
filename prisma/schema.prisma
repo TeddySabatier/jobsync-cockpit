@@ -40,6 +40,7 @@ model User {
   gmailAccount        GmailAccount?
   sentEmails          SentEmail[]
   sendAttempts        SendAttempt[]
+  jobFollowUps        JobFollowUp[]
   defaultResumeId String?
   defaultResume   Resume?          @relation("UserDefaultResume", fields: [defaultResumeId], references: [id], onDelete: SetNull)
 }
@@ -319,6 +320,7 @@ model Job {
   Notes         Note[]
   tags        Tag[]
   applicationPackages ApplicationPackage[]
+  followUp            JobFollowUp?
 
   // Automation discovery fields
   automationId    String?
@@ -553,7 +555,9 @@ model ApplicationPackage {
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobId            String
   job              Job       @relation(fields: [jobId], references: [id], onDelete: Restrict)
-  version          Int                       // 1, 2, 3 ... per job
+  version          Int                       // 1, 2, 3 ... per (job, kind)
+  kind             String    @default("application") // application | follow_up (D-030)
+  replyToPackageId String?                   // follow_up: the application it follows up (no FK: history must restore in any order)
   status           String    @default("pending") // pending|approved|rejected|changes_requested|sent|superseded
   emailTo          String?                   // null/empty = "apply via link"
   emailSubject     String
@@ -584,7 +588,7 @@ model ApplicationPackage {
   sentEmail        SentEmail?
   sendAttempts     SendAttempt[]
 
-  @@unique([jobId, version])
+  @@unique([jobId, kind, version])
   @@unique([userId, idempotencyKey])
   @@index([userId, status, createdAt])
 }
@@ -611,7 +615,31 @@ model SentEmail {
   toAddress      String
   gmailMessageId String
   threadId       String
+  messageIdHeader String?  // the RFC 5322 Message-ID we generated, for In-Reply-To / References (D-030); null before V1
   sentAt         DateTime @default(now())
+}
+
+// Follow-up state of one job (D-030). One optional row per job, created lazily
+// on the first snooze / skip / stop / outcome. Whether a follow-up is due is
+// derived (src/lib/cockpit/followUpDue.ts), never stored.
+// outcome: null | replied | interview | rejected | closed.
+// skippedThrough: the number (1 or 2) of the last skipped step, 0 = none.
+model JobFollowUp {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId          String    @unique
+  job            Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  outcome        String?
+  outcomeAt      DateTime?
+  stopped        Boolean   @default(false)
+  skippedThrough Int       @default(0)
+  skippedAt      DateTime?
+  snoozedUntil   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([userId])
 }
 
 // Issue #77 / D-028: append-only history of what happened on every send. Rows

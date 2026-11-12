@@ -1,9 +1,13 @@
 import { z } from "zod";
 
-export const BACKUP_FORMAT_VERSION = 1;
+// 2 = follow-ups (D-030): ApplicationPackage.kind / replyToPackageId,
+// SentEmail.messageIdHeader and the JobFollowUp group. Version 1 backups still
+// import: every new field has a default that reproduces the old behaviour.
+export const BACKUP_FORMAT_VERSION = 2;
+export const SUPPORTED_BACKUP_FORMAT_VERSIONS = [1, 2] as const;
 
 export const ManifestSchema = z.object({
-  formatVersion: z.literal(BACKUP_FORMAT_VERSION),
+  formatVersion: z.union([z.literal(1), z.literal(2)]),
   appVersion: z.string(),
   exportedAt: z.string(),
   sourceEmail: z.string(),
@@ -206,6 +210,9 @@ const ApplicationPackage = z.object({
   id,
   jobId: id,
   version: int,
+  // Absent in a version 1 backup: those are all applications (D-030).
+  kind: z.enum(["application", "follow_up"]).default("application"),
+  replyToPackageId: optId.default(null),
   status: str,
   emailTo: optStr,
   emailSubject: str,
@@ -241,6 +248,7 @@ const SentEmail = z.object({
   toAddress: str,
   gmailMessageId: str,
   threadId: str,
+  messageIdHeader: optStr.default(null),
   sentAt: dt,
 });
 
@@ -254,6 +262,21 @@ const SendAttempt = z.object({
   gmailMessageId: optStr,
   threadId: optStr,
   createdAt: dt,
+});
+
+// Follow-up state of a job (D-030). Absent from a version 1 backup: the group
+// defaults to empty, so every job starts with no outcome, not stopped.
+const JobFollowUp = z.object({
+  id,
+  jobId: id,
+  outcome: z.enum(["replied", "interview", "rejected", "closed"]).nullable(),
+  outcomeAt: optDt,
+  stopped: z.boolean(),
+  skippedThrough: z.number().int().min(0).max(2),
+  skippedAt: optDt,
+  snoozedUntil: optDt,
+  createdAt: dt,
+  updatedAt: dt,
 });
 
 const Note = z.object({
@@ -362,6 +385,7 @@ export const BackupDataSchema = z.object({
   ApplicationPackage: group(ApplicationPackage),
   SentEmail: group(SentEmail),
   SendAttempt: group(SendAttempt),
+  JobFollowUp: group(JobFollowUp),
   Note: group(Note),
   Interview: group(Interview),
   Contact: group(Contact),

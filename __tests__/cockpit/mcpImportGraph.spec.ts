@@ -109,6 +109,23 @@ describe("MCP import graph (AC-35)", () => {
     expect(violations(entries, SRC)).toEqual([]);
   });
 
+  // D-030: the follow-up modules are meant to be used by MCP tools (F-3). They
+  // and the follow-up actions' services must not reach send or Gmail.
+  it("the follow-up due module and service reach neither send nor Gmail", () => {
+    const entries = [
+      path.join(SRC, "lib/cockpit/followUpDue.ts"),
+      path.join(SRC, "lib/cockpit/followUps.ts"),
+      path.join(SRC, "lib/cockpit/activePackage.ts"),
+      path.join(SRC, "actions/cockpitFollowUps.actions.ts"),
+    ];
+    for (const e of entries) expect(fs.existsSync(e), e).toBe(true);
+    const seen = [...reachable(entries, SRC).keys()].map((f) =>
+      path.relative(SRC, f).split(path.sep).join("/"),
+    );
+    expect(seen).toContain("lib/cockpit/followUps.ts");
+    expect(violations(entries, SRC)).toEqual([]);
+  });
+
   it("send.ts, mime.ts and gmail/client.ts start with import \"server-only\"", () => {
     for (const rel of [
       "lib/cockpit/send.ts",

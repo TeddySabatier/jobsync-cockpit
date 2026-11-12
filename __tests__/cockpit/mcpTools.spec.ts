@@ -465,6 +465,40 @@ describe("list_jobs / get_job (AC-11)", () => {
     await c.close();
   });
 
+  it("a follow-up package is never the active package or a get_job version (D-030)", async () => {
+    const c = await asUser(userA);
+    const jobId = await newJob(userA);
+    const app = JSON.parse((await c.call("submit_application_package", submitArgs(jobId))).text);
+    // A follow-up draft of the same job, with a higher number, straight in the DB.
+    await prisma.applicationPackage.create({
+      data: {
+        userId: userA,
+        jobId,
+        kind: "follow_up",
+        version: 5,
+        status: "pending",
+        emailSubject: "Re: Application",
+        emailBody: "Following up",
+      },
+    });
+    const list = JSON.parse((await c.call("list_jobs", { hasPackage: true })).text);
+    const row = list.jobs.find((j: { id: string }) => j.id === jobId);
+    expect(row.activePackage).toEqual({ id: app.packageId, version: 1, status: "pending" });
+
+    const got = JSON.parse((await c.call("get_job", { jobId })).text);
+    expect(got.packages.map((p: { id: string }) => p.id)).toEqual([app.packageId]);
+
+    // A job that only has a follow-up draft has no package for the bot's purposes.
+    const onlyFu = await newJob(userA);
+    await prisma.applicationPackage.create({
+      data: { userId: userA, jobId: onlyFu, kind: "follow_up", version: 1, status: "pending", emailSubject: "Re", emailBody: "b" },
+    });
+    const without = JSON.parse((await c.call("list_jobs", { hasPackage: false })).text);
+    expect(without.jobs.map((j: { id: string }) => j.id)).toContain(onlyFu);
+    expect(JSON.parse((await c.call("get_job", { jobId: onlyFu })).text).packages).toEqual([]);
+    await c.close();
+  });
+
   it("get_job returns the documented fields and all versions newest first", async () => {
     const c = await asUser(userA);
     const jobId = await newJob(userA, { jobUrl: "https://example.com/jobs/1", matchScore: 77 });
