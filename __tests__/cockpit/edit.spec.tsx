@@ -27,8 +27,8 @@ vi.mock("next/navigation", () => ({
 const toastError = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/toast", () => ({ toastSuccess: vi.fn(), toastError }));
 vi.mock("@/components/TipTapContentViewer", () => ({
-  TipTapContentViewer: ({ content }: { content: string }) => (
-    <div data-testid="tiptap" data-html={content} />
+  TipTapContentViewer: ({ content, label }: { content: string; label?: string }) => (
+    <div data-testid="tiptap" data-html={content} data-label={label} />
   ),
 }));
 
@@ -331,6 +331,17 @@ describe("edit form: letter preview", () => {
     expect(html).toContain("Hi");
     expect(html).not.toMatch(/<img/i);
     expect(html).not.toMatch(/<a[\s>]/i);
+  });
+});
+
+describe("edit form: letter preview a11y", () => {
+  it("is a named, focusable scroll group with a labelled viewer", () => {
+    render(<EditForm detail={fixture()} onClose={vi.fn()} />);
+    expect(screen.getByRole("group", { name: "Letter preview text" })).toHaveAttribute(
+      "tabindex",
+      "0",
+    );
+    expect(screen.getByTestId("tiptap")).toHaveAttribute("data-label", "Letter preview");
   });
 });
 

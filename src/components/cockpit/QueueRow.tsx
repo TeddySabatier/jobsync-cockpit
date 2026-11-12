@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { Badge } from "@/components/ui/badge";
+import FitGradeBadge from "./FitGradeBadge";
+import { statusLabel } from "./statusLabels";
 import type { getReviewQueue } from "@/actions/cockpit.actions";
 
 type QueueData = Extract<
@@ -8,14 +10,6 @@ type QueueData = Extract<
   { success: true }
 >["data"];
 export type QueueRowData = QueueData["rows"][number];
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Pending",
-  approved: "Approved",
-  changes_requested: "Changes requested",
-  sent: "Sent",
-  rejected: "Rejected",
-};
 
 // Readiness chips (SPEC §5.2): shown only for a problem or a mode.
 export function readinessChips(row: QueueRowData, gmailConnected: boolean) {
@@ -49,15 +43,9 @@ export default function QueueRow({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {row.fitGrade && (
-            <Badge variant="outline" aria-label={`Fit grade ${row.fitGrade}`}>
-              {row.fitGrade}
-            </Badge>
-          )}
+          {row.fitGrade && <FitGradeBadge grade={row.fitGrade} />}
           <span className="text-xs text-muted-foreground">v{row.version}</span>
-          <Badge variant="secondary">
-            {STATUS_LABELS[row.status] ?? row.status}
-          </Badge>
+          <Badge variant="secondary">{statusLabel(row.status)}</Badge>
           {chips.map((c) => (
             <Badge key={c} variant="outline" data-testid="readiness-chip">
               {c}
@@ -65,7 +53,7 @@ export default function QueueRow({
           ))}
         </div>
         <div className="min-w-0 text-sm text-muted-foreground @md/main:w-64 @md/main:text-right">
-          <p className="truncate">{row.emailTo?.trim() || "apply via link"}</p>
+          <p className="truncate">{row.emailTo?.trim() || "Apply via link"}</p>
           <p className="text-xs">
             {formatDistanceToNow(row.createdAt, { addSuffix: true })}
           </p>

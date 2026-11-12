@@ -64,6 +64,6 @@ describe("JobDetails application package card", () => {
     expect(screen.getByText("Application package")).toBeInTheDocument();
     const link = screen.getByTestId("job-details-package-link");
     expect(link).toHaveAttribute("href", "/dashboard/review/p3");
-    expect(link).toHaveTextContent("v3 · pending");
+    expect(link).toHaveTextContent("v3 · Pending");
   });
 });
