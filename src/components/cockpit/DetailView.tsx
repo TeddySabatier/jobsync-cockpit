@@ -1,13 +1,13 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Info } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { formatUrl } from "@/lib/utils";
 import ActionBar from "./ActionBar";
-import EditForm, { canEditPackage } from "./EditForm";
+import EditForm, { canEditPackage, DISCARD_MESSAGE } from "./EditForm";
 import {
   CvPanel,
   EmailPanel,
@@ -46,12 +46,31 @@ export default function DetailView({
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [wasEditing, setWasEditing] = useState(false);
+  const dirtyRef = useRef(false);
+  const onDirtyChange = useCallback((d: boolean) => {
+    dirtyRef.current = d;
+  }, []);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // The remounted ActionBar has taken focus (its effect runs before this one):
+  // later remounts must not take it again.
+  useEffect(() => {
+    if (wasEditing && !editing) setWasEditing(false);
+  }, [wasEditing, editing]);
   // j / k must not navigate away from unsaved edits.
   useQueueKeys(editing ? { previousId: null, nextId: null } : adjacent);
 
   const { package: pkg, versions, activePackageId, isActive } = detail;
   const canEdit = canEditPackage(detail);
   const activeVersion = versions.find((v) => v.id === activePackageId);
+
+  // After a successful Send the action bar disappears (status sent) and the
+  // focused Send button with it: move focus to the page heading.
+  const prevStatus = useRef(pkg.status);
+  useEffect(() => {
+    if (prevStatus.current !== "sent" && pkg.status === "sent") headingRef.current?.focus();
+    prevStatus.current = pkg.status;
+  }, [pkg.status]);
 
   return (
     <div className="flex flex-col gap-4 py-4">
@@ -64,7 +83,7 @@ export default function DetailView({
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="truncate text-xl font-semibold">
+            <h1 ref={headingRef} tabIndex={-1} className="truncate text-xl font-semibold outline-none">
               {pkg.job.Company.label}
             </h1>
             <p className="truncate text-sm text-muted-foreground">
@@ -91,7 +110,11 @@ export default function DetailView({
             <select
               aria-label="Version"
               value={pkg.id}
-              onChange={(e) => router.push(`/dashboard/review/${e.target.value}`)}
+              onChange={(e) => {
+                // A controlled select: declining keeps the current version.
+                if (editing && dirtyRef.current && !window.confirm(DISCARD_MESSAGE)) return;
+                router.push(`/dashboard/review/${e.target.value}`);
+              }}
               className="h-9 rounded-md border bg-background px-2 text-sm"
             >
               {versions.map((v) => (
@@ -129,7 +152,14 @@ export default function DetailView({
       <PreviousReviewInfo pkg={pkg} />
 
       {editing && canEdit ? (
-        <EditForm detail={detail} onClose={() => setEditing(false)} />
+        <EditForm
+          detail={detail}
+          onClose={() => {
+            setEditing(false);
+            setWasEditing(true);
+          }}
+          onDirtyChange={onDirtyChange}
+        />
       ) : (
         <>
           <div className="grid grid-cols-1 gap-4 @3xl/main:grid-cols-2">
@@ -152,6 +182,7 @@ export default function DetailView({
             <ActionBar
               detail={detail}
               onEdit={canEdit ? () => setEditing(true) : undefined}
+              focusEditOnMount={wasEditing}
             />
           )}
         </>

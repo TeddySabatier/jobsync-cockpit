@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const h = vi.hoisted(() => ({
@@ -39,8 +39,36 @@ describe("GmailCard", () => {
     expect(screen.queryByText("Connect Gmail")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    // Disconnect needs a confirmation (review 07 finding 6): nothing yet.
+    expect(h.disconnect).not.toHaveBeenCalled();
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Disconnect" }),
+    );
     await waitFor(() => expect(h.disconnect).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(h.refresh).toHaveBeenCalled());
+  });
+
+  it("Disconnect: Cancel in the confirmation does nothing", async () => {
+    render(
+      <GmailCard
+        account={{ email: "you@example.com", scopes: SCOPES }}
+        missingEnv={[]}
+        errorMessage={null}
+        justConnected={false}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("you@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(h.disconnect).not.toHaveBeenCalled();
+  });
+
+  // Review 07 finding 1: ?connected=1 survives router.refresh() after Disconnect.
+  it("does not say 'Gmail connected.' when there is no account (after Disconnect)", () => {
+    render(<GmailCard account={null} missingEnv={[]} errorMessage={null} justConnected />);
+    expect(screen.queryByText("Gmail connected.")).not.toBeInTheDocument();
+    expect(screen.getByText("Gmail is not connected.")).toBeInTheDocument();
   });
 
   it("disconnected: a Connect link to the connect route", () => {

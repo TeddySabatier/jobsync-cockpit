@@ -272,6 +272,21 @@ All 18 items accepted (one with a ruling that adds a requirement instead of a fi
 - **Not changed:** `updatedAt` concurrency on the review actions (last write wins, owner decision, review finding 1).
 - **Scope:** `src/actions/cockpit*.actions.ts`, `src/actions/shared.ts`, `src/lib/{authError.ts,cockpit/{actionRunner,packageView,config,errors,send}.ts}`, `__tests__/cockpit/*`.
 
+
+## D-023 Edit and send UI review fixes (issue #59)
+
+| # | Topic | Ruling | Reason |
+|---|---|---|---|
+| (a) | The recipient warning compares **registrable domains** only (last label before the public suffix, `co.uk`-style suffixes handled), never subdomains or generic words (`careers`, `jobs`, `inc`, `corp`, `mail`, `hr`...). The company match is the exact label or one of the company's words. The free-mail list gains the common French providers and matches on the registrable domain | **Accept.** Tests for `careers.evil.example`, `inc.evil.example`, `corp.evil.example`, plus a 77-case table (`recipientWarning.table.spec.ts`) added in the PR #74 test pass: two-part suffixes only under a country TLD (`co.com`), weak company words (`technologies`) never match alone, accents and apostrophes ignored, an incomplete address (`hr@`) warns. | The bot takes the recipient from untrusted postings; the old check was bypassable and is the main safety net on Send. |
+| (b) | While the edit form has unsaved changes, in-app navigation asks first: the version selector, and any same-origin link (back link, sidebar, "Open vN") through one capture-phase click listener. The browser Back button is not guarded | **Accept.** | Edits were lost silently. A router-level guard does not exist in the App Router. |
+| (c) | A **definitive** send failure keeps the Send dialog open with an inline `role="alert"`; a state change (`CONFLICT`, `INVALID_STATE`, `NOT_FOUND`, `SEND_OUTCOME_UNKNOWN`) toasts and closes; a **thrown** action closes the dialog and refreshes the page | **Accept.** | A toast vanishes; a re-enabled Send after an unknown outcome invites a double send. |
+| (d) | Disconnect Gmail asks for confirmation; "Gmail connected." shows only when an account exists (the `?connected=1` query survives `router.refresh()`) | **Accept.** | |
+| (e) | `ActionBar` reads `gmailSendAllowed` (D-020 f): a connected but not allowed address gives a dedicated reason and a settings link instead of a Send that fails with "Reconnect Gmail" | **Accept.** The UI cannot tell "other address" from "variable not set", so the text names both. | |
+| (f) | Focus: first field on Edit, Edit button on return, page title after Send success. EditForm **Reload** leaves edit mode before refreshing | **Accept.** | |
+| (g) | `TextDialog` (own file, `initialValue`, counter) is shared by reject, request changes and re-render; `runAction` is the try / toast / busy helper of the cockpit components; `STALE_LOCK_MS` lives in `src/lib/cockpit/constants.ts` for the client. A test keeps it equal to the constant in `send.ts` | **Accept.** `send.ts` still defines its own copy (the send PR is in flight); unify it there afterwards. | |
+
+- **Not changed:** status wording (D-021). Not done: the `descriptionToText` double decode and the client-clock staleness (server validates), outside the edit and send components.
+
 ## D-022 Send path review fixes (review 02, issue #54)
 
 The lost-lock cases below need a recovery action (allowed only on a lock older than 60 s or an unknown outcome) to run while the Gmail call is still in flight (20 s timeout): unreachable today, closed anyway because the cost is a double send.

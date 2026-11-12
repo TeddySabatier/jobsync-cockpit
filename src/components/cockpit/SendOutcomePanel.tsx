@@ -5,7 +5,7 @@ import {
   releaseSendLock,
 } from "@/actions/cockpitSend.actions";
 import type { CockpitResult } from "@/lib/cockpit/errors";
-import { toastError, toastSuccess } from "@/lib/toast";
+import { STALE_LOCK_MS } from "@/lib/cockpit/constants";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -17,9 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
-// Same value as STALE_LOCK_MS in send.ts (server-only, so not importable here).
-const STALE_LOCK_MS = 60_000;
+import { runAction } from "./runAction";
 
 type Confirm = "sent" | "release" | null;
 
@@ -54,19 +52,8 @@ export default function SendOutcomePanel({
     );
   }
 
-  async function run(fn: () => Promise<CockpitResult<unknown>>, success: string) {
-    setBusy(true);
-    try {
-      const r = await fn();
-      if (r.success) toastSuccess(success);
-      else toastError(r.message);
-      setConfirm(null);
-    } catch {
-      toastError("Request failed. Check your connection and try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const run = (fn: () => Promise<CockpitResult<unknown>>, success: string) =>
+    runAction(fn, { success, setBusy, onSettled: () => setConfirm(null) });
 
   return (
     <div
