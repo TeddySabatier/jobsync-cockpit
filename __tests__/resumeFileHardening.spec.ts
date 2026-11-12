@@ -323,6 +323,18 @@ describe("POST /api/profile/resume: the server makes the stored path", () => {
     expect(resumeFiles()).toEqual(before);
   });
 
+  it("a failure after the resume was created (default update) keeps the linked upload", async () => {
+    state.userId = userB;
+    await prisma.resume.deleteMany({ where: { profile: { userId: userB } } });
+    const title = `First ${crypto.randomUUID()}`;
+    const upd = vi.spyOn(prisma.user, "update").mockRejectedValue(new Error("boom"));
+    await upload({ title });
+    upd.mockRestore();
+    const resume = await prisma.resume.findFirst({ where: { title }, include: { File: true } });
+    expect(resume?.File).toBeTruthy();
+    expect(fs.existsSync(resume!.File!.filePath)).toBe(true);
+  });
+
   it("a database failure answers the fixed message, never the error text with the stored path", async () => {
     const leak = (p: string) => new Error(`Unique constraint failed on filePath ${p}`);
     const before = resumeFiles();

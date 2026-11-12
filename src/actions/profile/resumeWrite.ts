@@ -63,6 +63,15 @@ export async function storeResumeUpload(file: File): Promise<StoredUpload> {
 // Removes an upload stored by storeResumeUpload that ended up unused (the
 // create or edit failed). Server-made path, still confined.
 export async function discardResumeUpload(userId: string, upload: StoredUpload) {
+  // A failure after the resume was created (e.g. setting the default) leaves a
+  // resume linked to this file: that file stays.
+  const linked = await prisma.file
+    .findFirst({
+      where: { filePath: upload.filePath, Resume: { isNot: null } },
+      select: { id: true },
+    })
+    .catch(() => ({ id: "unknown" }));
+  if (linked) return;
   await removeStoredFile(userId, upload.filePath, false).catch(() => undefined);
 }
 
