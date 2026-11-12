@@ -31,7 +31,7 @@ Flip the two `fixme` to `test` when the fixes land.
 
 - [ ] `File` rows have no `userId` column; ownership is path-based (V1 hook).
 - [ ] Edits have no optimistic concurrency; two tabs can overwrite each other (Send re-checks `updatedAt`).
-- [ ] Upstream `/api/profile/resume` has no path confinement (upstream code, not changed in V0).
+- [x] ~~Upstream `/api/profile/resume` has no path confinement~~ fixed: download by File id, scoped to the user, realpath-confined (D-024, issue #78).
 - [ ] Leaving edit mode through a sidebar link does not warn about unsaved changes (known limit).
 - [ ] Rate limits are per process and a fixed window (can pass up to 2× max across a window edge); not shared across replicas.
 - [ ] Use a dedicated MCP token for the bot, created after upgrade (older tokens lack `package:write` and `jobs:read`).

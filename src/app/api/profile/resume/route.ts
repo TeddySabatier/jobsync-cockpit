@@ -7,15 +7,26 @@ import {
   uploadFile,
 } from "@/actions/profile.actions";
 import path from "path";
-import fs from "fs";
+import fsp from "fs/promises";
 import { getTimestampedFileName } from "@/lib/utils";
 import { APP_CONSTANTS } from "@/lib/constants";
 import { PDF_MAGIC, ZIP_MAGIC } from "@/lib/ai/import/extract-text";
 import { log } from "@/lib/telemetry";
-import db from "@/lib/db";
 import { contentDisposition, safeDownloadName } from "@/lib/downloadName";
+import { findDownloadableFile, resumesDir } from "@/lib/uploadedFile";
 
 const ALLOWED_MIME = new Set<string>(APP_CONSTANTS.RESUME_ALLOWED_MIME_TYPES);
+
+// Download types by on-disk extension; any other file is not served.
+const CONTENT_TYPES: Record<string, string> = {
+  ".pdf": "application/pdf",
+  ".docx":
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".doc": "application/msword",
+};
+
+// One answer for every file the user may not download: no body, no reason.
+const notFound = () => new NextResponse(null, { status: 404 });
 
 function validateFileBytes(buf: Buffer, mimeType: string): boolean {
   if (mimeType === "application/pdf") return buf.subarray(0, 4).equals(PDF_MAGIC);
@@ -61,7 +72,7 @@ export const POST = async (req: NextRequest) => {
         return NextResponse.json({ error: "File content does not match declared type" }, { status: 400 });
       }
 
-      const uploadDir = path.join(APP_CONSTANTS.UPLOADS_DIR, "files", "resumes");
+      const uploadDir = resumesDir();
       const timestampedFileName = getTimestampedFileName(file.name);
       filePath = path.join(uploadDir, timestampedFileName);
       await uploadFile(file, uploadDir, filePath);
@@ -109,7 +120,7 @@ export const GET = async (req: NextRequest) => {
   const userId = session?.user?.id;
 
   try {
-    if (!session || !session.user) {
+    if (!session || !session.user || !userId) {
       return NextResponse.json(
         {
           error: "Not Authenticated",
@@ -120,66 +131,35 @@ export const GET = async (req: NextRequest) => {
       );
     }
 
-    const { searchParams } = new URL(req.url);
-    const filePath = searchParams.get("filePath");
+    // Issue #78 (D-024): the request names a File id, never a path. The row
+    // is looked up for this user and its stored path is confined to the
+    // uploads dir; anything else is the same empty 404.
+    const fileId = new URL(req.url).searchParams.get("fileId");
+    const file = await findDownloadableFile(userId, fileId);
+    if (!file) return notFound();
 
-    if (!filePath) {
-      return NextResponse.json(
-        { error: "File path is required" },
-        { status: 400 }
-      );
-    }
+    const contentType = CONTENT_TYPES[path.extname(file.realPath).toLowerCase()];
+    if (!contentType) return notFound();
 
-    const fullFilePath = path.join(filePath);
-    if (!fs.existsSync(fullFilePath)) {
-      return NextResponse.json({ error: "File not found" }, { status: 404 });
-    }
+    const fileContent = await fsp.readFile(file.realPath);
 
-    const fileType = path.extname(fullFilePath).toLowerCase();
-    const fileName = path.basename(fullFilePath);
-
-    let contentType;
-
-    if (fileType === ".pdf") {
-      contentType = "application/pdf";
-    } else if (fileType === ".doc" || fileType === ".docx") {
-      contentType =
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-    } else {
-      return NextResponse.json(
-        { error: "Unsupported file type" },
-        { status: 400 }
-      );
-    }
-
-    const fileContent = fs.readFileSync(fullFilePath);
-
-    // The display name of the user's own row when there is one: a restored
-    // backup names files <id>.<ext> on disk (D-017). Sanitized for the header.
-    const row = await db.file.findFirst({
-      where: { filePath, Resume: { profile: { userId } } },
-      select: { fileName: true },
-    });
-    const safeFileName = safeDownloadName(row?.fileName, fileName.replace(/[\r\n"]/g, "_"));
-    const response = new NextResponse(fileContent, {
+    // The display name (File.fileName): a restored backup names files
+    // <id>.<ext> on disk (D-017). Sanitized for the header.
+    const onDisk = path.basename(file.realPath).replace(/[\r\n"]/g, "_");
+    const safeFileName = safeDownloadName(file.fileName, onDisk);
+    return new NextResponse(new Uint8Array(fileContent), {
       headers: {
         "Content-Type": contentType,
         "Content-Disposition": contentDisposition(safeFileName),
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
       },
     });
-
-    return response;
   } catch (error) {
+    // A file removed after the check is still "not found"; any other error
+    // is logged and answered without its message (it can carry a path).
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return notFound();
     log.error("[Resume] File download failed", { error: String(error) });
-    if (error instanceof Error) {
-      return NextResponse.json(
-        {
-          error: error.message ?? "File download failed",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
+    return NextResponse.json({ error: "File download failed" }, { status: 500 });
   }
 };
