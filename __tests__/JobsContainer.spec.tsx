@@ -225,7 +225,7 @@ describe("JobsContainer Search Functionality", () => {
     vi.useRealTimers();
   });
 
-  const renderComponent = () => {
+  const renderComponent = (props: { cockpitEnabled?: boolean } = {}) => {
     return render(
       <JobsContainer
         statuses={mockStatuses}
@@ -234,9 +234,33 @@ describe("JobsContainer Search Functionality", () => {
         locations={mockLocations}
         sources={mockSources}
         tags={[]}
+        {...props}
       />,
     );
   };
+
+  describe("Refresh jobs button (cockpit)", () => {
+    beforeEach(() => {
+      (getJobsList as any).mockResolvedValue({ success: true, data: mockJobs, total: 2 });
+    });
+
+    it("is shown on the toolbar when the cockpit is on", async () => {
+      renderComponent({ cockpitEnabled: true });
+      expect(await screen.findByTestId("refresh-jobs-prompt-btn")).toBeInTheDocument();
+    });
+
+    it("is absent when the cockpit is off", async () => {
+      renderComponent({ cockpitEnabled: false });
+      await screen.findByPlaceholderText("Search jobs...");
+      expect(screen.queryByTestId("refresh-jobs-prompt-btn")).not.toBeInTheDocument();
+    });
+
+    it("is absent when the prop is not passed", async () => {
+      renderComponent();
+      await screen.findByPlaceholderText("Search jobs...");
+      expect(screen.queryByTestId("refresh-jobs-prompt-btn")).not.toBeInTheDocument();
+    });
+  });
 
   describe("Search Input", () => {
     it("should render search input with placeholder", async () => {
