@@ -2,6 +2,7 @@ import "server-only";
 import React from "react";
 import { letterMarkdown } from "./markdown";
 import path from "path";
+import { randomUUID } from "crypto";
 import { Document, Font, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
 
 // Cover-letter PDF (cockpit/DECISIONS.md D-015). The Review preview and the
@@ -29,9 +30,8 @@ export const FONT_DIR = path.join(process.cwd(), "assets", "fonts", "noto-sans")
 // "Lukasz" (seen in tests, D-026; the page looks right, the copied text does
 // not). So every render registers its own family under a fresh name, which
 // parses the files anew (a few ms), and removes it afterwards.
-let familySeq = 0;
 function registerFonts(): string {
-  const family = "NotoSans" + familySeq++;
+  const family = "NotoSans-" + randomUUID();
   const f = (file: string) => path.join(FONT_DIR, file);
   Font.register({
     family,
@@ -54,7 +54,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: PAGE_MARGIN,
     color: "#000000",
   },
-  name: { fontWeight: 700, fontSize: 18, color: ACCENT, marginBottom: 2 },
+  name: { fontWeight: 700, fontSize: 18, color: ACCENT, marginBottom: 4 },
   title: { fontSize: 11, color: MUTED, marginBottom: 2 },
   contact: { fontSize: 9.5, color: MUTED },
   rule: { height: 1, backgroundColor: ACCENT, marginTop: 8, marginBottom: 18 },
