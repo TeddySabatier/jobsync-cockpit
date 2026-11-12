@@ -1,8 +1,8 @@
 import { auth } from "@/auth";
 import { NextRequest, NextResponse } from "next/server";
-import { deleteFile } from "@/actions/profile.actions";
 import {
   createResumeProfileWith,
+  discardResumeUpload,
   editResumeWith,
   storeResumeUpload,
   type StoredUpload,
@@ -54,8 +54,8 @@ export const POST = async (req: NextRequest) => {
     const title = formData.get("title") as string;
     const file = formData.get("file") as File | null;
     const resumeId = (formData.get("id") as string) ?? null;
-    let fileId: string | undefined =
-      (formData.get("fileId") as string) ?? undefined;
+    const fileId: string | undefined =
+      (formData.get("fileId") as string) || undefined;
 
     // The stored path is made here, server side (issue #78, D-024): no
     // action takes a path from the client.
@@ -76,17 +76,21 @@ export const POST = async (req: NextRequest) => {
       upload = await storeResumeUpload(file);
     }
 
-    if (resumeId && title) {
-      if (fileId && upload) {
-        await deleteFile(fileId);
-        fileId = undefined;
-      }
+    // A failed create or edit keeps nothing of the new upload. On an edit the
+    // old file (`fileId`) is removed by editResumeWith only after the edit
+    // committed, so a failure loses neither the old file nor its row.
+    const discardOnFailure = async (result: { success?: boolean } | undefined) => {
+      if (upload && !result?.success) await discardResumeUpload(session.user.id, upload);
+    };
 
+    if (resumeId && title) {
       const res = await editResumeWith(resumeId, title, fileId, upload);
+      await discardOnFailure(res);
       return NextResponse.json(res, { status: 200 });
     }
 
     const response = await createResumeProfileWith(title, upload);
+    await discardOnFailure(response);
     return NextResponse.json(response, { status: 201 });
   } catch (error) {
     // A fixed message: the error text can carry a path. The log carries a

@@ -236,6 +236,22 @@ describe("backup import removes replaced files only from their folder", () => {
     expect(fs.readFileSync(target)).toEqual(SECRET);
   });
 
+  it("keeps a replaced symlink inside the resumes dir and its in-dir target (another user's file)", async () => {
+    const { userId, email } = await account();
+    const other = await account();
+    const theirs = write(path.join(resumes, `${randomUUID()}.pdf`), SECRET);
+    await resumeFile(other.userId, theirs);
+    const link = path.join(resumes, `${randomUUID()}.pdf`);
+    fs.symlinkSync(theirs, link);
+    await resumeFile(userId, link);
+    const { buffer } = await exportOf(userId);
+    const warn = vi.spyOn(log, "warn");
+    await importBackup(buffer, userId, email, true);
+    expect(fs.readFileSync(theirs)).toEqual(SECRET);
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.any(String), { code: "FILE_OUTSIDE_UPLOADS" });
+  });
+
   it("keeps an old CV row pointing into another user's cockpit dir", async () => {
     const { userId, email } = await account();
     const other = await account();

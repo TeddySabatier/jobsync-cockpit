@@ -291,6 +291,62 @@ describe("POST /api/profile/resume: the server makes the stored path", () => {
     expect(file!.id).not.toBe(fileId);
     expect(path.dirname(path.resolve(file!.filePath))).toBe(resumes);
     expect(fs.existsSync(old)).toBe(false);
+    expect(await fileRow(fileId)).toBeNull();
+  });
+
+  const resumeFiles = () => fs.readdirSync(resumes).sort();
+
+  it("a failed edit (another user's resume) keeps the old file and row and discards the new upload", async () => {
+    const old = write(fresh(resumes));
+    const mine = await resumeWithFile(userA, old);
+    const theirs = await resumeWithFile(userB, write(fresh(resumes)));
+    const before = resumeFiles();
+    const filesBefore = await prisma.file.count();
+    const res = await upload({ id: theirs.resumeId, title: "Hijack", fileId: mine.fileId });
+    expect((await res!.json()).success).toBe(false);
+    expect(fs.readFileSync(old)).toEqual(PDF);
+    expect(await fileRow(mine.fileId)).not.toBeNull();
+    expect((await fileOf(mine.resumeId))!.id).toBe(mine.fileId);
+    expect(resumeFiles()).toEqual(before);
+    expect(await prisma.file.count()).toBe(filesBefore);
+  });
+
+  it("a failed edit (file of another of the user's resumes) keeps that file", async () => {
+    const old = write(fresh(resumes));
+    const first = await resumeWithFile(userA, old);
+    const second = await resumeWithFile(userA, write(fresh(resumes)));
+    const before = resumeFiles();
+    const res = await upload({ id: second.resumeId, title: "Swap", fileId: first.fileId });
+    expect((await res!.json()).success).toBe(false);
+    expect(fs.readFileSync(old)).toEqual(PDF);
+    expect((await fileOf(first.resumeId))!.id).toBe(first.fileId);
+    expect(resumeFiles()).toEqual(before);
+  });
+
+  it("a database failure answers the fixed message, never the error text with the stored path", async () => {
+    const leak = (p: string) => new Error(`Unique constraint failed on filePath ${p}`);
+    const before = resumeFiles();
+    const create = vi
+      .spyOn(prisma.file, "create")
+      .mockImplementation((async (args: { data: { filePath: string } }) => {
+        throw leak(args.data.filePath);
+      }) as never);
+    const created = await (await upload({ title: `Leak ${crypto.randomUUID()}` }))!.json();
+    create.mockRestore();
+    expect(created).toEqual({ success: false, message: "Failed to create resume." });
+    expect(resumeFiles()).toEqual(before);
+
+    const { fileId, resumeId } = await resumeWithFile(userA, write(fresh(resumes)));
+    const before2 = resumeFiles();
+    const tx = vi.spyOn(prisma, "$transaction").mockImplementation((async () => {
+      throw leak(path.join(resumes, "x.pdf"));
+    }) as never);
+    const edited = await (await upload({ id: resumeId, title: "Leak", fileId }))!.json();
+    tx.mockRestore();
+    expect(edited).toEqual({ success: false, message: "Failed to update resume or file." });
+    expect(JSON.stringify(edited)).not.toContain(tmp);
+    expect(resumeFiles()).toEqual(before2);
+    expect(await fileRow(fileId)).not.toBeNull();
   });
 
   it("answers a fixed 500 message without the error text (it can carry a path), code-only log", async () => {
