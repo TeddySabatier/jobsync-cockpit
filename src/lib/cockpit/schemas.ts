@@ -96,7 +96,7 @@ export type SubmitApplicationPackageInput = z.output<
   typeof SubmitApplicationPackageSchema
 >;
 
-// ---- submit_follow_up (D-033) ---------------------------------------------
+// ---- submit_follow_up (D-034) ---------------------------------------------
 // The same subject and body rules as an application (one set of limits, one
 // blank check). No recipient, no CV, no fit: the follow-up replies to the
 // application (To and the base of the subject come from it, server side).
@@ -111,7 +111,7 @@ export const SubmitFollowUpObject = z.strictObject(SubmitFollowUpInputShape);
 export const SubmitFollowUpSchema = SubmitFollowUpObject;
 export type SubmitFollowUpInput = z.output<typeof SubmitFollowUpSchema>;
 
-// ---- list_due_follow_ups (D-033) ------------------------------------------
+// ---- list_due_follow_ups (D-034) ------------------------------------------
 export const ListDueFollowUpsInputShape = {
   limit: z.number().int().min(1).max(100).default(20),
 };

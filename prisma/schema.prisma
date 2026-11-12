@@ -556,7 +556,7 @@ model ApplicationPackage {
   jobId            String
   job              Job       @relation(fields: [jobId], references: [id], onDelete: Restrict)
   version          Int                       // 1, 2, 3 ... per (job, kind)
-  kind             String    @default("application") // application | follow_up (D-030)
+  kind             String    @default("application") // application | follow_up (D-031)
   replyToPackageId String?                   // follow_up: the application it follows up (no FK: history must restore in any order)
   status           String    @default("pending") // pending|approved|rejected|changes_requested|sent|superseded
   emailTo          String?                   // null/empty = "apply via link"
@@ -615,11 +615,11 @@ model SentEmail {
   toAddress      String
   gmailMessageId String
   threadId       String
-  messageIdHeader String?  // the RFC 5322 Message-ID we generated, for In-Reply-To / References (D-030); null before V1
+  messageIdHeader String?  // the RFC 5322 Message-ID we generated, for In-Reply-To / References (D-031); null before V1
   sentAt         DateTime @default(now())
 }
 
-// Follow-up state of one job (D-030). One optional row per job, created lazily
+// Follow-up state of one job (D-031). One optional row per job, created lazily
 // on the first snooze / skip / stop / outcome. Whether a follow-up is due is
 // derived (src/lib/cockpit/followUpDue.ts), never stored.
 // outcome: null | replied | interview | rejected | closed.

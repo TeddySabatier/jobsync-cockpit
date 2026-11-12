@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-// D-030: kind-aware package rules, the follow-up state actions, and the due
+// D-031: kind-aware package rules, the follow-up state actions, and the due
 // calculation fed from a real (temp) database. Synthetic data only.
 
 const db = await vi.hoisted(async () => {

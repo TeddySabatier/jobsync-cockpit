@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-// D-030 review: until F-4 the V0 send/recovery paths are kind-blind, so a
+// D-031 review: until F-4 the V0 send/recovery paths are kind-blind, so a
 // follow-up package that arrives through a hand-made v2 backup must never be
 // sent as an application, nor mark the job applied.
 

@@ -1,5 +1,5 @@
 // The "active package" of a job: its highest version whose status is not
-// "superseded" (cockpit/SPEC.md §2.2), per kind (D-030). A job has packages of
+// "superseded" (cockpit/SPEC.md §2.2), per kind (D-031). A job has packages of
 // two kinds: its "application" and, once that is sent, "follow_up" packages that
 // reply to it. "Which package is THE application of this job" has one answer
 // here: every reader of the one-application-per-job rule goes through this

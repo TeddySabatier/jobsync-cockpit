@@ -44,7 +44,7 @@ export const QUEUE_TAB_STATUSES: Record<QueueTab, PackageStatus[]> = {
 type Db = Prisma.TransactionClient;
 
 // What a package is created from. The application input (the MCP schema) with
-// the fit grade optional: a follow-up has no fit grade (D-033).
+// the fit grade optional: a follow-up has no fit grade (D-034).
 export type SubmitPackageInput = Omit<SubmitApplicationPackageInput, "fitGrade"> & {
   fitGrade?: "A" | "B";
 };
@@ -82,7 +82,7 @@ function replay(
 
 const RETRYABLE_PRISMA_CODES = ["P2034", "P1008", "P2028"];
 
-// D-030. The default is the V0 behaviour (an application). A "follow_up" keeps
+// D-031. The default is the V0 behaviour (an application). A "follow_up" keeps
 // its own version sequence, its own active package, supersede set and send-lock
 // check. It is NOT blocked by an earlier sent follow-up (ALREADY_SENT is the
 // application rule; the two-step cap and every other follow-up rule is
@@ -357,7 +357,7 @@ export async function rejectPackage(
       rejectedAt: now,
     });
     // Rejecting a follow-up draft skips that step, so the bot is not asked to
-    // draft it again (V1 plan 3.1, D-030). In the same transaction.
+    // draft it again (V1 plan 3.1, D-031). In the same transaction.
     const pkg = await tx.applicationPackage.findFirst({
       where: { id, userId },
       select: { kind: true, jobId: true },
@@ -460,7 +460,7 @@ export async function markPackageAppliedManually(userId: string, id: string) {
       id,
       ["pending", "approved"],
       { status: "sent", sentVia: "manual", sentAt: now },
-      // Applications only until F-4 (D-030): a follow-up never marks a job applied.
+      // Applications only until F-4 (D-031): a follow-up never marks a job applied.
       { kind: "application", OR: [{ emailTo: null }, { emailTo: "" }] },
     );
     const { jobId } = await tx.applicationPackage.findFirstOrThrow({
@@ -547,7 +547,7 @@ export async function updatePackageContent(
 // §2.2 a job never has two non-superseded packages of a kind (a submit
 // supersedes the open ones; sent/rejected block further submits), so filtering
 // on the tab statuses is enough. Newest first. The queue tabs list applications
-// only (D-030): follow-up drafts have their own tab, so the default is
+// only (D-031): follow-up drafts have their own tab, so the default is
 // "application".
 export function listPackagesByTab(
   userId: string,

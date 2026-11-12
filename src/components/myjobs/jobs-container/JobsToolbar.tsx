@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "../../ui/select";
 import { RecordsCount } from "../../RecordsCount";
+import { RefreshJobsPromptButton } from "@/components/cockpit/RefreshJobsPromptButton";
 import { JobsViewToggle } from "../JobsViewToggle";
 import { AddJob } from "../AddJob";
 import {
@@ -58,6 +59,7 @@ export function JobsToolbar({
   editJob,
   resetEditJob,
   addJobInitialOpen,
+  cockpitEnabled = false,
 }: {
   jobsCount: number;
   totalJobs: number;
@@ -78,6 +80,7 @@ export function JobsToolbar({
   filterKey: string;
   onFilterChange: (filterBy: string) => void;
   onDownload: () => void;
+  cockpitEnabled?: boolean;
   statuses: JobStatus[];
   companies: Company[];
   titles: JobTitle[];
@@ -188,6 +191,7 @@ export function JobsToolbar({
             Export
           </span>
         </Button>
+        {cockpitEnabled && <RefreshJobsPromptButton />}
         <AddJob
           jobStatuses={statuses}
           companies={companies}

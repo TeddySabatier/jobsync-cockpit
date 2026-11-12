@@ -61,7 +61,7 @@ describe.skipIf(!hasPython)("bot script vs the strict submit schema", () => {
     expect(failures).toEqual([]);
   });
 
-  // D-033: the follow-up command against the strict submit_follow_up schema.
+  // D-034: the follow-up command against the strict submit_follow_up schema.
   it("the follow-up commands submit at least once, with only schema keys, and pass the strict schema", () => {
     expect(captured.followUpArgs.length).toBeGreaterThan(0);
     const allowed = Object.keys(SubmitFollowUpObject.shape);

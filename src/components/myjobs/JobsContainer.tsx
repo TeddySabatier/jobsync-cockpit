@@ -35,6 +35,7 @@ type MyJobsProps = {
   locations: JobLocation[];
   sources: JobSource[];
   tags: Tag[];
+  cockpitEnabled?: boolean;
 };
 
 function JobsContainer({
@@ -44,6 +45,7 @@ function JobsContainer({
   locations,
   sources,
   tags,
+  cockpitEnabled = false,
 }: MyJobsProps) {
   const router = useRouter();
   const [editJob, setEditJob] = useState(null);
@@ -142,6 +144,7 @@ function JobsContainer({
     <>
       <Card x-chunk="dashboard-06-chunk-0">
         <JobsToolbar
+          cockpitEnabled={cockpitEnabled}
           jobsCount={jobs.length}
           totalJobs={totalJobs}
           initialLoading={initialLoading}

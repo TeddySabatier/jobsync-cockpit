@@ -1,5 +1,5 @@
 // Builds the text the owner pastes into Claude to draft the follow-ups that are
-// due (cockpit/DECISIONS.md D-033; plan 3.6, the "Follow-ups" copy button comes
+// due (cockpit/DECISIONS.md D-034; plan 3.6, the "Follow-ups" copy button comes
 // later). Pure and client-safe: no server imports. It lives apart from
 // claudePrompt.ts, which builds the prompt for one application.
 

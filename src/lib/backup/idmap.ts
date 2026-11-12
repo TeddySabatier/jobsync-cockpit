@@ -20,7 +20,7 @@ const OPTIONAL_FKS = new Set<string>([
   // restores without a CV instead of blocking the whole import (D-012).
   "ApplicationPackage.cvFileId",
   // A follow-up whose application is not in the file restores without the link
-  // (the column has no foreign key; it is informational, D-030).
+  // (the column has no foreign key; it is informational, D-031).
   "ApplicationPackage.replyToPackageId",
   "Contact.interviewId",
   "Task.activityTypeId",

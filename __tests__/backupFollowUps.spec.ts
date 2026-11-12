@@ -8,7 +8,7 @@ import { buildBackupZip } from "@/lib/backup/export";
 import { importBackup } from "@/lib/backup/import";
 import { seedAccount } from "./helpers/backupTestDb";
 
-// D-030: follow-up state (kind, replyToPackageId, messageIdHeader, JobFollowUp)
+// D-031: follow-up state (kind, replyToPackageId, messageIdHeader, JobFollowUp)
 // travels in format version 2 backups; version 1 backups still import. Real
 // SQLite, synthetic data only.
 

@@ -6,7 +6,7 @@ import { execFileSync } from "child_process";
 import { PrismaClient } from "@prisma/client";
 import { createJobFor, seedUserWithRefs } from "./helpers/seedUser";
 
-// D-030: the follow-ups migration, applied on top of a populated database made
+// D-031: the follow-ups migration, applied on top of a populated database made
 // by the migrations before it. Real SQLite, synthetic data only.
 
 const NEW = "20261114120000_follow_ups_foundation";

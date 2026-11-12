@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// 2 = follow-ups (D-030): ApplicationPackage.kind / replyToPackageId,
+// 2 = follow-ups (D-031): ApplicationPackage.kind / replyToPackageId,
 // SentEmail.messageIdHeader and the JobFollowUp group. Version 1 backups still
 // import: every new field has a default that reproduces the old behaviour.
 export const BACKUP_FORMAT_VERSION = 2;
@@ -210,7 +210,7 @@ const ApplicationPackage = z.object({
   id,
   jobId: id,
   version: int,
-  // Absent in a version 1 backup: those are all applications (D-030).
+  // Absent in a version 1 backup: those are all applications (D-031).
   kind: z.enum(["application", "follow_up"]).default("application"),
   replyToPackageId: optId.default(null),
   status: str,
@@ -264,7 +264,7 @@ const SendAttempt = z.object({
   createdAt: dt,
 });
 
-// Follow-up state of a job (D-030). Absent from a version 1 backup: the group
+// Follow-up state of a job (D-031). Absent from a version 1 backup: the group
 // defaults to empty, so every job starts with no outcome, not stopped.
 const JobFollowUp = z.object({
   id,

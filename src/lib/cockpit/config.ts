@@ -35,7 +35,7 @@ export const COCKPIT_RATE_LIMITS = {
   attach: { bucket: "cockpit-attach", max: 30, windowMs: HOUR_MS },
 } as const;
 
-// Follow-ups (D-030). Read per call. COCKPIT_TIMEZONE: IANA name the due day and
+// Follow-ups (D-031). Read per call. COCKPIT_TIMEZONE: IANA name the due day and
 // the weekday rule are computed in (default UTC; an invalid name also gives UTC).
 export function getFollowUpTimezone(): string {
   return resolveTimezone(process.env.COCKPIT_TIMEZONE);

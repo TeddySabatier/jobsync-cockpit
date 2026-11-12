@@ -10,7 +10,7 @@ import {
   undoFollowUpOutcome as undoFollowUpOutcomeSvc,
 } from "@/lib/cockpit/followUps";
 
-// Follow-up actions (V1 plan 3.6 row actions, D-030). Session only: nothing here
+// Follow-up actions (V1 plan 3.6 row actions, D-031). Session only: nothing here
 // sends, and none of it is reachable from MCP. Every export of a "use server"
 // file is a public endpoint, so only the async actions are exported. The
 // non-"use server" logic is src/lib/cockpit/followUps.ts; run/mutate do

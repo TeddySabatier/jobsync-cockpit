@@ -7,7 +7,7 @@ import { getFollowUpDue } from "./followUps";
 import { submitPackage, type SubmitResult } from "./packages";
 import { SubmitFollowUpSchema, type SubmitFollowUpInput } from "./schemas";
 
-// Follow-up services behind the two MCP tools (D-033, plan 3.5): list_due_follow_ups
+// Follow-up services behind the two MCP tools (D-034, plan 3.5): list_due_follow_ups
 // and submit_follow_up. Everything here is read or "create a pending draft": there
 // is no send, approve, outcome or status change, and this module never imports
 // send or gmail (AC-35; __tests__/cockpit/mcpImportGraph.spec.ts). Every query is
@@ -19,7 +19,7 @@ const SUBJECT_MAX = 300; // the shared subject limit (schemas.ts, cockpit_limits
 // carries (100 jobs x a full posting would be megabytes).
 export const POSTING_MAX_CHARS = 6_000;
 // Candidate jobs read per list call before the due check (a personal tool:
-// hundreds of applied jobs at most). Documented in D-033.
+// hundreds of applied jobs at most). Documented in D-034.
 const CANDIDATE_CAP = 1_000;
 
 // ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ function truncateUnits(text: string, limit: number): string {
 
 const RE_PREFIX = /^\s*re\s*:/i;
 
-// D-033: the follow-up subject always starts with "Re: ". The bot may give none
+// D-034: the follow-up subject always starts with "Re: ". The bot may give none
 // (then it is "Re: <original subject>") or its own (then "Re: " is added when it
 // is missing). The owner can still edit it in review. A subject equal to the
 // original keeps Gmail's subject matching when there is no Message-ID.

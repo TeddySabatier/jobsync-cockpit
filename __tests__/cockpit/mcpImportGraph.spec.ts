@@ -96,7 +96,7 @@ describe("MCP import graph (AC-35)", () => {
         "lib/cockpit/packages.ts",
         "lib/cockpit/files.ts",
         "lib/cockpit/attachments.ts",
-        // F-3 (D-033): the follow-up tools and what they use.
+        // F-3 (D-034): the follow-up tools and what they use.
         "lib/cockpit/followUpMcp.ts",
         "lib/cockpit/followUps.ts",
         "lib/cockpit/followUpDue.ts",
@@ -113,7 +113,7 @@ describe("MCP import graph (AC-35)", () => {
     expect(violations(entries, SRC)).toEqual([]);
   });
 
-  // D-030: the follow-up modules are meant to be used by MCP tools (F-3). They
+  // D-031: the follow-up modules are meant to be used by MCP tools (F-3). They
   // and the follow-up actions' services must not reach send or Gmail.
   it("the follow-up due module and service reach neither send nor Gmail", () => {
     const entries = [
@@ -131,7 +131,7 @@ describe("MCP import graph (AC-35)", () => {
     expect(violations(entries, SRC)).toEqual([]);
   });
 
-  // D-033: the two follow-up tools are registered in the MCP tool file; it and
+  // D-034: the two follow-up tools are registered in the MCP tool file; it and
   // the follow-up service behind it reach neither send nor Gmail, and the
   // source calls no send / approve / outcome / status function.
   it("the follow-up MCP tools and their service reach neither send nor Gmail and call no send/approve/outcome/status function", () => {

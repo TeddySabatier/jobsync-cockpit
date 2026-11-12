@@ -3,7 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-// D-033: the two follow-up MCP tools and `kind` on list_change_requests, over the
+// D-034: the two follow-up MCP tools and `kind` on list_change_requests, over the
 // real MCP stack and a temp SQLite database. Synthetic data only.
 
 const db = await vi.hoisted(async () => {
@@ -325,7 +325,7 @@ describe("submit_follow_up", () => {
       fitGrade: null,
       sentAt: null,
     });
-    // The application is untouched and still the application (D-030).
+    // The application is untouched and still the application (D-031).
     expect((await prisma.applicationPackage.findUniqueOrThrow({ where: { id: app.id } })).status).toBe("sent");
     expect((await prisma.job.findUniqueOrThrow({ where: { id: jobId }, include: { Status: true } })).Status.value).toBe("applied");
   });

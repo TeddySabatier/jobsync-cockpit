@@ -467,7 +467,7 @@ describe("list_jobs / get_job (AC-11)", () => {
     await c.close();
   });
 
-  it("a follow-up package is never the active package or a get_job version (D-030)", async () => {
+  it("a follow-up package is never the active package or a get_job version (D-031)", async () => {
     const c = await asUser(userA);
     const jobId = await newJob(userA);
     const app = JSON.parse((await c.call("submit_application_package", submitArgs(jobId))).text);

@@ -155,7 +155,7 @@ describe("cockpit_limits.json matches the real schemas (issue #83)", () => {
     expect(limit(num("listLimitMax") + 1)).toBe(false);
   });
 
-  // D-033: submit_follow_up shares the subject, body and key limits.
+  // D-034: submit_follow_up shares the subject, body and key limits.
   it("submit_follow_up: subject, emailBody and idempotencyKey follow the same table", () => {
     const fu = (over: Record<string, unknown> = {}) =>
       SubmitFollowUpSchema.safeParse({
