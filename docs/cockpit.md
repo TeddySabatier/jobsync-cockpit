@@ -1,4 +1,4 @@
-# Cockpit (V0)
+# Cockpit
 
 The **cockpit** is a review workflow inside JobSync. An external bot submits **application packages** (tailored CV PDF, CV JSON, cover letter, draft email, fit analysis) through the MCP server. You review, edit, approve, and **send from the UI only** — MCP cannot approve, send, or reject.
 

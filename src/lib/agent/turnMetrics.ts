@@ -27,10 +27,9 @@ function toolMaterial(tools: ToolSet): string {
     .join("\n");
 }
 
-// Sizes of what was actually sent, not of what the transcript holds. The
-// estimates in docs/reviews/review-chat-agent-optimizations.md become facts
-// here, and prefixChanged is the only direct evidence that the prefix stays
-// cacheable as tools are scoped or deferred.
+// Sizes of what was actually sent, not of what the transcript holds: measured
+// facts instead of estimates. prefixChanged is the only direct evidence that
+// the prefix stays cacheable as tools are scoped or deferred.
 export function measureTurnPrefix(args: {
   userId: string;
   system: string;

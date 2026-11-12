@@ -7,8 +7,13 @@ export function isCockpitEnabled(): boolean {
 
 // True when the connected Gmail address is the one the owner allowed for
 // sending (COCKPIT_GMAIL_ALLOWED_ADDRESS, compared trimmed and lower-cased).
-export function isGmailSendAllowed(accountEmail: string | null | undefined): boolean {
-  const allowed = process.env.COCKPIT_GMAIL_ALLOWED_ADDRESS?.trim().toLowerCase();
+// The one allow-list check: Connect (oauth.ts, which passes the address it
+// already read), the Send button state and Send itself all use it.
+export function isGmailSendAllowed(
+  accountEmail: string | null | undefined,
+  allowedAddress: string | null | undefined = process.env.COCKPIT_GMAIL_ALLOWED_ADDRESS,
+): boolean {
+  const allowed = allowedAddress?.trim().toLowerCase();
   if (!accountEmail || !allowed) return false;
   return accountEmail.trim().toLowerCase() === allowed;
 }

@@ -9,6 +9,7 @@ import {
   type CockpitErrorCode,
 } from "@/lib/cockpit/errors";
 import { attachFile } from "@/lib/cockpit/attachments";
+import { ACTIVE_PACKAGE_ORDER, activePackageWhere } from "@/lib/cockpit/activePackage";
 import { markChangeRequestDone, submitPackage } from "@/lib/cockpit/packages";
 import {
   AttachFileInputShape,
@@ -146,8 +147,8 @@ export function registerCockpitTools(
                 // "Has a package" means an active one (not superseded), as
                 // activePackage below.
                 applicationPackages: input.hasPackage
-                  ? { some: { userId, status: { not: "superseded" } } }
-                  : { none: { userId, status: { not: "superseded" } } },
+                  ? { some: activePackageWhere({ userId }) }
+                  : { none: activePackageWhere({ userId }) },
               }),
         };
         const [total, rows] = await Promise.all([
@@ -167,8 +168,8 @@ export function registerCockpitTools(
               Status: { select: { value: true } },
               // Active package = highest non-superseded version.
               applicationPackages: {
-                where: { userId, status: { not: "superseded" } },
-                orderBy: { version: "desc" },
+                where: activePackageWhere({ userId }),
+                orderBy: ACTIVE_PACKAGE_ORDER,
                 take: 1,
                 select: { id: true, version: true, status: true },
               },
