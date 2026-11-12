@@ -206,7 +206,9 @@ export function recipientNote(
   const domain = to.split("@").pop()?.trim().toLowerCase() ?? "";
   const host = sourceHost(source);
   if (host && domain && registrable(host).domain === registrable(domain).domain) {
-    return `Found on ${host}, the address's own site.`;
+    // Same domain as the address, which says nothing about who owns it: no
+    // reassuring wording (the bot's source is as untrusted as the address).
+    return `Found on ${host} (same domain as the address).`;
   }
   if (host) return `Found at ${source}. Its site differs from the address domain: open it to confirm.`;
   return `Source: ${source}.`;

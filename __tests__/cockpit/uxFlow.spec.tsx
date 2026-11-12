@@ -287,6 +287,109 @@ describe("keyboard a / e / x", () => {
   });
 });
 
+describe("send-path guards (review of PR #95)", () => {
+  const press = (key: string, extra = {}) => fireEvent.keyDown(document.body, { key, ...extra });
+
+  it("a pressed twice (or held) while the approval is in flight approves once", async () => {
+    let resolve!: (v: unknown) => void;
+    actions.approvePackage.mockImplementation(() => new Promise((r) => (resolve = r)));
+    render(<ActionBar detail={detail()} />);
+    press("a");
+    press("a");
+    press("a", { repeat: true });
+    expect(actions.approvePackage).toHaveBeenCalledTimes(1);
+    await act(async () => resolve(ok()));
+  });
+
+  it("a held down (auto-repeat) never acts", () => {
+    render(<ActionBar detail={detail()} />);
+    press("a", { repeat: true });
+    expect(actions.approvePackage).not.toHaveBeenCalled();
+  });
+
+  it("approved but the refreshed page is locked: no Send dialog", async () => {
+    actions.approvePackage.mockResolvedValue(ok());
+    const { rerender } = render(<ActionBar detail={detail()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Approve and send…" }));
+    vi.useFakeTimers();
+    try {
+      rerender(<ActionBar detail={detail({ status: "approved", sendStartedAt: new Date() })} />);
+      act(() => {
+        vi.advanceTimersByTime(10_001);
+      });
+      // Lock released much later (Release lock): no Send dialog out of the blue.
+      rerender(<ActionBar detail={detail({ status: "approved", sendStartedAt: null, sendOutcome: null })} />);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("approval confirmed but the page still shows pending: no dialog until it shows approved", async () => {
+    actions.approvePackage.mockResolvedValue(ok());
+    const { rerender } = render(<ActionBar detail={detail()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Approve and send…" }));
+    rerender(<ActionBar detail={detail({ updatedAt: new Date("2026-11-01T10:01:00Z") })} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("the refreshed page arrives after 10 s: no dialog out of the blue", async () => {
+    actions.approvePackage.mockResolvedValue(ok());
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(<ActionBar detail={detail()} />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Approve and send…" }));
+      });
+      expect(actions.approvePackage).toHaveBeenCalledTimes(1);
+      act(() => {
+        vi.advanceTimersByTime(10_001);
+      });
+      rerender(<ActionBar detail={detail({ status: "approved" })} />);
+      expect(screen.queryByRole("dialog")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("e and x do nothing on a locked application", () => {
+    const onEdit = vi.fn();
+    render(<ActionBar detail={detail({ status: "approved", sendStartedAt: new Date() })} onEdit={onEdit} />);
+    press("e");
+    press("x");
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("Escape cannot close the Send dialog while the send is in flight", async () => {
+    let resolve!: (v: unknown) => void;
+    sendPackage.mockImplementation(() => new Promise((r) => (resolve = r)));
+    render(<ActionBar detail={detail({ status: "approved" })} adjacent={adjacent} />);
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send now" }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await act(async () => resolve(ok()));
+    expect(push).toHaveBeenCalledWith("/dashboard/review/next");
+  });
+
+  it("a source does not hide a domain mismatch: the amber note says the domain differs", async () => {
+    render(
+      <ActionBar
+        detail={detail({
+          status: "approved",
+          emailTo: "hr@recruit-other.example",
+          contactSource: "https://recruit-other.example/team",
+        })}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Send…" }));
+    const note = screen.getByTestId("send-contact-source");
+    expect(note).toHaveTextContent("The recipient domain differs from the company and the job posting.");
+    expect(note).toHaveTextContent("Found on recruit-other.example (same domain as the address).");
+  });
+});
+
 describe("SummaryStrip", () => {
   it("shows grade, why, recipient, source, readiness and what to check", () => {
     render(<SummaryStrip detail={detail()} />);

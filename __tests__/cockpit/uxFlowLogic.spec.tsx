@@ -291,6 +291,28 @@ describe("navGuard (reload, links, Back)", () => {
     expect(ev2.defaultPrevented).toBe(false);
   });
 
+  it("saved (clean again) while the sentinel is current: it is removed, so Back needs no extra press", () => {
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const { rerender } = render(<Host dirty />);
+    rerender(<Host dirty={false} />);
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it("after a confirmed Back, the guard's own history.back() does not ask a second time", () => {
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<Host dirty />);
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    // The popstate of the guard's own back() arrives while it is still mounted.
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
   it("an in-app link asks first", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<Host dirty />);

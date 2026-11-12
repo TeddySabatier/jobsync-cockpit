@@ -652,8 +652,10 @@ def cmd_submit(args, url, token):
         analysis = as_dict(item.get("fitAnalysis"))
         subject = values["subject"] or item.get("emailSubject") or ""
         to = values["to"] if values["to"] is not None else (item.get("emailTo") or "")
-        # Keep the source of the recipient the owner already saw unless a new one is given.
-        if not values["contact_source"] and item.get("contactSource"):
+        # Keep the source of the recipient the owner already saw unless a new one is given,
+        # and only for that same recipient: a changed address needs its own source.
+        same_to = to.strip().lower() == (item.get("emailTo") or "").strip().lower()
+        if not values["contact_source"] and item.get("contactSource") and same_to:
             values["contact_source"] = str(item["contactSource"])
         fit = values["fit"] or item.get("fitGrade") or analysis.get("verdict") or ""
         previous = (item.get("emailBody") or "").strip().splitlines()[:1]

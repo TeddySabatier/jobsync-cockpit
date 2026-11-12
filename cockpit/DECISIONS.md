@@ -495,3 +495,4 @@ Scope of this entry: data model, the pure due calculation, the follow-up state a
 
 - **Scope:** review detail, action bar, summary strip, sidebar, prompts, backup schema, MCP submit, bot script, tests.
 - **Not changed:** `send.ts`, the Send guards.
+- **Review of PR #95 (tester):** Reopen is also refused when a newer non-superseded application version of the job exists (only the active one may come back, so the queue and the bot's `JOB_REJECTED` guard agree). `contactSource` is stored as one line: control (CR/LF, tab), zero-width and bidi characters become a space (`cleanContactSource`). The sidebar count counts applications only, like the To do tab (follow-up drafts are not in it). The bot script carries a change request's `contactSource` over only when the recipient is unchanged. The Send dialog's same-domain note no longer calls the address domain "its own site".

@@ -146,6 +146,27 @@ export async function submitPackage(
   }
 }
 
+// contactSource is one line of bot-supplied text shown next to the recipient
+// (D-041). Control characters (CR/LF, tab), zero-width and bidi-override
+// characters become a space, so the line cannot be split, hidden or shown
+// reversed; runs of spaces collapse. Blank is null.
+// Code point ranges (inclusive): C0 / C1 controls, soft hyphen, Arabic letter
+// mark, Mongolian vowel separator, zero-width and directional marks, line /
+// paragraph separators and bidi embeddings / overrides, word joiner and bidi
+// isolates, BOM.
+const CONTACT_SOURCE_STRIP: ReadonlyArray<readonly [number, number]> = [
+  [0x00, 0x1f], [0x7f, 0x9f], [0xad, 0xad], [0x61c, 0x61c], [0x180e, 0x180e],
+  [0x200b, 0x200f], [0x2028, 0x202e], [0x2060, 0x206f], [0xfeff, 0xfeff],
+];
+const stripped = (cp: number) => CONTACT_SOURCE_STRIP.some(([lo, hi]) => cp >= lo && cp <= hi);
+export function cleanContactSource(v: string | null | undefined): string | null {
+  const s = Array.from(v ?? "", (ch) => (stripped(ch.codePointAt(0)!) ? " " : ch))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+  return s || null;
+}
+
 async function submitInTransaction(
   tx: Db,
   userId: string,
@@ -266,7 +287,7 @@ async function submitInTransaction(
       cvJson: input.cvJson ? JSON.stringify(input.cvJson) : null,
       cvFileId: input.cvFileId ?? null,
       sourceFolder: input.sourceFolder ?? null,
-      contactSource: input.contactSource?.trim() || null,
+      contactSource: cleanContactSource(input.contactSource),
       idempotencyKey: input.idempotencyKey ?? null,
     },
   });
@@ -380,17 +401,24 @@ export async function reopenPackage(userId: string, id: string) {
   await prisma.$transaction(async (tx) => {
     const pkg = await tx.applicationPackage.findFirst({
       where: { id, userId },
-      select: { jobId: true, kind: true },
+      select: { jobId: true, kind: true, version: true },
     });
     if (!pkg) throw new CockpitError("NOT_FOUND");
     // Rejecting a follow-up draft skipped its step (D-031): not undoable here.
     if (pkg.kind === "follow_up") throw new CockpitError("INVALID_STATE");
+    // Another live package of the job, or a newer non-superseded application
+    // version (e.g. a later rejected one): only the job's active application may
+    // come back, otherwise the bot's JOB_REJECTED guard (active package) and the
+    // queue would disagree about this job.
     const other = await tx.applicationPackage.findFirst({
       where: {
         jobId: pkg.jobId,
         userId,
         id: { not: id },
-        status: { in: ["pending", "approved", "changes_requested", "sent"] },
+        OR: [
+          { status: { in: ["pending", "approved", "changes_requested", "sent"] } },
+          { kind: "application", status: { not: "superseded" }, version: { gt: pkg.version } },
+        ],
       },
       select: { id: true },
     });
@@ -406,9 +434,11 @@ export async function reopenPackage(userId: string, id: string) {
 }
 
 // Number of To do applications (pending and approved), for the sidebar badge.
+// Applications only, like the To do tab (listPackagesByTab): a follow-up draft
+// is not in that list, so it must not be in the badge either.
 export function countTodo(userId: string): Promise<number> {
   return prisma.applicationPackage.count({
-    where: { userId, status: { in: QUEUE_TAB_STATUSES.todo } },
+    where: { userId, kind: "application", status: { in: QUEUE_TAB_STATUSES.todo } },
   });
 }
 

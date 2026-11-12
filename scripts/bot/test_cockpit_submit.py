@@ -818,6 +818,26 @@ class CommandTests(FolderMixin, unittest.TestCase):
         self.assertEqual(package["fitAnalysis"]["track"], "AI")
         self.assertEqual(package["fitAnalysis"]["extra"], {"keep": "me"})  # nothing the owner stored is dropped
 
+    def test_revision_keeps_the_contact_source_of_the_same_recipient_only(self):
+        # D-041 review: the source belongs to the address; a new address must not inherit it.
+        self.change_request(contactSource="https://example.com/team")
+        code, result, _ = self.revise(self.make_folder())
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.stub.calls[-1][1]["contactSource"], "https://example.com/team")
+
+    def test_revision_with_a_new_recipient_does_not_inherit_the_old_source(self):
+        self.change_request(contactSource="https://example.com/team")
+        code, result, _ = self.revise(self.make_folder(), "--to", "other@example.org")
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.stub.calls[-1][0], "submit_application_package")
+        self.assertNotIn("contactSource", self.stub.calls[-1][1])
+
+    def test_revision_with_a_new_recipient_and_its_own_source(self):
+        self.change_request(contactSource="https://example.com/team")
+        code, result, _ = self.revise(self.make_folder(), "--to", "other@example.org", "--contact-source", "posting")
+        self.assertEqual(code, 0, result)
+        self.assertEqual(self.stub.calls[-1][1]["contactSource"], "posting")
+
     def test_revision_options_override_the_package_values(self):
         self.change_request()
         self.revise(self.make_folder(), "--subject", "A new subject", "--fit", "A", "--to", "")

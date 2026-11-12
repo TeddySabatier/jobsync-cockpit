@@ -101,6 +101,76 @@ describe("reopenPackage", () => {
   });
 });
 
+describe("reopenPackage (review of PR #95)", () => {
+  it("refused when the job has a sent application", async () => {
+    // The sent one is the OLDER version, so only the live-package rule refuses.
+    const sent = await mk("sent");
+    const rejected = await mk("rejected", { jobId: sent.jobId });
+    await expect(reopenPackage(a.id, rejected.id)).rejects.toMatchObject({ code: "INVALID_STATE" });
+    expect((await row(rejected.id)).status).toBe("rejected");
+  });
+
+  it("refused for an older rejected version when a newer version is rejected too", async () => {
+    const older = await mk("rejected");
+    const newer = await mk("rejected", { jobId: older.jobId });
+    await expect(reopenPackage(a.id, older.id)).rejects.toMatchObject({ code: "INVALID_STATE" });
+    expect((await row(older.id)).status).toBe("rejected");
+    // The active (newest) one can come back.
+    expect((await reopenPackage(a.id, newer.id)).status).toBe("pending");
+  });
+
+  it("an older superseded version does not block reopening the active one", async () => {
+    const old = await mk("superseded");
+    const active = await mk("rejected", { jobId: old.jobId });
+    expect((await reopenPackage(a.id, active.id)).status).toBe("pending");
+  });
+
+  it("a rejected follow-up draft is never reopened", async () => {
+    const fu = await mk("rejected", { kind: "follow_up" });
+    await expect(reopenPackage(a.id, fu.id)).rejects.toMatchObject({ code: "INVALID_STATE" });
+    expect((await row(fu.id)).status).toBe("rejected");
+  });
+});
+
+describe("rejectPackage reason (D-041)", () => {
+  it("no reason, blank or spaces are stored as null; a reason is trimmed", async () => {
+    for (const reason of [undefined, "", "   "]) {
+      const p = await mk("pending");
+      await rejectPackage(a.id, p.id, reason);
+      expect(await row(p.id)).toMatchObject({ status: "rejected", rejectReason: null });
+    }
+    const p = await mk("pending");
+    await rejectPackage(a.id, p.id, "  Too far  ");
+    expect((await row(p.id)).rejectReason).toBe("Too far");
+  });
+});
+
+const ZW = String.fromCharCode(0x200b);
+const ZWJ = String.fromCharCode(0x200d);
+const RLO = String.fromCharCode(0x202e);
+const LS = String.fromCharCode(0x2028);
+const CR = String.fromCharCode(13);
+const LF = String.fromCharCode(10);
+const TAB = String.fromCharCode(9);
+
+describe("contactSource cleaning (review of PR #95)", () => {
+  it("CR/LF, tabs, zero-width and bidi controls become one space", async () => {
+    const base = { emailTo: "hr@example.com", emailSubject: "S", emailBody: "B", fitGrade: "A" as const };
+    const r = await submitPackage(a.id, {
+      ...base,
+      jobId: await createJobFor(prisma, a, draftId),
+      contactSource: "https://acme.example/" + CR + LF + "careers" + ZW + RLO + "gpj.exe" + TAB + "tab" + LS + "x",
+    });
+    expect(r.package.contactSource).toBe("https://acme.example/ careers gpj.exe tab x");
+    const z = await submitPackage(a.id, {
+      ...base,
+      jobId: await createJobFor(prisma, a, draftId),
+      contactSource: ZW + ZWJ + CR + LF,
+    });
+    expect(z.package.contactSource).toBeNull();
+  });
+});
+
 describe("contactSource", () => {
   it("is stored trimmed, blank becomes null, absent is null", async () => {
     const mkJob = () => createJobFor(prisma, a, draftId);
@@ -124,6 +194,28 @@ describe("link-apply from pending (no Approve needed)", () => {
     expect(job.applied).toBe(true);
   });
 
+  it("approved without a recipient can be marked applied too", async () => {
+    const p = await mk("approved", { emailTo: "" });
+    expect((await markPackageAppliedManually(a.id, p.id)).status).toBe("sent");
+  });
+
+  it("a follow-up draft without a recipient is refused (never marks the job applied)", async () => {
+    const p = await mk("pending", { kind: "follow_up", emailTo: null });
+    await expect(markPackageAppliedManually(a.id, p.id)).rejects.toMatchObject({ code: "INVALID_STATE" });
+    expect((await row(p.id)).status).toBe("pending");
+  });
+
+  it("rejected, changes_requested or locked packages are refused", async () => {
+    for (const over of [
+      { status: "rejected" },
+      { status: "changes_requested" },
+      { status: "pending", sendStartedAt: new Date() },
+    ]) {
+      const p = await mk(over.status, { emailTo: null, ...over });
+      await expect(markPackageAppliedManually(a.id, p.id)).rejects.toMatchObject({ code: "INVALID_STATE" });
+    }
+  });
+
   it("a package WITH a recipient is still refused (no email is skipped silently)", async () => {
     const p = await mk("pending");
     await expect(markPackageAppliedManually(a.id, p.id)).rejects.toMatchObject({ code: "INVALID_STATE" });
@@ -140,6 +232,13 @@ describe("countTodo", () => {
     await mk("sent");
     await mk("pending", {}, b);
     expect(await countTodo(a.id)).toBe(before + 2);
+  });
+
+  it("does not count follow-up drafts (they are not in the To do tab)", async () => {
+    const before = await countTodo(a.id);
+    await mk("pending", { kind: "follow_up" });
+    await mk("approved", { kind: "follow_up" });
+    expect(await countTodo(a.id)).toBe(before);
   });
 });
 
