@@ -11,7 +11,12 @@ vi.mock("@/lib/telemetry", () => ({
 }));
 vi.mock("@/lib/db", () => ({
   default: {
-    applicationPackage: { findFirst: vi.fn(), findMany: vi.fn(), count: vi.fn() },
+    applicationPackage: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
+      groupBy: vi.fn().mockResolvedValue([]),
+    },
     gmailAccount: { findUnique: vi.fn() },
   },
 }));

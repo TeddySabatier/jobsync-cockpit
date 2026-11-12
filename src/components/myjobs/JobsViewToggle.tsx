@@ -14,7 +14,7 @@ export function JobsViewToggle({ value, onChange }: JobsViewToggleProps) {
       <Button
         size="sm"
         variant={value === "table" ? "secondary" : "ghost"}
-        className="h-7 w-7 p-0"
+        className="h-7 w-7 p-0 max-sm:h-11 max-sm:w-11"
         title="Table view"
         aria-pressed={value === "table"}
         data-testid="jobs-view-table-btn"
@@ -26,7 +26,7 @@ export function JobsViewToggle({ value, onChange }: JobsViewToggleProps) {
       <Button
         size="sm"
         variant={value === "cards" ? "secondary" : "ghost"}
-        className="h-7 w-7 p-0"
+        className="h-7 w-7 p-0 max-sm:h-11 max-sm:w-11"
         title="Card view"
         aria-pressed={value === "cards"}
         data-testid="jobs-view-cards-btn"

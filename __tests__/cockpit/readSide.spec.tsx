@@ -196,6 +196,6 @@ describe("fit analysis", () => {
     render(<FitPanel pkg={pkgFixture()} />);
     expect(screen.getByText("Must haves")).toBeInTheDocument();
     expect(screen.queryByText("must_haves")).toBeNull();
-    expect(screen.getByTestId("panel-fit")).toHaveTextContent("Grade: Fit grade A");
+    expect(screen.getByTestId("panel-fit")).not.toHaveTextContent(/Grade/);
   });
 });

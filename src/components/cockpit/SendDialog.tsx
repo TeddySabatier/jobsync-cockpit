@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sendPackage } from "@/actions/cockpitSend.actions";
@@ -152,6 +152,13 @@ export function recipientWarning(
     : `The recipient domain (${domain}) does not match the company (${company}) or the job posting. Check that this is the right recipient.`;
 }
 
+// The address in chunks that may wrap: a break opportunity after "@" and each
+// ".", so a narrow phone breaks at a natural place, not mid-word. The chunks
+// joined give back the address.
+export function recipientParts(to: string): string[] {
+  return to.split(/(?<=[@.])/);
+}
+
 // Failure codes after which the page state changed: close the dialog.
 const CLOSE_ON = new Set<string>(["SEND_OUTCOME_UNKNOWN", "CONFLICT", "INVALID_STATE", "NOT_FOUND"]);
 
@@ -215,7 +222,7 @@ export default function SendDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Send this application</DialogTitle>
           <DialogDescription>
@@ -223,9 +230,6 @@ export default function SendDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <p className="break-all text-2xl font-semibold" data-testid="send-to">
-          {to}
-        </p>
         {warning && (
           <p
             role="alert"
@@ -234,11 +238,22 @@ export default function SendDialog({
             {warning}
           </p>
         )}
+        <p
+          className="[overflow-wrap:anywhere] text-xl font-semibold"
+          data-testid="send-to"
+        >
+          {recipientParts(to).map((part, i) => (
+            <Fragment key={i}>
+              {part}
+              <wbr />
+            </Fragment>
+          ))}
+        </p>
         {failure && (
           <p
             role="alert"
             data-testid="send-failure"
-            className="rounded border border-destructive p-2 text-sm font-medium text-destructive"
+            className="rounded border border-destructive p-2 text-sm font-medium text-destructive dark:text-red-400"
           >
             {`Not sent: ${failure.message}`}
             {failure.code === "VALIDATION" && (
@@ -257,11 +272,11 @@ export default function SendDialog({
         )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
           <dt className="text-muted-foreground">From</dt>
-          <dd className="break-all">{detail.gmail?.email ?? "not connected"}</dd>
+          <dd className="[overflow-wrap:anywhere]">{detail.gmail?.email ?? "not connected"}</dd>
           <dt className="text-muted-foreground">Subject</dt>
           <dd className="break-words">{pkg.emailSubject}</dd>
           <dt className="text-muted-foreground">Attachment</dt>
-          <dd className="break-all">
+          <dd className="[overflow-wrap:anywhere]">
             {detail.attachment
               ? `${detail.attachment.fileName} (${formatBytes(detail.attachment.size)})`
               : "None"}
@@ -269,7 +284,7 @@ export default function SendDialog({
           {detail.letterAttachment && (
             <>
               <dt className="text-muted-foreground">Cover letter</dt>
-              <dd className="break-all" data-testid="send-letter-attachment">
+              <dd className="[overflow-wrap:anywhere]" data-testid="send-letter-attachment">
                 {detail.letterAttachment.fileName} (made from the letter text)
               </dd>
             </>

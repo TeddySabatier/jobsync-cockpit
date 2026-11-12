@@ -37,6 +37,7 @@ import {
   undoFollowUpOutcome,
 } from "@/lib/cockpit/followUps";
 import {
+  countPackagesByTab,
   listJobVersions,
   listPackagesByTab,
   rejectPackage,
@@ -164,6 +165,40 @@ describe("read sites list applications only", () => {
     const fus = await listPackagesByTab(userA, "todo", "follow_up");
     expect(fus.map((r) => r.id)).toContain(fu.id);
     expect(fus.map((r) => r.id)).not.toContain(app.id);
+  });
+
+  it("countPackagesByTab (D-040 tab counts) counts applications only, per user, matching each tab list", async () => {
+    const jobId = await newJob(userA, appliedId);
+    await mk(jobId, "application", 1, "pending");
+    await mk(jobId, "follow_up", 1, "pending");
+    await mk(jobId, "follow_up", 2, "approved");
+    const jobB = await newJob(userB, appliedId);
+    await mk(jobB, "application", 1, "pending", {}, userB);
+    const counts = await countPackagesByTab(userA);
+    for (const tab of ["todo", "changes", "sent", "rejected"] as const) {
+      expect(counts[tab]).toBe((await listPackagesByTab(userA, tab)).length);
+    }
+    const fuCounts = await countPackagesByTab(userA, "follow_up");
+    expect(fuCounts.todo).toBe((await listPackagesByTab(userA, "todo", "follow_up")).length);
+    expect((await countPackagesByTab(userB)).todo).toBe(1);
+  });
+
+  it("listPackagesByTab To do puts a send-unknown row first, then approved, then pending", async () => {
+    const u = await seedUser("order@example.com");
+    const j1 = await newJob(u, appliedId);
+    const j2 = await newJob(u, appliedId);
+    const j3 = await newJob(u, appliedId);
+    const pending = await mk(j1, "application", 1, "pending", { createdAt: new Date("2026-03-03T00:00:00Z") }, u);
+    const approved = await mk(j2, "application", 1, "approved", { createdAt: new Date("2026-03-02T00:00:00Z") }, u);
+    const unknown = await mk(
+      j3,
+      "application",
+      1,
+      "approved",
+      { createdAt: new Date("2026-03-01T00:00:00Z"), sendStartedAt: new Date(), sendOutcome: "unknown" },
+      u,
+    );
+    expect((await listPackagesByTab(u, "todo")).map((r) => r.id)).toEqual([unknown.id, approved.id, pending.id]);
   });
 
   it("listJobVersions lists one kind; versions are separate sequences", async () => {

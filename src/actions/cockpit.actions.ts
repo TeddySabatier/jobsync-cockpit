@@ -13,6 +13,7 @@ import { findGmailPublic } from "@/lib/cockpit/connectedAccount";
 import {
   QUEUE_TAB_STATUSES,
   approvePackage as approvePackageSvc,
+  countPackagesByTab,
   getPackageWithJob,
   listJobVersions,
   listPackagesByTab,
@@ -76,7 +77,7 @@ export async function markPackageAppliedManually(id: string) {
 export async function getReviewQueue(tab: QueueTab) {
   return run(async (userId) => {
     const parsedTab = parseTab(tab);
-    const [rows, gmail, approvedWithEmail] = await Promise.all([
+    const [rows, gmail, approvedWithEmail, counts] = await Promise.all([
       listPackagesByTab(userId, parsedTab),
       findGmailPublic(userId),
       prisma.applicationPackage.count({
@@ -86,9 +87,11 @@ export async function getReviewQueue(tab: QueueTab) {
           AND: [{ emailTo: { not: null } }, { emailTo: { not: "" } }],
         },
       }),
+      countPackagesByTab(userId),
     ]);
     return {
       rows,
+      counts,
       gmail: gmail ? { email: gmail.email } : null,
       gmailCalloutNeeded: !gmail && approvedWithEmail > 0,
     };

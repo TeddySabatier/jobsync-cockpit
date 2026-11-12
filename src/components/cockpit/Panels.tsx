@@ -1,15 +1,35 @@
 "use client";
-import { useMemo } from "react";
-import { format } from "date-fns";
-import { Download, ExternalLink } from "lucide-react";
+import { useMemo, useState } from "react";
+import { format, formatDistanceToNow } from "date-fns";
+import {
+  Check,
+  CircleHelp,
+  Download,
+  ExternalLink,
+  Info,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import { TipTapContentViewer } from "@/components/TipTapContentViewer";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import FitGradeBadge from "./FitGradeBadge";
-import { formatUrl } from "@/lib/utils";
+import { Progress } from "@/components/ui/progress";
+import { cn, formatUrl } from "@/lib/utils";
+import {
+  attemptView,
+  fitKind,
+  fitLabel,
+  fitMax,
+  fitScoreView,
+  humanizeKey,
+  splitHistory,
+  type HistoryTone,
+} from "./panelModels";
 import { renderLetterMarkdown } from "@/lib/cockpit/markdown";
 import type { getPackageDetail } from "@/actions/cockpit.actions";
 
@@ -122,15 +142,7 @@ function PdfLinks({
   );
 }
 
-// "must_haves" and "mustHaves" -> "Must haves".
-export function humanizeKey(key: string): string {
-  const text = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/[_-]+/g, " ")
-    .trim()
-    .toLowerCase();
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : key;
-}
+export { humanizeKey };
 
 export function PostingPanel({ pkg }: { pkg: PackageDetail["package"] }) {
   const { jobUrl, description } = pkg.job;
@@ -217,6 +229,53 @@ function FitValue({ value, label }: { value: unknown; label: string }) {
   return <Pre label={label}>{JSON.stringify(value, null, 2)}</Pre>;
 }
 
+// "87 / 100" with a meter. The grade badge lives in the header and the queue
+// row, not repeated here.
+function FitScore({ view, label }: { view: { percent: number; text: string }; label: string }) {
+  const value = view.percent;
+  return (
+    <div className="flex items-center gap-3">
+      <span className="whitespace-nowrap font-semibold tabular-nums">
+        {view.text}
+      </span>
+      <Progress
+        value={value}
+        aria-valuenow={value}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+        className="h-2 max-w-48 flex-1"
+      />
+    </div>
+  );
+}
+
+// Strengths get a green check, gaps an amber warning; the icon is decoration,
+// the heading above says which list it is.
+function FitList({
+  items,
+  kind,
+}: {
+  items: string[];
+  kind: "strengths" | "gaps";
+}) {
+  const Icon = kind === "strengths" ? Check : TriangleAlert;
+  const tone =
+    kind === "strengths"
+      ? "text-green-700 dark:text-green-400"
+      : "text-amber-700 dark:text-amber-400";
+  return (
+    <ul className="flex flex-col gap-1">
+      {items.map((v, i) => (
+        <li key={i} className="flex items-start gap-2 break-words">
+          <Icon aria-hidden className={cn("mt-0.5 h-4 w-4 shrink-0", tone)} />
+          <span className="min-w-0">{v}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function FitPanel({ pkg }: { pkg: PackageDetail["package"] }) {
   let parsed: unknown = null;
   if (pkg.fitAnalysis) {
@@ -227,25 +286,32 @@ export function FitPanel({ pkg }: { pkg: PackageDetail["package"] }) {
     }
   }
   const isObject = !!parsed && typeof parsed === "object" && !Array.isArray(parsed);
+  const max = isObject ? fitMax(parsed as Record<string, unknown>) : null;
+  // The grade is in the detail header (and the queue row); not repeated here.
   return (
     <Panel title="Fit analysis" testId="panel-fit">
-      {pkg.fitGrade && (
-        <p className="mb-2 text-sm">
-          Grade: <FitGradeBadge grade={pkg.fitGrade} />
-        </p>
-      )}
       {!pkg.fitAnalysis ? (
         <p className="text-sm text-muted-foreground">No fit analysis.</p>
       ) : isObject ? (
-        <dl className="flex flex-col gap-2 text-sm">
-          {Object.entries(parsed as Record<string, unknown>).map(([k, v]) => (
-            <div key={k}>
-              <dt className="font-medium">{humanizeKey(k)}</dt>
-              <dd className="mt-0.5">
-                <FitValue value={v} label={`Fit analysis: ${humanizeKey(k)}`} />
-              </dd>
-            </div>
-          ))}
+        <dl className="flex flex-col gap-3 text-sm">
+          {Object.entries(parsed as Record<string, unknown>).map(([k, v]) => {
+            const kind = fitKind(k, v, max);
+            const label = fitLabel(k);
+            return (
+              <div key={k}>
+                <dt className="font-medium">{label}</dt>
+                <dd className="mt-0.5">
+                  {kind === "score" ? (
+                    <FitScore view={fitScoreView(v, max)!} label={label} />
+                  ) : kind === "strengths" || kind === "gaps" ? (
+                    <FitList items={v as string[]} kind={kind} />
+                  ) : (
+                    <FitValue value={v} label={`Fit analysis: ${label}`} />
+                  )}
+                </dd>
+              </div>
+            );
+          })}
         </dl>
       ) : (
         <Pre label="Fit analysis">{prettyJson(pkg.fitAnalysis)}</Pre>
@@ -307,10 +373,21 @@ export function LetterPanel({
             className="h-[560px] w-full rounded border"
           />
           <PdfLinks href={pdfUrl} download={fileName ?? true} />
-          <p className="mb-1 mt-4 text-xs text-muted-foreground">Letter text:</p>
-          <ScrollRegion label="Letter text">
-            <TipTapContentViewer content={html} label="Cover letter" />
-          </ScrollRegion>
+          {/* The PDF above is made from this text, so the text starts closed.
+              forceMount keeps it in the DOM (hidden) for tests and find-in-page
+              is not needed: it is the same content as the PDF. */}
+          <Collapsible className="mt-3">
+            <CollapsibleTrigger className="inline-flex min-h-11 items-center text-sm font-medium underline">
+              Letter text
+            </CollapsibleTrigger>
+            <CollapsibleContent forceMount className="mt-1 data-[state=closed]:hidden">
+              <ScrollRegion label="Letter text">
+                <div className="[&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0.5">
+                  <TipTapContentViewer content={html} label="Cover letter" />
+                </div>
+              </ScrollRegion>
+            </CollapsibleContent>
+          </Collapsible>
         </>
       ) : (
         <p className="text-sm text-muted-foreground">No cover letter.</p>
@@ -355,50 +432,96 @@ export function PreviousReviewInfo({ pkg }: { pkg: PackageDetail["package"] }) {
   );
 }
 
-// Plain sentences for what happened; never the raw outcome string.
-const ATTEMPT_LABELS: Record<string, string> = {
-  sent: "Gmail accepted the message",
-  failed: "Not sent: Gmail or the app refused before the message left",
-  ambiguous: "Result unknown: the message may or may not have gone out",
-  record_failed:
-    "Gmail accepted the message, but the app could not record it. Sending is blocked until you check your Gmail Sent folder",
-  late_recorded:
-    "Gmail accepted the message after this application was no longer waiting to be sent. It was recorded as sent",
-  lock_lost:
-    "Gmail accepted the message after you had released the block on sending. Check your Gmail Sent folder before sending again",
-  marked_sent: "You marked it as sent (manual)",
-  lock_released: "You released the block on sending (the email was not in Gmail)",
+const TONE_ICON: Record<HistoryTone, { Icon: typeof Check; cls: string; word: string }> = {
+  ok: { Icon: Check, cls: "text-green-600 dark:text-green-400", word: "Succeeded" },
+  fail: { Icon: X, cls: "text-red-600 dark:text-red-400", word: "Failed" },
+  unknown: { Icon: CircleHelp, cls: "text-amber-600 dark:text-amber-400", word: "Needs a check" },
+  neutral: { Icon: Info, cls: "text-muted-foreground", word: "Info" },
+};
+
+const TONE_BADGE: Record<HistoryTone, string> = {
+  ok: "border-transparent bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
+  fail: "border-transparent bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
+  unknown: "border-transparent bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300",
+  neutral: "border-transparent bg-muted text-muted-foreground",
 };
 
 // Read-only history of every send attempt on this package, oldest first
-// (D-028). It backs the Mark as sent / Release lock decision.
+// (D-028). It backs the Mark as sent / Release lock decision. Each row has an
+// outcome icon and badge, a relative time (absolute in the tooltip) and the
+// reason as muted small text; past 3 rows the earlier ones collapse (D-040).
 export function SendHistoryPanel({
   history,
 }: {
   history: PackageDetail["sendHistory"];
 }) {
+  const [expanded, setExpanded] = useState(false);
   if (history.length === 0) return null;
+  const { hidden, visible } = splitHistory(history, expanded);
   return (
     <Panel title="Send history" testId="panel-send-history">
       <p className="mb-2 text-xs text-muted-foreground">
         What was attempted and what happened, oldest first.
       </p>
-      <ol className="flex flex-col gap-2 text-sm">
-        {history.map((a) => (
-          <li key={a.id} data-testid="send-attempt">
-            <span className="font-medium">
-              {format(new Date(a.createdAt), "PP p")}
-            </span>
-            {": "}
-            {ATTEMPT_LABELS[a.outcome] ?? "Unrecognized entry"}
-            {a.reason && ` (${a.reason})`}
-            {a.gmailMessageId && (
-              <span className="block break-all text-xs text-muted-foreground">
-                Gmail message id: {a.gmailMessageId}
-              </span>
-            )}
-          </li>
-        ))}
+      {hidden > 0 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mb-2 min-h-11 px-2 md:min-h-9"
+          aria-expanded={false}
+          onClick={() => setExpanded(true)}
+        >
+          {`Show ${hidden} earlier ${hidden === 1 ? "attempt" : "attempts"}`}
+        </Button>
+      )}
+      <ol className="flex flex-col gap-3 text-sm">
+        {visible.map((a) => {
+          const v = attemptView(a.outcome);
+          const { Icon, cls, word } = TONE_ICON[v.tone];
+          const when = new Date(a.createdAt);
+          return (
+            <li key={a.id} data-testid="send-attempt" className="flex gap-2">
+              <Icon aria-hidden className={cn("mt-0.5 h-4 w-4 shrink-0", cls)} />
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <Badge variant="outline" className={TONE_BADGE[v.tone]}>
+                    <span className="sr-only">{`${word}: `}</span>
+                    {v.badge}
+                  </Badge>
+                  {/* The relative text and the local-time title can differ
+                      between the server render and the browser (clock, zone). */}
+                  <time
+                    suppressHydrationWarning
+                    dateTime={when.toISOString()}
+                    title={format(when, "PP p")}
+                    className="text-xs text-muted-foreground"
+                  >
+                    {formatDistanceToNow(when, { addSuffix: true })}
+                  </time>
+                </p>
+                {/* Visible absolute time: the title tooltip does not exist on touch. */}
+                <p
+                  suppressHydrationWarning
+                  data-testid="send-attempt-abs"
+                  className="text-xs text-muted-foreground"
+                >
+                  {format(when, "PP p")}
+                </p>
+                <p className="mt-0.5">{v.sentence}</p>
+                {a.reason && (
+                  <p className="break-words text-xs text-muted-foreground">
+                    {a.reason}
+                  </p>
+                )}
+                {a.gmailMessageId && (
+                  <span className="block break-all text-xs text-muted-foreground">
+                    Gmail message id: {a.gmailMessageId}
+                  </span>
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ol>
     </Panel>
   );

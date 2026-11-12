@@ -140,7 +140,7 @@ export function JobsToolbar({
         <Button
           size="sm"
           variant="outline"
-          className="h-8 w-8 p-0"
+          className="h-8 w-8 p-0 max-sm:h-11 max-sm:w-11"
           disabled={initialLoading}
           title="Reload jobs"
           onClick={onReload}
@@ -157,7 +157,7 @@ export function JobsToolbar({
         />
         <Select value={filterKey} onValueChange={onFilterChange}>
           <SelectTrigger
-            className="w-[120px] h-8"
+            className="w-[120px] h-8 max-sm:h-11"
             data-testid="job-filter-select"
           >
             <ListFilter className="h-3.5 w-3.5" />
@@ -182,7 +182,8 @@ export function JobsToolbar({
         <Button
           size="sm"
           variant="outline"
-          className="h-8 gap-1"
+          className="h-8 gap-1 max-sm:h-11 max-sm:min-w-11"
+          title="Export jobs as CSV"
           disabled={initialLoading}
           onClick={onDownload}
         >

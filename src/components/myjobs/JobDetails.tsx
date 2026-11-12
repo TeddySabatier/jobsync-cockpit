@@ -27,6 +27,7 @@ import { Button } from "../ui/button";
 import {
   Archive,
   ArrowLeft,
+  ChevronRight,
   FileText,
   MoreVertical,
   Pencil,
@@ -74,7 +75,7 @@ import { toastArchived } from "./archiveUndo";
 import { archiveJobById, deleteJobById, updateJobStatus } from "@/actions/job.actions";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { ClaudePromptButton } from "@/components/cockpit/ClaudePromptButton";
-import { statusLabel } from "@/components/cockpit/statusLabels";
+import PackageStatusBadge from "@/components/cockpit/StatusBadge";
 
 type JobDetailsProps = {
   job: JobResponse;
@@ -219,11 +220,17 @@ function JobDetails({
 
   return (
     <>
-      <div className="flex justify-between">
-        <Button title="Go Back" size="sm" variant="outline" onClick={goBack}>
+      <div className="flex justify-between gap-2">
+        <Button
+          title="Go Back"
+          size="sm"
+          variant="outline"
+          className="shrink-0 max-sm:h-11 max-sm:w-11"
+          onClick={goBack}
+        >
           <ArrowLeft />
         </Button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {cockpitEnabled && (
             <ClaudePromptButton
               input={{
@@ -245,7 +252,7 @@ function JobDetails({
           <Button
             size="sm"
             variant="outline"
-            className="h-8 gap-1 cursor-pointer"
+            className="h-8 gap-1 cursor-pointer max-sm:h-11 max-sm:min-w-11"
             onClick={() => requestChat(`Match my resume to ${jobLabel}`)}
           >
             <Sparkles className="h-3.5 w-3.5" />
@@ -256,7 +263,7 @@ function JobDetails({
           <Button
             size="sm"
             variant="outline"
-            className="h-8 gap-1 cursor-pointer"
+            className="h-8 gap-1 cursor-pointer max-sm:h-11 max-sm:min-w-11"
             data-testid="generate-cover-letter-btn"
             disabled={!!coverLetterBlockedReason}
             title={coverLetterBlockedReason}
@@ -273,6 +280,7 @@ function JobDetails({
                 aria-haspopup="true"
                 size="icon"
                 variant="ghost"
+                className="max-sm:h-11 max-sm:w-11"
                 data-testid="job-details-actions-menu-btn"
               >
                 <MoreVertical className="h-4 w-4" />
@@ -333,8 +341,8 @@ function JobDetails({
       </div>
       {job?.id && (
         <Card className="col-span-3">
-          <CardHeader className="flex-row items-center justify-between relative">
-            <div>
+          <CardHeader className="relative flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
+            <div className="min-w-0">
               {job?.Company?.label}
               <CardTitle>{job?.JobTitle?.label}</CardTitle>
               <CardDescription>
@@ -344,12 +352,15 @@ function JobDetails({
                 {job?.salaryRange && ` · ${job.salaryRange}`}
               </CardDescription>
             </div>
-            <div className="flex flex-col items-end gap-2">
-              <div className="flex items-center gap-1">
+            <div className="flex flex-col gap-2 sm:items-end">
+              {/* Edit on the left, the destructive-ish actions pushed to the
+                  other edge (ml-auto) and 44px on phone, so a mis-tap on Edit
+                  cannot archive the job. */}
+              <div className="flex w-full items-center gap-1 sm:w-auto">
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 px-2"
+                  className="h-8 px-2 max-sm:h-11 max-sm:min-w-11"
                   onClick={onEditJob}
                   aria-label="Edit job"
                   data-testid="job-details-edit-btn"
@@ -361,7 +372,7 @@ function JobDetails({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 px-2"
+                    className="ml-auto h-8 px-2 max-sm:h-11 max-sm:min-w-11 sm:ml-1"
                     onClick={onArchiveJob}
                     aria-label="Archive job"
                     data-testid="job-details-archive-btn"
@@ -374,7 +385,7 @@ function JobDetails({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-8 px-2 text-destructive hover:text-destructive"
+                    className={`h-8 px-2 text-destructive hover:text-destructive max-sm:h-11 max-sm:min-w-11 ${isArchived ? "ml-auto sm:ml-1" : "ml-3 sm:ml-1"}`}
                     onClick={() => setDeleteAlertOpen(true)}
                     aria-label="Delete job"
                     data-testid="job-details-delete-btn"
@@ -406,12 +417,13 @@ function JobDetails({
             </div>
           </CardHeader>
           {job.jobUrl && (
-            <div className="my-3 ml-4">
-              <span className="font-semibold mr-2">Job URL:</span>
+            <div className="my-3 ml-4 mr-4 flex min-w-0 flex-col gap-0.5 sm:flex-row sm:gap-2">
+              <span className="font-semibold">Job URL:</span>
               <a
                 href={formatUrl(job.jobUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
+                className="min-w-0 [overflow-wrap:anywhere]"
               >
                 {job.jobUrl}
               </a>
@@ -451,14 +463,18 @@ function JobDetails({
             </div>
           )}
           {cockpitPackage && (
-            <div className="mx-4 my-3 flex items-center justify-between gap-2 rounded-lg border p-3 text-sm">
-              <span className="font-medium">Application package</span>
+            <div className="mx-4 my-3 rounded-lg border text-sm">
               <Link
                 href={`/dashboard/review/${cockpitPackage.id}`}
-                className="underline"
+                className="flex min-h-11 items-center justify-between gap-2 rounded-lg p-3 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 data-testid="job-details-package-link"
               >
-                {`v${cockpitPackage.version} · ${statusLabel(cockpitPackage.status)}`}
+                <span className="font-medium">Application package</span>
+                <span className="flex items-center gap-2">
+                  <span className="text-muted-foreground">{`v${cockpitPackage.version}`}</span>
+                  <PackageStatusBadge status={cockpitPackage.status} />
+                  <ChevronRight aria-hidden className="h-4 w-4 text-muted-foreground" />
+                </span>
               </Link>
             </div>
           )}
