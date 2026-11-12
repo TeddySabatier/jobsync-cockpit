@@ -97,7 +97,7 @@ function MyJobsTable({
                   <div className="flex items-center gap-1.5">
                     <Link
                       href={`/dashboard/myjobs/${job?.id}`}
-                      className="block min-w-0 truncate max-md:inline-flex max-md:min-h-11 max-md:items-center"
+                      className="block min-w-0 truncate max-md:flex-1 max-md:py-3 max-md:leading-5"
                       title={job.JobTitle?.label}
                     >
                       {job.JobTitle?.label}

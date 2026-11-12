@@ -113,7 +113,7 @@ export default function SendOutcomePanel({
           aria-expanded={why}
           aria-controls="send-outcome-why"
           onClick={() => setWhy((w) => !w)}
-          className="inline-flex min-h-11 items-center text-sm underline md:hidden"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center text-sm underline md:hidden"
         >
           {why ? "Hide" : "Why?"}
         </button>

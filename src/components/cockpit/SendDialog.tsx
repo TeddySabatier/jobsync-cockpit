@@ -272,11 +272,11 @@ export default function SendDialog({
         )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
           <dt className="text-muted-foreground">From</dt>
-          <dd className="break-all">{detail.gmail?.email ?? "not connected"}</dd>
+          <dd className="[overflow-wrap:anywhere]">{detail.gmail?.email ?? "not connected"}</dd>
           <dt className="text-muted-foreground">Subject</dt>
           <dd className="break-words">{pkg.emailSubject}</dd>
           <dt className="text-muted-foreground">Attachment</dt>
-          <dd className="break-all">
+          <dd className="[overflow-wrap:anywhere]">
             {detail.attachment
               ? `${detail.attachment.fileName} (${formatBytes(detail.attachment.size)})`
               : "None"}
@@ -284,7 +284,7 @@ export default function SendDialog({
           {detail.letterAttachment && (
             <>
               <dt className="text-muted-foreground">Cover letter</dt>
-              <dd className="break-all" data-testid="send-letter-attachment">
+              <dd className="[overflow-wrap:anywhere]" data-testid="send-letter-attachment">
                 {detail.letterAttachment.fileName} (made from the letter text)
               </dd>
             </>

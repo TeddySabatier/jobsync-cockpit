@@ -306,6 +306,19 @@ describe("send-outcome panel (AC-33)", () => {
     expect(releaseSendLock).toHaveBeenCalledExactlyOnceWith("p1");
   });
 
+  it("only the unblock confirm is destructive-styled; the mark-as-sent confirm is not", async () => {
+    render(<ActionBar detail={unknown()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Mark as sent (manual)" }));
+    expect(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Mark as sent" }).className,
+    ).not.toMatch(/bg-destructive/);
+    await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Not sent: unblock" }));
+    expect(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Unblock sending" }).className,
+    ).toMatch(/bg-destructive/);
+  });
+
   it("a fresh lock without outcome shows 'Sending…', no actions", () => {
     render(<ActionBar detail={detail({ sendStartedAt: new Date() })} />);
     expect(screen.getByRole("status")).toHaveTextContent(/Sending…/);

@@ -225,7 +225,7 @@ function JobDetails({
           title="Go Back"
           size="sm"
           variant="outline"
-          className="max-sm:h-11 max-sm:w-11"
+          className="shrink-0 max-sm:h-11 max-sm:w-11"
           onClick={goBack}
         >
           <ArrowLeft />

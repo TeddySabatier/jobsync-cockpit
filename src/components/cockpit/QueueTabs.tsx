@@ -24,7 +24,7 @@ export default function QueueTabs({
             href={`/dashboard/review?tab=${t.value}`}
             aria-current={t.value === tab ? "page" : undefined}
             className={cn(
-              "inline-flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "inline-flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
               t.value === tab
                 ? "bg-accent text-foreground"
                 : "text-muted-foreground",
@@ -34,7 +34,7 @@ export default function QueueTabs({
             {typeof count === "number" && (
               <span
                 data-testid="tab-count"
-                className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground"
+                className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-foreground"
               >
                 {count}
               </span>

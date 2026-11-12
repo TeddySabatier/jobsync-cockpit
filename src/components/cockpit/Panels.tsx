@@ -490,7 +490,10 @@ export function SendHistoryPanel({
                     <span className="sr-only">{`${word}: `}</span>
                     {v.badge}
                   </Badge>
+                  {/* The relative text and the local-time title can differ
+                      between the server render and the browser (clock, zone). */}
                   <time
+                    suppressHydrationWarning
                     dateTime={when.toISOString()}
                     title={format(when, "PP p")}
                     className="text-xs text-muted-foreground"

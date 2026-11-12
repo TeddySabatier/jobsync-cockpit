@@ -96,7 +96,7 @@ export default function QueueRow({
             <ReadinessChip key={c} label={c} />
           ))}
         </div>
-        <div className="min-w-0 text-sm text-muted-foreground @md/main:w-64 @md/main:text-right">
+        <div className="min-w-0 text-sm text-muted-foreground @md/main:ml-auto @md/main:w-64 @md/main:text-right">
           <p className="truncate" title={row.emailTo?.trim() || undefined}>
             {row.emailTo?.trim() || "Apply via link"}
           </p>

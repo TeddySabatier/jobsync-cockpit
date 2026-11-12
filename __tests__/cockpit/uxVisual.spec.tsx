@@ -250,6 +250,9 @@ describe("send history rows", () => {
     expect(time.getAttribute("title")).toBeTruthy();
     expect(time.textContent).toMatch(/ago/);
     expect(screen.getByText("Gmail rejected the message")).toHaveClass("text-xs");
+    // The icon is aria-hidden; the outcome tone is spoken as sr-only text.
+    expect(first.textContent).toMatch(/^Failed: Not sent/);
+    expect(screen.getAllByTestId("send-attempt")[2].textContent).toMatch(/^Succeeded: Sent/);
 
     await userEvent.click(screen.getByRole("button", { name: "Show 2 earlier attempts" }));
     expect(screen.getAllByTestId("send-attempt")).toHaveLength(5);
@@ -326,6 +329,9 @@ describe("TextDialog", () => {
     const { rerender } = render(<TextDialog {...base} />);
     expect(screen.getByRole("button", { name: "Reject package" })).not.toHaveAttribute(
       "data-destructive",
+    );
+    expect(screen.getByRole("button", { name: "Reject package" }).className).not.toMatch(
+      /bg-destructive/,
     );
     rerender(<TextDialog {...base} destructive />);
     const submit = screen.getByRole("button", { name: "Reject package" });
