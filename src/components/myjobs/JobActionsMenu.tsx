@@ -1,5 +1,5 @@
 "use client";
-import { ListCollapse, MoreVertical, Pencil, StickyNote, Tags, Trash } from "lucide-react";
+import { Archive, ListCollapse, MoreVertical, Pencil, StickyNote, Tags, Trash } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
@@ -25,6 +25,7 @@ type JobActionsMenuProps = {
   onChangeJobStatus: (id: string, status: JobStatus) => void;
   onAddNote: (jobId: string) => void;
   onDeleteJob: (jobId: string) => void;
+  onArchiveJob?: (jobId: string) => void;
 };
 
 export function JobActionsMenu({
@@ -34,6 +35,7 @@ export function JobActionsMenu({
   onChangeJobStatus,
   onAddNote,
   onDeleteJob,
+  onArchiveJob,
 }: JobActionsMenuProps) {
   const router = useRouter();
 
@@ -91,13 +93,25 @@ export function JobActionsMenu({
             </DropdownMenuPortal>
           </DropdownMenuSub>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="text-red-600 cursor-pointer"
-            onClick={() => onDeleteJob(job.id)}
-          >
-            <Trash className="mr-2 h-4 w-4" />
-            Delete
-          </DropdownMenuItem>
+          {onArchiveJob && job.Status?.value !== "archived" && (
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onClick={() => onArchiveJob(job.id)}
+            >
+              <Archive className="mr-2 h-4 w-4" />
+              Archive
+            </DropdownMenuItem>
+          )}
+          {/* A job with packages cannot be deleted (D-026): Archive only. */}
+          {!(job._count?.applicationPackages && job._count.applicationPackages > 0) && (
+            <DropdownMenuItem
+              className="text-red-600 cursor-pointer"
+              onClick={() => onDeleteJob(job.id)}
+            >
+              <Trash className="mr-2 h-4 w-4" />
+              Delete
+            </DropdownMenuItem>
+          )}
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>

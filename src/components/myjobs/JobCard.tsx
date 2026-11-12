@@ -15,6 +15,7 @@ type JobCardProps = {
   onChangeJobStatus: (id: string, status: JobStatus) => void;
   onAddNote: (jobId: string) => void;
   onDeleteJob: (jobId: string) => void;
+  onArchiveJob?: (jobId: string) => void;
 };
 
 export function JobCard({
@@ -24,6 +25,7 @@ export function JobCard({
   onChangeJobStatus,
   onAddNote,
   onDeleteJob,
+  onArchiveJob,
 }: JobCardProps) {
   const notesCount = job._count?.Notes ?? 0;
 
@@ -102,6 +104,7 @@ export function JobCard({
           onChangeJobStatus={onChangeJobStatus}
           onAddNote={onAddNote}
           onDeleteJob={onDeleteJob}
+          onArchiveJob={onArchiveJob}
         />
       </div>
     </div>

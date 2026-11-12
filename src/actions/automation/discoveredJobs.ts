@@ -222,6 +222,9 @@ export async function clearDiscoveredJobs(options: {
         userId: user.id,
         automationId,
         discoveryStatus: { in: statuses },
+        // Never delete the history of what was sent (D-026): a discovered job
+        // that already has a package is kept.
+        applicationPackages: { none: {} },
       },
     });
 

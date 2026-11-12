@@ -3,10 +3,12 @@ import { useState } from "react";
 import { Card, CardContent, CardFooter } from "../ui/card";
 import { Loader } from "lucide-react";
 import {
+  archiveJobById,
   deleteJobById,
   getJobDetails,
   updateJobStatus,
 } from "@/actions/job.actions";
+import { toastArchived } from "./archiveUndo";
 import { toastError, toastSuccess } from "@/lib/toast";
 import {
   Company,
@@ -97,6 +99,16 @@ function JobsContainer({
     reloadJobs();
   };
 
+  const onArchiveJob = async (jobId: string) => {
+    const { success, message, previousStatus } = await archiveJobById(jobId);
+    if (success) {
+      toastArchived(previousStatus, jobId, reloadJobs);
+    } else {
+      toastError(message);
+    }
+    reloadJobs();
+  };
+
   const onEditJob = async (jobId: string) => {
     const { job, success, message } = await getJobDetails(jobId);
     if (!success) {
@@ -167,6 +179,7 @@ function JobsContainer({
                 jobs={jobs}
                 jobStatuses={statuses}
                 deleteJob={onDeleteJob}
+                archiveJob={onArchiveJob}
                 editJob={onEditJob}
                 onChangeJobStatus={onChangeJobStatus}
                 onAddNote={onAddNote}
@@ -176,6 +189,7 @@ function JobsContainer({
                 jobs={jobs}
                 jobStatuses={statuses}
                 deleteJob={onDeleteJob}
+                archiveJob={onArchiveJob}
                 editJob={onEditJob}
                 onChangeJobStatus={onChangeJobStatus}
                 onAddNote={onAddNote}

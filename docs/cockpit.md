@@ -187,3 +187,7 @@ After any failure except `UNAUTHENTICATED` and `COCKPIT_DISABLED` the page is re
 | `no_refresh_token` | Retry connect (consent/offline access) |
 
 Further detail: `cockpit/SPEC.md` and `cockpit/DECISIONS.md` (e.g. D-010 reconnect).
+
+## Archive instead of delete (D-026)
+
+A job that has an application package cannot be deleted: the Delete action is hidden for it, a direct delete is refused with "Archive it instead", and the database itself refuses (`ApplicationPackage.job` is `ON DELETE RESTRICT`), so the history of what was sent is never lost. Use **Archive** (job page, jobs list menu, or "Change status" to Archived). Archived jobs are hidden from the default jobs list; pick **Archived** in the filter to see them. Their Review history is untouched, and changing the status back restores them. A job with no package can still be deleted. Archived jobs still count in the dashboard stats and charts and in MCP `list_jobs` (their history is real); only the jobs list hides them. The archive toast has an **Undo** that restores the previous status. Backup and restore are unaffected. Deleting a whole user account that owns jobs with packages is not supported until those packages are removed first.

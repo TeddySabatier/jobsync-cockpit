@@ -58,6 +58,8 @@ export async function POST(req: NextRequest) {
   // Delete jobs, resumes and tasks first (they/their sections reference the
   // Library items), so those items become unused and eligible for deletion.
   for (const id of jobIds) {
+    // Test-only: packages (and their sent emails) go first, the job delete is restricted (D-026).
+    await prisma.applicationPackage.deleteMany({ where: { jobId: id, userId } });
     await prisma.job.deleteMany({ where: { id, userId } });
   }
   for (const title of resumes) {
