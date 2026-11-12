@@ -107,7 +107,8 @@ test.describe("send failures", () => {
     await expect(confirm).toContainText("in your Gmail Sent folder");
     await confirm.getByRole("button", { name: "Mark as sent" }).click();
     await expect(page.locator("header").getByText("Sent", { exact: true })).toBeVisible();
-    expect(fakeSends()).toHaveLength(1);
+    // Only this package's sends: a slow earlier request may still log late (as above).
+    expect(fakeSends().filter((e) => e.to === pkg.to)).toHaveLength(1);
     const job = await bot.call("get_job", { jobId: pkg.jobId });
     expect(job.json?.status).toBe("applied");
   });
