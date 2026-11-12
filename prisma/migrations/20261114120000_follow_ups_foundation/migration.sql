@@ -3,7 +3,7 @@
 -- so every existing row stays as it is: kind = application for all of them.
 
 -- ApplicationPackage: a package is an application or a follow-up to one.
-ALTER TABLE "ApplicationPackage" ADD COLUMN "kind" TEXT NOT NULL DEFAULT application;
+ALTER TABLE "ApplicationPackage" ADD COLUMN "kind" TEXT NOT NULL DEFAULT 'application';
 ALTER TABLE "ApplicationPackage" ADD COLUMN "replyToPackageId" TEXT;
 
 -- Versions are numbered per (job, kind). The old unique index is a subset of
