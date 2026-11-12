@@ -45,7 +45,7 @@ export default function RejectDialog({
               type="button"
               variant="outline"
               size="sm"
-              className="h-9"
+              className="h-9 aria-pressed:border-primary aria-pressed:bg-primary/10"
               aria-pressed={text === chip}
               onClick={() => setText(text === chip ? "" : chip)}
             >

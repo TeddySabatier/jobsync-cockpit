@@ -181,6 +181,15 @@ describe("summary helpers", () => {
     expect(whatToCheck({ ...input, emailTo: null }).join()).toMatch(/No recipient/);
     expect(readinessChips({ ...input, emailTo: null }).map((c) => c.label)).not.toContain("Can send");
   });
+  it("never says Can send on a locked, rejected or sent application (review of PR #95)", () => {
+    const labels = (o: object) => readinessChips({ ...input, ...o }).map((c) => c.label);
+    expect(labels({ status: "approved", sendLocked: true })).toContain("Send result unknown");
+    expect(labels({ status: "approved", sendLocked: true })).not.toContain("Can send");
+    for (const status of ["rejected", "sent", "changes_requested", "superseded"]) {
+      expect(labels({ status })).not.toContain("Can send");
+    }
+    expect(labels({ status: "approved" })).toContain("Can send");
+  });
 });
 
 describe("recipient rules (D-041)", () => {

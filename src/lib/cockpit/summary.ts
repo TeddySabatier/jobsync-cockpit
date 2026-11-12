@@ -51,6 +51,8 @@ export type SummaryInput = {
   hasLetter: boolean;
   gmailConnected: boolean;
   sendBlockedReason: string | null;
+  // The send lock is set (a send is running or its outcome is unknown).
+  sendLocked?: boolean;
 };
 
 export type Chip = { label: string; tone: "ok" | "warn" | "info" };
@@ -68,7 +70,12 @@ export function readinessChips(i: SummaryInput): Chip[] {
       : { label: "No CV file", tone: "warn" },
   );
   chips.push(i.hasLetter ? { label: "Cover letter", tone: "ok" } : { label: "No cover letter", tone: "warn" });
-  if (email) {
+  // Only an open application (pending / approved) can be sent; a locked one
+  // waits for the send-outcome decision, never "Can send" (review of PR #95).
+  const open = i.status === "pending" || i.status === "approved";
+  if (email && i.sendLocked && open) {
+    chips.push({ label: "Send result unknown", tone: "warn" });
+  } else if (email && open) {
     chips.push(
       i.sendBlockedReason
         ? { label: "Cannot send yet", tone: "warn" }

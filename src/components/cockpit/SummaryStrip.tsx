@@ -28,6 +28,7 @@ export default function SummaryStrip({ detail }: { detail: PackageDetail }) {
     hasLetter: !!pkg.letterMd?.trim(),
     gmailConnected: !!detail.gmail,
     sendBlockedReason: sendBlockedReason(detail),
+    sendLocked: !!pkg.sendStartedAt,
   };
   const why = fitWhy(pkg.fitAnalysis);
   const chips = readinessChips(input);
