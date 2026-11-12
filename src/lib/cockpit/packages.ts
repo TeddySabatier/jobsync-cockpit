@@ -43,6 +43,12 @@ export const QUEUE_TAB_STATUSES: Record<QueueTab, PackageStatus[]> = {
 
 type Db = Prisma.TransactionClient;
 
+// What a package is created from. The application input (the MCP schema) with
+// the fit grade optional: a follow-up has no fit grade (D-033).
+export type SubmitPackageInput = Omit<SubmitApplicationPackageInput, "fitGrade"> & {
+  fitGrade?: "A" | "B";
+};
+
 export type SubmitResult = {
   package: ApplicationPackage;
   supersededIds: string[];
@@ -91,7 +97,7 @@ export type SubmitOptions = {
 
 export async function submitPackage(
   userId: string,
-  input: SubmitApplicationPackageInput,
+  input: SubmitPackageInput,
   opts: SubmitOptions = {},
 ): Promise<SubmitResult> {
   const kind: PackageKind = opts.kind ?? "application";
@@ -131,7 +137,7 @@ export async function submitPackage(
 async function submitInTransaction(
   tx: Db,
   userId: string,
-  input: SubmitApplicationPackageInput,
+  input: SubmitPackageInput,
   kind: PackageKind,
   replyToPackageId: string | null,
 ): Promise<SubmitResult> {

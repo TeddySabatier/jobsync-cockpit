@@ -6,6 +6,8 @@ import path from "path";
 import {
   SubmitApplicationPackageObject,
   SubmitApplicationPackageSchema,
+  SubmitFollowUpObject,
+  SubmitFollowUpSchema,
 } from "@/lib/cockpit/schemas";
 
 // The submit schema is strict (D-018 (b)): an unknown key is refused. This runs
@@ -21,6 +23,7 @@ describe.skipIf(!hasPython)("bot script vs the strict submit schema", () => {
     ok: boolean;
     testsRun: number;
     args: Record<string, unknown>[];
+    followUpArgs: Record<string, unknown>[];
   };
 
   beforeAll(() => {
@@ -53,6 +56,19 @@ describe.skipIf(!hasPython)("bot script vs the strict submit schema", () => {
   it("every argument object the bot sent passes the strict schema", () => {
     const failures = captured.args.flatMap((a, i) => {
       const r = SubmitApplicationPackageSchema.safeParse(a);
+      return r.success ? [] : [{ i, issues: r.error.issues }];
+    });
+    expect(failures).toEqual([]);
+  });
+
+  // D-033: the follow-up command against the strict submit_follow_up schema.
+  it("the follow-up commands submit at least once, with only schema keys, and pass the strict schema", () => {
+    expect(captured.followUpArgs.length).toBeGreaterThan(0);
+    const allowed = Object.keys(SubmitFollowUpObject.shape);
+    const sent = [...new Set(captured.followUpArgs.flatMap((a) => Object.keys(a)))];
+    expect(sent.filter((k) => !allowed.includes(k))).toEqual([]);
+    const failures = captured.followUpArgs.flatMap((a, i) => {
+      const r = SubmitFollowUpSchema.safeParse(a);
       return r.success ? [] : [{ i, issues: r.error.issues }];
     });
     expect(failures).toEqual([]);

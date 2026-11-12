@@ -131,3 +131,45 @@ describe("buildCreateData", () => {
     expect(JSON.stringify(data)).not.toContain("old-");
   });
 });
+
+describe("buildCreateData: replyToPackageId only remaps package ids", () => {
+  const pkgRow = (replyTo: string | null) => ({
+    id: "old-pkg-2",
+    jobId: "old-job",
+    cvFileId: null,
+    replyToPackageId: replyTo,
+    kind: "follow_up",
+  });
+  function typedMap(): IdMap {
+    const map = new IdMap();
+    map.mint("old-job", "Job");
+    map.mint("old-pkg-1", "ApplicationPackage");
+    map.mint("old-pkg-2", "ApplicationPackage");
+    return map;
+  }
+
+  it("remaps an id of the ApplicationPackage map", () => {
+    const map = typedMap();
+    const data = buildCreateData("ApplicationPackage", pkgRow("old-pkg-1"), map, "u");
+    expect(data.replyToPackageId).toBe(map.get("old-pkg-1"));
+  });
+
+  it("an id that belongs to another model (a Job id) is unknown: null, never the job's new id", () => {
+    const map = typedMap();
+    const data = buildCreateData("ApplicationPackage", pkgRow("old-job"), map, "u");
+    expect(data.replyToPackageId).toBeNull();
+    expect(data.jobId).toBe(map.get("old-job"));
+  });
+
+  it("an id that is nowhere in the file is null", () => {
+    const data = buildCreateData("ApplicationPackage", pkgRow("ghost"), typedMap(), "u");
+    expect(data.replyToPackageId).toBeNull();
+  });
+
+  it("a required key to the wrong model still aborts", () => {
+    const map = typedMap();
+    expect(() =>
+      buildCreateData("ApplicationPackage", { ...pkgRow(null), jobId: "old-pkg-1" }, map, "u"),
+    ).toThrow(/ApplicationPackage\.jobId/);
+  });
+});

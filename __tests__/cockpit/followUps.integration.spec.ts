@@ -365,13 +365,48 @@ describe("snooze, skip, stop", () => {
     });
   });
 
-  it("skip works on a step that is still scheduled but not on an expired one", async () => {
+  it("skip works on a due or snoozed step, not on a scheduled or expired one", async () => {
     const { jobId } = await appliedJob();
-    expect((await skipFollowUpStep(userA, jobId, new Date("2026-03-03T00:00:00Z"))).skippedThrough).toBe(1);
+    // Before the due day: nothing to skip yet.
+    await expect(skipFollowUpStep(userA, jobId, new Date("2026-03-03T00:00:00Z"))).rejects.toMatchObject({
+      code: "INVALID_STATE",
+    });
+    expect(await prisma.jobFollowUp.count({ where: { jobId } })).toBe(0);
+    expect((await skipFollowUpStep(userA, jobId, DAY9)).skippedThrough).toBe(1);
+    const snoozed = await appliedJob();
+    await snoozeFollowUp(userA, snoozed.jobId, 3, DAY9);
+    expect((await skipFollowUpStep(userA, snoozed.jobId, DAY9)).skippedThrough).toBe(1);
     const old = await appliedJob();
     await expect(skipFollowUpStep(userA, old.jobId, new Date("2026-09-01T00:00:00Z"))).rejects.toMatchObject({
       code: "INVALID_STATE",
     });
+  });
+
+  it("a double skip (double click) skips one step only, and skip-then-reject cannot skip both", async () => {
+    const { jobId } = await appliedJob();
+    const draft = await mk(jobId, "follow_up", 1, "pending");
+    await skipFollowUpStep(userA, jobId, DAY9);
+    await expect(skipFollowUpStep(userA, jobId, DAY9)).rejects.toMatchObject({ code: "INVALID_STATE" });
+    expect((await getFollowUpState(userA, jobId))?.skippedThrough).toBe(1);
+    // The draft was superseded by the skip, so rejecting it afterwards fails
+    // and cannot skip step 2.
+    expect((await row(draft.id)).status).toBe("superseded");
+    await expect(rejectPackage(userA, draft.id, "no")).rejects.toBeTruthy();
+    expect((await getFollowUpState(userA, jobId))?.skippedThrough).toBe(1);
+    expect(await getFollowUpDue(userA, jobId, DAY9)).toMatchObject({ eligible: true, step: 2, status: "scheduled" });
+  });
+
+  it("skip supersedes open drafts (changes_requested gets handled) but not a locked one", async () => {
+    const { jobId } = await appliedJob();
+    const pending = await mk(jobId, "follow_up", 1, "pending");
+    const changes = await mk(jobId, "follow_up", 2, "changes_requested");
+    const locked = await mk(jobId, "follow_up", 3, "approved", { sendStartedAt: new Date("2026-03-09T11:00:00Z") });
+    await skipFollowUpStep(userA, jobId, DAY9);
+    expect((await row(pending.id)).status).toBe("superseded");
+    const c = await row(changes.id);
+    expect(c.status).toBe("superseded");
+    expect(c.changeRequestHandledAt).not.toBeNull();
+    expect((await row(locked.id)).status).toBe("approved");
   });
 
   it("stop ends suggestions, is idempotent, and leaves an open draft alone", async () => {
