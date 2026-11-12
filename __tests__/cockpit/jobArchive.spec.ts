@@ -36,6 +36,7 @@ import {
   getJobsList,
 } from "@/actions/job.actions";
 import { clearDiscoveredJobs } from "@/actions/automation/discoveredJobs";
+import appDb from "@/lib/db";
 
 let db: CockpitTestDb;
 let prisma: PrismaClient;
@@ -114,6 +115,29 @@ describe("deleteJobById", () => {
     const res = await deleteJobById(jobId);
     expect(res.success).toBe(false);
     expect(await prisma.job.count({ where: { id: jobId } })).toBe(1);
+  });
+
+  it("maps the RESTRICT (a package created after the check) to the Archive message, not a generic error", async () => {
+    const jobId = await jobWithSentEmail();
+    // Simulate the race: the pre-check sees no package, the DB then refuses.
+    const spy = vi
+      .spyOn(appDb.applicationPackage, "count")
+      .mockResolvedValueOnce(0);
+    try {
+      const res = await deleteJobById(jobId);
+      expect(res.success).toBe(false);
+      expect(res.message).toMatch(/archive it instead/i);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await counts(jobId)).toEqual({ job: 1, packages: 1, sent: 1 });
+  });
+
+  it("does not delete another user's job that has packages", async () => {
+    const jobId = await jobWithSentEmail(other);
+    const res = await deleteJobById(jobId);
+    expect(res.success).toBe(false);
+    expect(await counts(jobId)).toEqual({ job: 1, packages: 1, sent: 1 });
   });
 });
 
