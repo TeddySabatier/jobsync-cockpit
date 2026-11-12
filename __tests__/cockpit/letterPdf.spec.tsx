@@ -2,7 +2,10 @@
 import fs from "fs";
 import { extractText, getDocumentProxy } from "unpdf";
 import { Font } from "@react-pdf/renderer";
-import { renderLetterPdf, toWinAnsi } from "@/lib/cockpit/letterPdf";
+import path from "path";
+// @ts-expect-error fontkit ships no types; it is react-pdf's own font parser
+import * as fontkit from "fontkit";
+import { FONT_DIR, FONT_RANGES, renderLetterPdf, toPdfText } from "@/lib/cockpit/letterPdf";
 import { letterPdfName } from "@/lib/cockpit/letterName";
 import { buildMimeMessage } from "@/lib/cockpit/gmail/mime";
 
@@ -57,8 +60,8 @@ describe("renderLetterPdf", () => {
   });
 
   it("keeps accents and typographic quotes, drops glyphs the PDF font cannot draw", async () => {
-    expect(toWinAnsi("é à ç ’ – “x” €")).toBe("é à ç ’ – “x” €");
-    expect(toWinAnsi("ok → next \u{1F600} ≥ 3")).toBe("ok -> next  >= 3");
+    expect(toPdfText("é à ç ’ – “x” €")).toBe("é à ç ’ – “x” €");
+    expect(toPdfText("ok → next \u{1F600} ≥ 3")).toBe("ok -> next  >= 3");
     const text = await textOf(await renderLetterPdf({ letterMd: "Café d’été → fin" }));
     expect(text).toContain("Café d’été");
   });
@@ -126,19 +129,19 @@ describe("renderLetterPdf: nothing is lost silently (review findings)", () => {
     for (const s of ["INDENTED-CODE", "FENCED-CODE", "second line", "Outro"]) expect(text).toContain(s);
   });
 
-  it("keeps Latin letters the font lacks as their base letter, and shows other alphabets as ?", async () => {
-    expect(toWinAnsi("Łukasz Wałęsa, Dvořák, Őry, Pań")).toBe("Lukasz Walesa, Dvorák, Ory, Pan");
-    expect(toWinAnsi("Ελληνικά Москва")).toBe("???????? ??????");
-    const text = await textOf(await renderLetterPdf({ letterMd: "Szanowni Państwo, Łukasz" }));
-    expect(text).toContain("Szanowni Panstwo, Lukasz");
+  it("draws Polish, Czech, Greek and Cyrillic letters; shows CJK as ? (D-027)", async () => {
+    expect(toPdfText("Łukasz Wałęsa, Dvořák, Őry, Pań")).toBe("Łukasz Wałęsa, Dvořák, Őry, Pań");
+    expect(toPdfText("Ελληνικά Москва")).toBe("Ελληνικά Москва");
+    expect(toPdfText("日本語 한국어 ア")).toBe("??? ??? ?");
+    const text = await textOf(await renderLetterPdf({ letterMd: "Hello 日本語 world" }));
+    expect(text).toContain("Hello ??? world");
   });
-
   it("turns typographic spaces and hyphens into plain ones, so words never run together", async () => {
-    expect(toWinAnsi("99,9 %")).toBe("99,9 %");
-    expect(toWinAnsi("a b c")).toBe("a b c");
-    expect(toWinAnsi("e‑mail‐x")).toBe("e-mail-x");
-    expect(toWinAnsi("a​b­c")).toBe("abc");
-    expect(toWinAnsi("a → b ≥ c")).toBe("a -> b >= c");
+    expect(toPdfText("99,9 %")).toBe("99,9 %");
+    expect(toPdfText("a b c")).toBe("a b c");
+    expect(toPdfText("e‑mail‐x")).toBe("e-mail-x");
+    expect(toPdfText("a​b­c")).toBe("abc");
+    expect(toPdfText("a → b ≥ c")).toBe("a -> b >= c");
   });
 
   it("numbers nested ordered lists correctly and honours the start number", async () => {
@@ -148,6 +151,115 @@ describe("renderLetterPdf: nothing is lost silently (review findings)", () => {
     const flat = text.replace(/\s+/g, " ");
     expect(flat).toMatch(/1\. one 2\. two .*sub 3\. three/);
     expect(flat).toContain("5. five 6. six");
+  });
+});
+
+describe("renderLetterPdf: embedded Noto Sans (D-027)", () => {
+  const POLISH = "Zażółć gęślą jaźń, Łukasz Wałęsa, Dąbrowski";
+  const CZECH = "Příliš žluťoučký kůň úpěl ďábelské ódy, Dvořák";
+  const GREEK = "Αγαπητοί κύριοι, Ελληνικά ΩΏΊ ά έ ή ί ό ύ ώ";
+  const CYRILLIC = "Уважаемые господа, Москва Ёё Щщ Юю Ґґ Її";
+
+  it("round-trips Polish, Czech, Greek and Cyrillic through the PDF text layer", async () => {
+    const letterMd = [POLISH, CZECH, GREEK, CYRILLIC].map((s, i) => (i === 1 ? `**${s}**` : i === 2 ? `*${s}*` : s)).join("\n\n");
+    const text = await textOf(await renderLetterPdf({ letterMd }));
+    for (const s of [POLISH, CZECH, GREEK, CYRILLIC]) expect(text).toContain(s);
+    expect(text).not.toContain("?");
+  });
+
+  it("draws the letterhead, bold-italic, bullets and code in the same font", async () => {
+    const cvJson = JSON.stringify({ name: "Łukasz Ωμέγα Петров", title: "Ingénieur Σύστημα", contact: ["Zürich", "Köln"] });
+    const letterMd = `# Ελληνικά\n\n***Петров Łódź***\n\n- Příliš\n- Ωμέγα\n\n    код Ωμέγα\n`;
+    const text = await textOf(await renderLetterPdf({ letterMd, cvJson }));
+    for (const s of ["Łukasz Ωμέγα Петров", "Ingénieur Σύστημα", "Zürich", "Ελληνικά", "Петров Łódź", "Příliš", "Ωμέγα", "код Ωμέγα"]) {
+      expect(text).toContain(s);
+    }
+    expect(text).not.toContain("?");
+  });
+
+  it("round-trips every drawable code point in all four faces", async () => {
+    const chars: string[] = [];
+    for (const [lo, hi] of FONT_RANGES) for (let c = Math.max(lo, 0x21); c <= hi; c++) if (c !== 0xad && c !== 0xa0) chars.push(String.fromCodePoint(c));
+    const words: string[] = [];
+    for (let i = 0; i < chars.length; i += 1) words.push(chars[i]);
+    const plain = words.join(" ");
+    const letterMd = [plain, `**${plain}**`, `*${plain}*`, `***${plain}***`].join("\n\n");
+    // Markdown escapes would change the text: only compare the characters that
+    // are not markdown syntax.
+    const syntax = new Set("\\`*_{}[]()#+-.!|<>&~^:\"'=/$%@;,?".split(""));
+    const text = (await textOf(await renderLetterPdf({ letterMd, cvJson: CV_JSON }))).normalize("NFC");
+    const missing = chars.filter((ch) => !syntax.has(ch) && !text.includes((ch === "µ" ? "μ" : toPdfText(ch)).normalize("NFC")));
+    expect(missing.map((m) => m.codePointAt(0)!.toString(16))).toEqual([]);
+  });
+
+  it("is not affected by earlier letters in the same process (shared glyph cache)", async () => {
+    await renderLetterPdf({ letterMd: `**${CZECH}**\n\n***${GREEK}***`, cvJson: JSON.stringify({ name: "Ñandú Zzz" }) });
+    const cvJson = JSON.stringify({ name: "Łukasz Ωμέγα Петров" });
+    const text = await textOf(await renderLetterPdf({ letterMd: "**Zażółć** zz", cvJson }));
+    expect(text).toContain("Łukasz Ωμέγα Петров");
+    expect(text).toContain("Zażółć zz");
+  });
+
+  it("leaves the process-wide font registry as it found it, after a render and after a failed one", async () => {
+    const before = Object.keys(Font.getRegisteredFonts()).sort();
+    await renderLetterPdf({ letterMd: "Zażółć **x**", cvJson: CV_JSON });
+    expect(Object.keys(Font.getRegisteredFonts()).sort()).toEqual(before);
+    await expect(renderLetterPdf({ letterMd: null as unknown as string })).rejects.toThrow();
+    expect(Object.keys(Font.getRegisteredFonts()).sort()).toEqual(before);
+  });
+
+  it("embeds the matching face for regular, bold, italic and bold italic text", async () => {
+    const faces = async (letterMd: string) => {
+      // The embedded subset font names are plain text in the PDF (ABCDEF+NotoSans-Bold).
+      const raw = (await renderLetterPdf({ letterMd })).toString("latin1");
+      return [...new Set([...raw.matchAll(/[A-Z]{6}\+(NotoSans-[A-Za-z]+)/g)].map((m) => m[1]))].sort();
+    };
+    expect(await faces("plain")).toEqual(["NotoSans-Regular"]);
+    expect(await faces("**bold**")).toEqual(["NotoSans-Bold"]);
+    expect(await faces("*italic*")).toEqual(["NotoSans-Italic"]);
+    expect(await faces("***both***")).toEqual(["NotoSans-BoldItalic"]);
+  });
+
+  it("keeps every letter intact when renders overlap (preview and send at once)", async () => {
+    const samples = [POLISH, CZECH, GREEK, CYRILLIC, "Café d’été « oui » 12 €"];
+    for (let round = 0; round < 3; round++) {
+      const texts = await Promise.all(
+        samples.map(async (s, i) =>
+          textOf(await renderLetterPdf({ letterMd: `**${s}**\n\n*${samples[(i + 1) % 5]}*`, cvJson: JSON.stringify({ name: samples[(i + 2) % 5] }) })),
+        ),
+      );
+      texts.forEach((t, i) => {
+        for (const s of [samples[i], samples[(i + 1) % 5], samples[(i + 2) % 5]]) expect(t.replace(/\s+/g, " ")).toContain(s);
+      });
+    }
+  });
+
+  it("registers all four faces, and the shipped font covers every code point the filter lets through", () => {
+    for (const f of ["Regular", "Bold", "Italic", "BoldItalic"]) {
+      const font = fontkit.openSync(path.join(FONT_DIR, `NotoSans-${f}.ttf`)) as unknown as {
+        hasGlyphForCodePoint(c: number): boolean;
+      };
+      const missing: string[] = [];
+      for (const [lo, hi] of FONT_RANGES) {
+        for (let c = lo; c <= hi; c++) if (!font.hasGlyphForCodePoint(c)) missing.push(c.toString(16));
+      }
+      expect(missing, `${f} lacks ${missing.join(",")}`).toEqual([]);
+    }
+    const licence = fs.readFileSync(path.join(FONT_DIR, "OFL.txt"), "utf8");
+    expect(licence).toContain("SIL OPEN FONT LICENSE Version 1.1");
+  });
+
+  it("keeps the PDF small and the render fast (cost bounds)", async () => {
+    const letterMd = Array.from({ length: 12 }, () => `${POLISH}. ${GREEK}. ${CYRILLIC}. **bold** *italic* ${"lorem ipsum ".repeat(20)}`).join("\n\n");
+    await renderLetterPdf({ letterMd, cvJson: CV_JSON }); // warm-up: font parsing
+    const t0 = performance.now();
+    const pdf = await renderLetterPdf({ letterMd, cvJson: CV_JSON });
+    const ms = performance.now() - t0;
+    // Fonts are subset into the PDF, not embedded whole: four 230 KB files
+    // would make a PDF of more than 900 KB.
+    expect(pdf.length).toBeLessThan(250_000);
+    expect(ms).toBeLessThan(4000);
+    if (process.env.LETTER_PDF_COST) console.log(`letter PDF ${pdf.length} bytes, ${ms.toFixed(0)} ms`);
   });
 });
 

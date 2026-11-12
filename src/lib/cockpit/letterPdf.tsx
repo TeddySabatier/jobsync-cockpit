@@ -1,6 +1,8 @@
 import "server-only";
 import React from "react";
 import { letterMarkdown } from "./markdown";
+import path from "path";
+import { randomUUID } from "crypto";
 import { Document, Font, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
 
 // Cover-letter PDF (cockpit/DECISIONS.md D-015). The Review preview and the
@@ -16,9 +18,35 @@ const MUTED = "#555555";
 const PAGE_MARGIN = 54;
 const INDENT = 14;
 
+// Noto Sans (SIL OFL, assets/fonts/noto-sans/OFL.txt), subset to Latin, Latin
+// Extended, Greek, Cyrillic and common punctuation (D-027). Loaded from disk at
+// render time (no network); next.config.mjs traces the folder into the
+// standalone output. The family is registered once per process.
+export const FONT_DIR = path.join(process.cwd(), "assets", "fonts", "noto-sans");
+
+// react-pdf caches parsed fonts and glyphs process-wide, and the text-layer map
+// of a glyph (ToUnicode) comes from the first run that used it. Sharing one
+// parsed font between letters made a later letter extract "Lukas<U+0006>" for
+// "Lukasz" (seen in tests, D-027; the page looks right, the copied text does
+// not). So every render registers its own family under a fresh name, which
+// parses the files anew (a few ms), and removes it afterwards.
+function registerFonts(): string {
+  const family = "NotoSans-" + randomUUID();
+  const f = (file: string) => path.join(FONT_DIR, file);
+  Font.register({
+    family,
+    fonts: [
+      { src: f("NotoSans-Regular.ttf"), fontWeight: 400, fontStyle: "normal" },
+      { src: f("NotoSans-Bold.ttf"), fontWeight: 700, fontStyle: "normal" },
+      { src: f("NotoSans-Italic.ttf"), fontWeight: 400, fontStyle: "italic" },
+      { src: f("NotoSans-BoldItalic.ttf"), fontWeight: 700, fontStyle: "italic" },
+    ],
+  });
+  return family;
+}
+
 const styles = StyleSheet.create({
   page: {
-    fontFamily: "Helvetica",
     fontSize: 11,
     lineHeight: 1.4,
     paddingTop: PAGE_MARGIN,
@@ -26,69 +54,79 @@ const styles = StyleSheet.create({
     paddingHorizontal: PAGE_MARGIN,
     color: "#000000",
   },
-  name: { fontFamily: "Helvetica-Bold", fontSize: 18, color: ACCENT, marginBottom: 2 },
+  name: { fontWeight: 700, fontSize: 18, color: ACCENT, marginBottom: 4 },
   title: { fontSize: 11, color: MUTED, marginBottom: 2 },
   contact: { fontSize: 9.5, color: MUTED },
   rule: { height: 1, backgroundColor: ACCENT, marginTop: 8, marginBottom: 18 },
   paragraph: { marginBottom: 10 },
-  code: { fontFamily: "Courier", fontSize: 10, marginBottom: 10 },
-  heading: { fontFamily: "Helvetica-Bold", fontSize: 12, marginTop: 4, marginBottom: 4 },
+  code: { fontSize: 10, marginBottom: 10 },
+  heading: { fontWeight: 700, fontSize: 12, marginTop: 4, marginBottom: 4 },
   listRow: { flexDirection: "row", marginBottom: 2 },
   bullet: { width: INDENT },
   listText: { flex: 1 },
   listEnd: { height: 8 },
-  bold: { fontFamily: "Helvetica-Bold" },
-  italic: { fontFamily: "Helvetica-Oblique" },
-  boldItalic: { fontFamily: "Helvetica-BoldOblique" },
+  bold: { fontWeight: 700 },
+  italic: { fontStyle: "italic" as const },
+  boldItalic: { fontWeight: 700, fontStyle: "italic" as const },
 });
 
-// The standard PDF fonts cover WinAnsi only. Nothing is dropped silently when it
-// is a letter: a letter outside the font shows as "?" so the owner sees it in
-// the preview. Symbols and emoji are dropped.
-const WIN_ANSI_EXTRA = "–—‘’‚“”„•…€™†‡‰‹›ŒœŠšŽžŸƒˆ˜";
+// Code points the bundled Noto Sans subset can draw (D-027). The same ranges
+// were given to the subsetter; a test checks every one against the font file.
+// Nothing is dropped silently when it is a letter: a letter outside the font
+// (CJK, Arabic, ...) shows as "?" so the owner sees it in the preview. Symbols
+// and emoji are dropped.
+export const FONT_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x20, 0x7e], // ASCII
+  [0xa0, 0x1f7], // Latin-1, Latin Extended-A and B (U+01F8/9 left out: see D-027)
+  [0x1fa, 0x24f],
+  [0x370, 0x377], // Greek (unassigned code points left out)
+  [0x37a, 0x37f],
+  [0x384, 0x38a],
+  [0x38c, 0x38c],
+  [0x38e, 0x3a1],
+  [0x3a3, 0x3e1],
+  [0x3f0, 0x3ff],
+  [0x400, 0x4ff], // Cyrillic
+  [0x2010, 0x2027], // dashes, quotes, bullet, ellipsis
+  [0x2030, 0x2044], // per mille, primes, guillemets
+  [0x20ac, 0x20ac], // euro
+  [0x2122, 0x2122], // trade mark
+  [0x2212, 0x2212], // minus
+];
 const SPACES = new Set([0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x202f, 0x205f, 0x3000]);
 const HYPHENS = new Set([0x2010, 0x2011, 0x2012, 0x2212]);
 const INVISIBLE = new Set([0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xad]);
-const REPLACEMENTS: Record<string, string> = {
-  "→": "->",
-  "←": "<-",
-  "≥": ">=",
-  "≤": "<=",
-  "≠": "!=",
-  "ł": "l",
-  "Ł": "L",
-  "đ": "d",
-  "Đ": "D",
-  "ħ": "h",
-  "ı": "i",
-};
+// Noto Sans has no arrows or comparison signs; keep the old ASCII stand-ins.
+const REPLACEMENTS: Record<string, string> = { "→": "->", "←": "<-", "≥": ">=", "≤": "<=", "≠": "!=" };
 const LETTER = /\p{L}/u;
 const MARKS = /\p{M}/gu;
 
-function drawable(c: number, ch: string): boolean {
-  return c === 0x0a || (c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff) || WIN_ANSI_EXTRA.includes(ch);
+function drawable(c: number): boolean {
+  if (c === 0x0a) return true;
+  for (const [lo, hi] of FONT_RANGES) if (c >= lo && c <= hi) return true;
+  return false;
 }
 
-export function toWinAnsi(text: string): string {
+export function toPdfText(text: string): string {
   let out = "";
   for (const ch of text.normalize("NFC")) {
     const c = ch.codePointAt(0)!;
     if (c === 0xad) continue; // soft hyphen is invisible
-    if (drawable(c, ch)) {
-      out += ch;
-    } else if (c === 0x09 || SPACES.has(c)) {
+    if (c === 0x09 || SPACES.has(c)) {
       out += " ";
     } else if (HYPHENS.has(c)) {
       out += "-";
+    } else if (drawable(c)) {
+      out += ch;
     } else if (INVISIBLE.has(c)) {
       continue;
     } else if (REPLACEMENTS[ch]) {
       out += REPLACEMENTS[ch];
     } else if (LETTER.test(ch)) {
-      // Latin letters with a mark the font lacks (r with caron, o with double
-      // acute) keep their base letter; any other alphabet shows as "?".
+      // A Latin letter with a mark the font lacks keeps its base letter; any
+      // other alphabet (CJK, Arabic, ...) shows as "?".
       const base = ch.normalize("NFD").replace(MARKS, "");
-      out += base !== ch && [...base].every((b) => drawable(b.codePointAt(0)!, b)) ? base : "?";
+      out += base !== ch && [...base].every((b) => drawable(b.codePointAt(0)!)) ? base : "?";
     }
   }
   return out;
@@ -118,7 +156,7 @@ function inlineNodes(tokens: Token[] | null, keyPrefix: string): React.ReactNode
     else if (t.type === "em_close") italic--;
     else if (t.type === "softbreak" || t.type === "hardbreak") nodes.push("\n");
     else if (t.type === "text" || t.type === "code_inline") {
-      const text = toWinAnsi(t.content);
+      const text = toPdfText(t.content);
       if (!text) continue;
       const style = bold && italic ? styles.boldItalic : bold ? styles.bold : italic ? styles.italic : null;
       nodes.push(style ? <Text key={`${keyPrefix}-${n++}`} style={style}>{text}</Text> : text);
@@ -143,7 +181,7 @@ function bodyNodes(letterMd: string): React.ReactElement[] {
       if (lists.length === 0) out.push(<View key={`end${i}`} style={styles.listEnd} />);
     } else if (t.type === "code_block" || t.type === "fence") {
       // Indented and fenced blocks keep their line breaks, as plain text.
-      const text = toWinAnsi(t.content).replace(/\n+$/, "");
+      const text = toPdfText(t.content).replace(/\n+$/, "");
       if (text) out.push(<Text key={`c${i}`} style={styles.code}>{text}</Text>);
     } else if (t.type === "inline") {
       const prev = tokens[i - 1];
@@ -172,11 +210,11 @@ function letterhead(cvJson: string | null | undefined) {
   if (!cvJson) return null;
   try {
     const cv = JSON.parse(cvJson) as { name?: unknown; title?: unknown; contact?: unknown };
-    const name = typeof cv.name === "string" ? toWinAnsi(cv.name).trim() : "";
+    const name = typeof cv.name === "string" ? toPdfText(cv.name).trim() : "";
     if (!name) return null;
-    const title = typeof cv.title === "string" ? toWinAnsi(cv.title).trim() : "";
+    const title = typeof cv.title === "string" ? toPdfText(cv.title).trim() : "";
     const contact = Array.isArray(cv.contact)
-      ? cv.contact.filter((c): c is string => typeof c === "string").map((c) => toWinAnsi(c).trim()).filter(Boolean)
+      ? cv.contact.filter((c): c is string => typeof c === "string").map((c) => toPdfText(c).trim()).filter(Boolean)
       : [];
     return { name, title, contact };
   } catch {
@@ -184,10 +222,16 @@ function letterhead(cvJson: string | null | undefined) {
   }
 }
 
-export async function renderLetterPdf(input: {
-  letterMd: string;
-  cvJson?: string | null;
-}): Promise<Buffer> {
+export async function renderLetterPdf(input: { letterMd: string; cvJson?: string | null }): Promise<Buffer> {
+  const family = registerFonts();
+  try {
+    return await renderOnce(input, family);
+  } finally {
+    delete Font.getRegisteredFonts()[family];
+  }
+}
+
+async function renderOnce(input: { letterMd: string; cvJson?: string | null }, family: string): Promise<Buffer> {
   // Set on every render on purpose: react-pdf keeps ONE process-wide
   // hyphenation callback (global state). Setting it here is a cheap assignment
   // and keeps the letter independent of whatever else registers a callback in
@@ -197,7 +241,7 @@ export async function renderLetterPdf(input: {
   const head = letterhead(input.cvJson);
   const doc = (
     <Document title="Cover letter" author={head?.name ?? ""} creator="JobSync cockpit" producer="react-pdf">
-      <Page size="A4" style={styles.page} wrap>
+      <Page size="A4" style={[styles.page, { fontFamily: family }]} wrap>
         {head && (
           <View>
             <Text style={styles.name}>{head.name}</Text>
