@@ -85,13 +85,60 @@ describe("SubmitApplicationPackageSchema (AC-07)", () => {
   });
 
   it.each([
-    ["NBSP subject", { emailSubject: " " }],
-    ["ideographic-space subject", { emailSubject: "　 " }],
-    ["BOM subject", { emailSubject: "﻿ " }],
-    ["NBSP body", { emailBody: "  " }],
-    ["line / paragraph separator body", { emailBody: "  \n" }],
+    ["NBSP subject", { emailSubject: "\u00A0" }],
+    ["ideographic-space subject", { emailSubject: "\u3000\u2003" }],
+    ["BOM subject", { emailSubject: "\uFEFF " }],
+    ["NBSP body", { emailBody: "\u00A0\u00A0" }],
+    ["line / paragraph separator body", { emailBody: "\u2028\u2029\n" }],
   ])("rejects a unicode-whitespace-only %s (review 01 #5)", (_name, over) => {
     expect(ok(over).success).toBe(false);
+  });
+
+  // Issue #82: strings with no visible character are blank, not just
+  // whitespace. Escapes keep the invisible characters readable in review.
+  const INVISIBLE_ONLY: Array<[string, string]> = [
+    ["zero width space U+200B", "\u200B"],
+    ["zero width non-joiner U+200C", "\u200C\u200C"],
+    ["zero width joiner U+200D", "\u200D"],
+    ["word joiner U+2060", "\u2060"],
+    ["BOM / ZWNBSP U+FEFF", "\uFEFF"],
+    ["soft hyphen U+00AD", "\u00AD"],
+    ["NBSP U+00A0", "\u00A0\u00A0"],
+    ["line separator U+2028", "\u2028"],
+    ["paragraph separator U+2029", "\u2029"],
+    ["ideographic space U+3000", "\u3000"],
+    ["en/em/thin/narrow spaces", "\u2002\u2003\u2009\u202F\u205F"],
+    ["control characters", "\u0000\u0007"],
+    ["Hangul filler U+3164", "\u3164"],
+    ["Braille blank U+2800", "\u2800"],
+    ["a mix with ordinary whitespace", " \u200B\t\u00A0\uFEFF\n\u2060 "],
+  ];
+
+  it.each(INVISIBLE_ONLY)("rejects a subject made only of %s", (_n, v) => {
+    expect(ok({ emailSubject: v }).success).toBe(false);
+    expect(UpdatePackageContentSchema.safeParse({ emailSubject: v }).success).toBe(false);
+  });
+
+  it.each(INVISIBLE_ONLY)("rejects a body made only of %s", (_n, v) => {
+    expect(ok({ emailBody: v }).success).toBe(false);
+    expect(UpdatePackageContentSchema.safeParse({ emailBody: v }).success).toBe(false);
+  });
+
+  it("keeps text that has a visible character, invisible ones included, unchanged", () => {
+    const subject = "\u200BHi\u00AD there\uFEFF";
+    const body = "\u2060 Hello\u200B\n\n";
+    const r = ok({ emailSubject: subject, emailBody: body });
+    expect(r.success && r.data.emailSubject).toBe(subject);
+    expect(r.success && r.data.emailBody).toBe(body);
+    const e = UpdatePackageContentSchema.parse({ emailSubject: subject, emailBody: body });
+    expect(e.emailSubject).toBe(subject);
+    expect(e.emailBody).toBe(body);
+  });
+
+  it("does not treat real text in other scripts or emoji as blank", () => {
+    for (const v of ["é", "你好", "\u{1F600}", "ا", "a\u200Db"]) {
+      expect(ok({ emailSubject: v, emailBody: v }).success).toBe(true);
+    }
   });
 
   it("keeps surrounding whitespace of a non-blank body (no trimming)", () => {

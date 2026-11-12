@@ -374,11 +374,11 @@ describe("Dashboard Actions", () => {
       (getCurrentUser as any).mockResolvedValue(mockUser);
       const mockJobData = [
         {
-          appliedDate: new Date("2024-06-15T10:00:00Z"),
+          appliedDate: new Date(2024, 5, 15, 10, 0, 0), // local time: the code groups by local date
           _count: { _all: 2 },
         },
         {
-          appliedDate: new Date("2024-06-15T14:00:00Z"),
+          appliedDate: new Date(2024, 5, 15, 14, 0, 0),
           _count: { _all: 3 },
         },
       ];
