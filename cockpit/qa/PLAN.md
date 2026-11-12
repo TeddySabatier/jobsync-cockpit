@@ -41,4 +41,4 @@ Every hour, budget moves from lanes with no new confirmed findings to lanes that
 6. Orchestrator triage.
 7. Fix PR.
 
-Raw engine state lives in `.cockpit-tmp/` and is never committed. The curated ledger is `cockpit/qa/FINDINGS.jsonl`, committed through PRs.
+Raw engine state lives in `.cockpit-tmp/` and is never committed. The curated outcome is summarised in `QA-REPORT.md`, `REJECTED.md` and `V1-IDEAS.md`.

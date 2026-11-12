@@ -2,7 +2,7 @@
 
 ## Status
 
-All **11 tickets C-01..C-11** are merged into `main` of [TeddySabatier/jobsync-cockpit](https://github.com/TeddySabatier/jobsync-cockpit) through reviewed PRs **#4, #6, #8, #10, #12, #14, #16, #18, #20, #22, #24**; related issues are closed; **no pending GitHub work**. The D-001 fallback (stacked branches without `gh`) was **superseded by D-003** (real issue/PR flow). **Phase 4 integration is done** (see below). After the handoff, decisions **D-008 and D-010..D-015** amended the frozen SPEC (idempotency across jobs, Gmail reconnect, backups carry cockpit data, no attachment quota, the Claude prompt button, the cover letter sent as a PDF); read `DECISIONS.md` next to the SPEC. The Phase 4 results below are the V0 state and were not re-run for them.
+All **11 tickets C-01..C-11** are merged into `main` of the cockpit fork (the repo owner's `jobsync-cockpit` repository) through reviewed PRs **#4, #6, #8, #10, #12, #14, #16, #18, #20, #22, #24**; related issues are closed; **no pending GitHub work**. The D-001 fallback (stacked branches without `gh`) was **superseded by D-003** (real issue/PR flow). **Phase 4 integration is done** (see below). After the handoff, decisions **D-008 and D-010..D-015** amended the frozen SPEC (idempotency across jobs, Gmail reconnect, backups carry cockpit data, no attachment quota, the Claude prompt button, the cover letter sent as a PDF); read `DECISIONS.md` next to the SPEC. The Phase 4 results below are the V0 state and were not re-run for them.
 
 ---
 

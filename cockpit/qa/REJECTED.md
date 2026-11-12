@@ -1,5 +1,6 @@
 # Rejected, unclear and known findings
 
+The ids come from a retired findings ledger that is no longer in the repo; the file:line and the reason are the record.
 Format: ids — file:line — reason. Ids are not unique across lanes (many lanes reused F1, SEC-001...), so use file:line.
 
 ## Known (matches HANDOFF §7 or a DECISIONS ruling): 9
