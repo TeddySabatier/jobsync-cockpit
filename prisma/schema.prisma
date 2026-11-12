@@ -39,6 +39,7 @@ model User {
   applicationPackages ApplicationPackage[]
   gmailAccount        GmailAccount?
   sentEmails          SentEmail[]
+  sendAttempts        SendAttempt[]
   defaultResumeId String?
   defaultResume   Resume?          @relation("UserDefaultResume", fields: [defaultResumeId], references: [id], onDelete: SetNull)
 }
@@ -581,6 +582,7 @@ model ApplicationPackage {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   sentEmail        SentEmail?
+  sendAttempts     SendAttempt[]
 
   @@unique([jobId, version])
   @@unique([userId, idempotencyKey])
@@ -610,4 +612,23 @@ model SentEmail {
   gmailMessageId String
   threadId       String
   sentAt         DateTime @default(now())
+}
+
+// Issue #77 / D-028: append-only history of what happened on every send. Rows
+// are only ever inserted (never updated, never deleted by cleanup or edits) and
+// go away only with their package. outcome: sent | failed | ambiguous |
+// record_failed | late_recorded | lock_lost | marked_sent | lock_released.
+model SendAttempt {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  packageId      String
+  package        ApplicationPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  outcome        String
+  errorCode      String?   // CockpitError code only, never raw error text
+  gmailMessageId String?
+  threadId       String?
+  createdAt      DateTime @default(now())
+
+  @@index([packageId, createdAt])
 }

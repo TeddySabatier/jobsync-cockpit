@@ -25,6 +25,7 @@ export type BackupModel =
   | "Job"
   | "ApplicationPackage"
   | "SentEmail"
+  | "SendAttempt"
   | "Note"
   | "Interview"
   | "Contact"
@@ -167,6 +168,14 @@ export const MODEL_SPECS: Record<BackupModel, ModelSpec> = {
     fks: { packageId: "ApplicationPackage" },
     scope: byUser,
   },
+  // Send history (D-028): children of ApplicationPackage, inserted after it and
+  // therefore wiped before it (DELETE_ORDER is the reverse).
+  SendAttempt: {
+    delegate: "sendAttempt",
+    owner: "userId",
+    fks: { packageId: "ApplicationPackage" },
+    scope: byUser,
+  },
   Note: { delegate: "note", owner: "userId", fks: { jobId: "Job" }, scope: byUser },
   Interview: { delegate: "interview", fks: { jobId: "Job" }, scope: (userId) => ({ job: { userId } }) },
   Contact: {
@@ -219,6 +228,7 @@ export const INSERT_ORDER: BackupModel[] = [
   "Job",
   "ApplicationPackage",
   "SentEmail",
+  "SendAttempt",
   "Note",
   "Interview",
   "Contact",
@@ -259,5 +269,6 @@ export const REPLACED_MODELS: BackupModel[] = [
   ...EMPTINESS_MODELS,
   "ApplicationPackage",
   "SentEmail",
+  "SendAttempt",
   "File",
 ];

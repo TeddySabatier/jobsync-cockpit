@@ -1,3 +1,5 @@
+import { COCKPIT_ERROR_MESSAGES } from "./errors";
+
 // What the review UI may know about a package: an explicit field list, so a
 // new column never reaches the client by accident (no idempotencyKey,
 // sourceFolder, approval/send timestamps or file path).
@@ -59,4 +61,28 @@ export function toPackageView(p: PackageRow) {
       Company: { label: p.job.Company.label },
     },
   };
+}
+
+type SendAttemptRow = {
+  id: string;
+  outcome: string;
+  errorCode: string | null;
+  gmailMessageId: string | null;
+  createdAt: Date;
+};
+
+// The send history for the client: the failure is the fixed message of its
+// code (never stored or raw error text), thread id and user id stay on the
+// server.
+export function toSendHistoryView(rows: SendAttemptRow[]) {
+  return rows.map((r) => ({
+    id: r.id,
+    outcome: r.outcome,
+    reason:
+      r.errorCode && r.errorCode in COCKPIT_ERROR_MESSAGES
+        ? COCKPIT_ERROR_MESSAGES[r.errorCode as keyof typeof COCKPIT_ERROR_MESSAGES]
+        : null,
+    gmailMessageId: r.gmailMessageId,
+    createdAt: r.createdAt,
+  }));
 }

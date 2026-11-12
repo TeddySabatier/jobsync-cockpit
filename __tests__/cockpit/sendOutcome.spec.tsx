@@ -62,6 +62,7 @@ const detail = (over: Partial<PackageDetail["package"]> = {}): PackageDetail => 
     },
     ...over,
   },
+  sendHistory: [],
   versions: [{ id: "p1", version: 1, status: "approved" }],
   activePackageId: "p1",
   isActive: true,

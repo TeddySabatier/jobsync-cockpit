@@ -354,3 +354,52 @@ export function PreviousReviewInfo({ pkg }: { pkg: PackageDetail["package"] }) {
     </Panel>
   );
 }
+
+// Plain sentences for what happened; never the raw outcome string.
+const ATTEMPT_LABELS: Record<string, string> = {
+  sent: "Gmail accepted the message",
+  failed: "Not sent: Gmail or the app refused before the message left",
+  ambiguous: "Result unknown: the message may or may not have gone out",
+  record_failed:
+    "Gmail accepted the message, but the app could not record it. The package stayed locked",
+  late_recorded:
+    "Gmail accepted the message after the package had left Approved. It was recorded as sent",
+  lock_lost:
+    "Gmail accepted the message after the lock was cleared. Check the package state",
+  marked_sent: "You marked it as sent (manual)",
+  lock_released: "You released the lock (the email was not in Gmail)",
+};
+
+// Read-only history of every send attempt on this package, oldest first
+// (D-028). It backs the Mark as sent / Release lock decision.
+export function SendHistoryPanel({
+  history,
+}: {
+  history: PackageDetail["sendHistory"];
+}) {
+  if (history.length === 0) return null;
+  return (
+    <Panel title="Send history" testId="panel-send-history">
+      <p className="mb-2 text-xs text-muted-foreground">
+        What was attempted and what happened, oldest first.
+      </p>
+      <ol className="flex flex-col gap-2 text-sm">
+        {history.map((a) => (
+          <li key={a.id} data-testid="send-attempt">
+            <span className="font-medium">
+              {format(new Date(a.createdAt), "PP p")}
+            </span>
+            {": "}
+            {ATTEMPT_LABELS[a.outcome] ?? "Unrecognized entry"}
+            {a.reason && ` (${a.reason})`}
+            {a.gmailMessageId && (
+              <span className="block break-all text-xs text-muted-foreground">
+                Gmail message id: {a.gmailMessageId}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </Panel>
+  );
+}
