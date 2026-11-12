@@ -4,12 +4,13 @@ import {
   FileWarning,
   FileX,
   Link2,
+  Loader2,
   Mail,
   TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { isSendUnknown } from "@/lib/cockpit/queueOrder";
+import { sendState } from "@/lib/cockpit/queueOrder";
 import FitGradeBadge from "./FitGradeBadge";
 import StatusBadge from "./StatusBadge";
 import type { getReviewQueue } from "@/actions/cockpit.actions";
@@ -61,7 +62,8 @@ export default function QueueRow({
   gmailConnected: boolean;
 }) {
   const chips = readinessChips(row, gmailConnected);
-  const unknown = isSendUnknown(row);
+  const state = sendState(row);
+  const unknown = state === "unknown";
   const company = row.job.Company.label;
   const title = row.job.JobTitle.label;
   return (
@@ -87,6 +89,12 @@ export default function QueueRow({
             >
               <TriangleAlert aria-hidden className="h-3 w-3" />
               Send unknown
+            </Badge>
+          )}
+          {state === "sending" && (
+            <Badge variant="outline" data-testid="sending-chip" className="gap-1">
+              <Loader2 aria-hidden className="h-3 w-3" />
+              Sending
             </Badge>
           )}
           {row.fitGrade && <FitGradeBadge grade={row.fitGrade} />}

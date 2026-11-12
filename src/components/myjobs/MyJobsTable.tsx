@@ -51,32 +51,32 @@ function MyJobsTable({
       {/* Below md each row becomes a stacked card (title, company, status on
           the left, the actions menu on the right) so nothing is clipped or
           hidden behind a horizontal scroll. From md up it is the usual table. */}
-      <Table className="max-md:block">
-        <TableHeader className="max-md:hidden">
-          <TableRow>
-            <TableHead className="hidden w-[100px] md:table-cell">
+      <Table role="table" aria-label="My jobs" className="max-md:block">
+        <TableHeader role="rowgroup" className="max-md:sr-only">
+          <TableRow role="row">
+            <TableHead role="columnheader" className="hidden w-[100px] md:table-cell">
               <span className="sr-only">Company Logo</span>
             </TableHead>
-            <TableHead className="hidden md:table-cell">Date Applied</TableHead>
-            <TableHead>Title</TableHead>
-            <TableHead>Company</TableHead>
-            <TableHead className="hidden md:table-cell">Location</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="hidden md:table-cell">Match</TableHead>
-            <TableHead className="hidden md:table-cell">Source</TableHead>
-            <TableHead>
+            <TableHead role="columnheader" className="hidden md:table-cell">Date Applied</TableHead>
+            <TableHead role="columnheader">Title</TableHead>
+            <TableHead role="columnheader">Company</TableHead>
+            <TableHead role="columnheader" className="hidden md:table-cell">Location</TableHead>
+            <TableHead role="columnheader">Status</TableHead>
+            <TableHead role="columnheader" className="hidden md:table-cell">Match</TableHead>
+            <TableHead role="columnheader" className="hidden md:table-cell">Source</TableHead>
+            <TableHead role="columnheader">
               <span className="sr-only">Actions</span>
             </TableHead>
           </TableRow>
         </TableHeader>
-        <TableBody className="max-md:block">
+        <TableBody role="rowgroup" className="max-md:block">
           {jobs.map((job: JobResponse) => {
             return (
-              <TableRow
+              <TableRow role="row"
                 key={job.id}
                 className="max-md:grid max-md:grid-cols-[minmax(0,1fr)_auto] max-md:items-center max-md:gap-x-2 max-md:gap-y-1 max-md:py-2"
               >
-                <TableCell className="hidden md:table-cell">
+                <TableCell role="cell" className="hidden md:table-cell">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     alt="Company logo"
@@ -88,10 +88,10 @@ function MyJobsTable({
                     }}
                   />
                 </TableCell>
-                <TableCell className="hidden md:table-cell w-[120px] whitespace-nowrap">
+                <TableCell role="cell" className="hidden md:table-cell w-[120px] whitespace-nowrap">
                   {job.appliedDate ? format(job.appliedDate, "PP") : "N/A"}
                 </TableCell>
-                <TableCell
+                <TableCell role="cell"
                   className="font-medium cursor-pointer min-w-0 max-md:col-start-1 max-md:block max-md:max-w-none max-md:px-2 max-md:py-0 md:max-w-[220px]"
                 >
                   <div className="flex items-center gap-1.5">
@@ -110,15 +110,15 @@ function MyJobsTable({
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="min-w-0 font-medium max-md:col-start-1 max-md:block max-md:max-w-none max-md:px-2 max-md:py-0 md:max-w-[160px]">
+                <TableCell role="cell" className="min-w-0 font-medium max-md:col-start-1 max-md:block max-md:max-w-none max-md:px-2 max-md:py-0 md:max-w-[160px]">
                   <span className="block truncate" title={job.Company?.label}>
                     {job.Company?.label}
                   </span>
                 </TableCell>
-                <TableCell className="hidden md:table-cell whitespace-nowrap max-w-[120px]">
+                <TableCell role="cell" className="hidden md:table-cell whitespace-nowrap max-w-[120px]">
                   <span className="block truncate">{job.Location?.label}</span>
                 </TableCell>
-                <TableCell className="max-md:col-start-1 max-md:block max-md:px-2 max-md:py-0">
+                <TableCell role="cell" className="max-md:col-start-1 max-md:block max-md:px-2 max-md:py-0">
                   <JobStatusBadgeMenu
                     job={job}
                     jobStatuses={jobStatuses}
@@ -126,17 +126,17 @@ function MyJobsTable({
                     className="min-w-[110px] whitespace-nowrap justify-center"
                   />
                 </TableCell>
-                <TableCell className="hidden md:table-cell">
+                <TableCell role="cell" className="hidden md:table-cell">
                   {job.matchScore != null ? (
                     <CircularScore score={job.matchScore} size="sm" animate={false} />
                   ) : (
                     <span className="text-muted-foreground">-</span>
                   )}
                 </TableCell>
-                <TableCell className="hidden md:table-cell">
+                <TableCell role="cell" className="hidden md:table-cell">
                   {job.JobSource?.label}
                 </TableCell>
-                <TableCell className="max-md:col-start-2 max-md:row-span-3 max-md:row-start-1 max-md:block max-md:px-0 max-md:py-0">
+                <TableCell role="cell" className="max-md:col-start-2 max-md:row-span-3 max-md:row-start-1 max-md:block max-md:px-0 max-md:py-0">
                   <JobActionsMenu
                     job={job}
                     jobStatuses={jobStatuses}

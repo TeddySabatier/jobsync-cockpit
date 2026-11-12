@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { destructiveConfirmClass } from "./destructiveConfirm";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -74,6 +75,7 @@ export default function TextDialog({
           </Button>
           <Button
             variant={destructive ? "destructive" : "default"}
+            className={destructive ? destructiveConfirmClass : undefined}
             data-destructive={destructive ? "true" : undefined}
             disabled={busy || trimmed.length === 0}
             onClick={() => onSubmit(trimmed)}

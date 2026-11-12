@@ -1,13 +1,29 @@
 // Pure helpers for the review queue: ordering and per-tab counts (D-040).
 // No Prisma import, so a client component and a unit test can use them.
 
-// A package whose send result is unknown, or whose send lock is still held,
-// is the one row that needs action first (SPEC §6.4).
-export function isSendUnknown(row: {
+import { STALE_LOCK_MS } from "./constants";
+
+type SendFields = {
   sendOutcome?: string | null;
   sendStartedAt?: Date | string | null;
-}): boolean {
-  return row.sendOutcome === "unknown" || !!row.sendStartedAt;
+};
+
+// "unknown": the outcome is unknown, or the lock is older than STALE_LOCK_MS
+// with no outcome (the sender died): needs action first (SPEC §6.4).
+// "sending": a fresh lock, a send is probably still in flight: shown, not
+// alarming. null: nothing pending.
+export type SendState = "unknown" | "sending" | null;
+
+export function sendState(row: SendFields, now: number = Date.now()): SendState {
+  if (row.sendOutcome === "unknown") return "unknown";
+  if (row.sendOutcome || !row.sendStartedAt) return null;
+  const started = new Date(row.sendStartedAt).getTime();
+  if (Number.isNaN(started)) return "unknown";
+  return now - started < STALE_LOCK_MS ? "sending" : "unknown";
+}
+
+export function isSendUnknown(row: SendFields, now: number = Date.now()): boolean {
+  return sendState(row, now) === "unknown";
 }
 
 // To do groups: "Ready to send" (approved) before "To review" (pending).
@@ -20,13 +36,9 @@ export function todoGroup(row: { status: string }): TodoGroup {
 // Send-unknown first, then approved, then pending. Array.prototype.sort is
 // stable, so the incoming order (newest first) holds inside each rank.
 export function sortTodoRows<
-  T extends {
-    status: string;
-    sendOutcome?: string | null;
-    sendStartedAt?: Date | string | null;
-  },
->(rows: T[]): T[] {
-  const rank = (r: T) => (isSendUnknown(r) ? 0 : todoGroup(r) === "ready" ? 1 : 2);
+  T extends { status: string } & SendFields,
+>(rows: T[], now: number = Date.now()): T[] {
+  const rank = (r: T) => (isSendUnknown(r, now) ? 0 : todoGroup(r) === "ready" ? 1 : 2);
   return [...rows].sort((a, b) => rank(a) - rank(b));
 }
 

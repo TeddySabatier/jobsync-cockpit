@@ -8,7 +8,8 @@ import {
 import type { CockpitResult } from "@/lib/cockpit/errors";
 import { STALE_LOCK_MS } from "@/lib/cockpit/constants";
 import { cn } from "@/lib/utils";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+import { destructiveConfirmClass } from "./destructiveConfirm";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -128,16 +129,14 @@ export default function SendOutcomePanel({
             <AlertDialogDescription>
               {confirm === "sent"
                 ? "Only do this if the email is in your Gmail Sent folder. The package becomes sent and the job becomes applied."
-                : "Only do this if the email is NOT in your Gmail Sent folder. Sending again would otherwise apply twice."}
+                : "Only do this if the email is NOT in your Gmail Sent folder. Gmail can show a message late: if you just tried to send, wait a minute and check again. The application goes back to Approved and can be sent again; sending again when the first email did go out would apply twice."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               disabled={busy}
-              className={cn(
-                confirm === "release" && buttonVariants({ variant: "destructive" }),
-              )}
+              className={cn(confirm === "release" && destructiveConfirmClass)}
               onClick={(e) => {
                 e.preventDefault();
                 if (confirm === "sent") {

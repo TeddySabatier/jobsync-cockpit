@@ -77,9 +77,10 @@ describe("status class map", () => {
 });
 
 describe("queue order and counts", () => {
-  it("isSendUnknown: unknown outcome or a held lock", () => {
+  it("isSendUnknown: unknown outcome or a stale lock (fresh locks: see uxVisualReview)", () => {
     expect(isSendUnknown({ sendOutcome: "unknown" })).toBe(true);
-    expect(isSendUnknown({ sendStartedAt: new Date() })).toBe(true);
+    expect(isSendUnknown({ sendStartedAt: new Date(Date.now() - 120_000) })).toBe(true);
+    expect(isSendUnknown({ sendStartedAt: new Date() })).toBe(false);
     expect(isSendUnknown({ sendOutcome: null, sendStartedAt: null })).toBe(false);
     expect(isSendUnknown({})).toBe(false);
   });

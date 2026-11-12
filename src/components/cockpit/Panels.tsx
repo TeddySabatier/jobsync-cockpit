@@ -19,13 +19,13 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Progress } from "@/components/ui/progress";
-import FitGradeBadge from "./FitGradeBadge";
 import { cn, formatUrl } from "@/lib/utils";
 import {
   attemptView,
   fitKind,
   fitLabel,
-  fitScore,
+  fitMax,
+  fitScoreView,
   humanizeKey,
   splitHistory,
   type HistoryTone,
@@ -231,11 +231,12 @@ function FitValue({ value, label }: { value: unknown; label: string }) {
 
 // "87 / 100" with a meter. The grade badge lives in the header and the queue
 // row, not repeated here.
-function FitScore({ value, label }: { value: number; label: string }) {
+function FitScore({ view, label }: { view: { percent: number; text: string }; label: string }) {
+  const value = view.percent;
   return (
     <div className="flex items-center gap-3">
       <span className="whitespace-nowrap font-semibold tabular-nums">
-        {`${value} / 100`}
+        {view.text}
       </span>
       <Progress
         value={value}
@@ -285,26 +286,23 @@ export function FitPanel({ pkg }: { pkg: PackageDetail["package"] }) {
     }
   }
   const isObject = !!parsed && typeof parsed === "object" && !Array.isArray(parsed);
+  const max = isObject ? fitMax(parsed as Record<string, unknown>) : null;
+  // The grade is in the detail header (and the queue row); not repeated here.
   return (
     <Panel title="Fit analysis" testId="panel-fit">
-      {pkg.fitGrade && (
-        <p className="mb-2 text-sm">
-          Grade: <FitGradeBadge grade={pkg.fitGrade} />
-        </p>
-      )}
       {!pkg.fitAnalysis ? (
         <p className="text-sm text-muted-foreground">No fit analysis.</p>
       ) : isObject ? (
         <dl className="flex flex-col gap-3 text-sm">
           {Object.entries(parsed as Record<string, unknown>).map(([k, v]) => {
-            const kind = fitKind(k, v);
+            const kind = fitKind(k, v, max);
             const label = fitLabel(k);
             return (
               <div key={k}>
                 <dt className="font-medium">{label}</dt>
                 <dd className="mt-0.5">
                   {kind === "score" ? (
-                    <FitScore value={fitScore(v) as number} label={label} />
+                    <FitScore view={fitScoreView(v, max)!} label={label} />
                   ) : kind === "strengths" || kind === "gaps" ? (
                     <FitList items={v as string[]} kind={kind} />
                   ) : (
@@ -500,6 +498,14 @@ export function SendHistoryPanel({
                   >
                     {formatDistanceToNow(when, { addSuffix: true })}
                   </time>
+                </p>
+                {/* Visible absolute time: the title tooltip does not exist on touch. */}
+                <p
+                  suppressHydrationWarning
+                  data-testid="send-attempt-abs"
+                  className="text-xs text-muted-foreground"
+                >
+                  {format(when, "PP p")}
                 </p>
                 <p className="mt-0.5">{v.sentence}</p>
                 {a.reason && (

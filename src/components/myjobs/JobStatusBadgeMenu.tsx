@@ -34,7 +34,7 @@ export function JobStatusBadgeMenu({
             <button
               type="button"
               aria-label={`Change status, currently ${job.Status?.label ?? ""}`}
-              className="cursor-pointer rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="cursor-pointer rounded-full max-md:inline-flex max-md:min-h-11 max-md:items-center focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <JobStatusBadge job={job} className={className} />
             </button>

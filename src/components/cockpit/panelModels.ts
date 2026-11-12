@@ -92,6 +92,7 @@ const FIT_LABELS: Record<string, string> = {
   summary: "Summary",
   score: "Match score",
   fitscore: "Match score",
+  fit_score: "Match score",
   strengths: "Strengths",
   gaps: "Gaps",
   weaknesses: "Gaps",
@@ -103,24 +104,72 @@ export function fitLabel(key: string): string {
 
 export type FitKind = "score" | "strengths" | "gaps" | "other";
 
-export function fitKind(key: string, value: unknown): FitKind {
-  const k = key.toLowerCase();
-  if ((k === "score" || k === "fitscore") && fitScore(value) !== null) return "score";
+const normKey = (key: string) => key.toLowerCase().replace(/[_\-\s]+/g, "");
+
+const SCORE_KEYS = new Set(["score", "fitscore"]);
+const MAX_KEYS = new Set(["maxscore", "scoremax", "max", "outof", "scale", "scoremaximum"]);
+
+// The stated maximum of a fit object ({score: 8, max_score: 10}), or null.
+export function fitMax(obj: Record<string, unknown>): number | null {
+  for (const [k, v] of Object.entries(obj)) {
+    if (!MAX_KEYS.has(normKey(k))) continue;
+    const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+export function fitKind(key: string, value: unknown, max: number | null = null): FitKind {
+  const k = normKey(key);
+  if (SCORE_KEYS.has(k) && fitScoreView(value, max) !== null) return "score";
   const list = Array.isArray(value) && value.every((v) => typeof v === "string");
   if (list && k === "strengths") return "strengths";
   if (list && (k === "gaps" || k === "weaknesses")) return "gaps";
   return "other";
 }
 
-// A numeric score in 0..100 (a numeric string counts); anything else is null
-// and falls back to plain text.
-export function fitScore(value: unknown): number | null {
-  const n =
-    typeof value === "number"
-      ? value
-      : typeof value === "string" && value.trim() !== ""
-        ? Number(value)
-        : NaN;
-  if (!Number.isFinite(n) || n < 0 || n > 100) return null;
-  return n;
+export type FitScoreView = { percent: number; text: string };
+
+const NUM = "(\\d+(?:\\.\\d+)?)";
+const PERCENT_RE = new RegExp(`^${NUM}\\s*%$`);
+const OF_RE = new RegExp(`^${NUM}\\s*(?:/|out of)\\s*${NUM}$`, "i");
+
+// Reads a score without ever guessing a wrong scale (a near-empty meter for
+// "8" on a 0..10 scale is worse than plain text):
+//   87, "87", "87%"          -> 87 / 100
+//   0.87                     -> 87 / 100 (a 0..1 fraction)
+//   "8/10", or 8 with max 10 -> 8 / 10 (scale stated)
+//   2..10 with no stated max, 1, negatives, > max, text -> null (plain text)
+export function fitScoreView(value: unknown, max: number | null = null): FitScoreView | null {
+  let n = NaN;
+  let scale = max;
+  if (typeof value === "number") n = value;
+  else if (typeof value === "string" && value.trim() !== "") {
+    const t = value.trim();
+    const pct = PERCENT_RE.exec(t);
+    const of = OF_RE.exec(t);
+    if (pct) {
+      n = Number(pct[1]);
+      scale = 100;
+    } else if (of) {
+      n = Number(of[1]);
+      scale = Number(of[2]);
+    } else n = Number(t);
+  }
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (scale !== null && scale !== undefined) {
+    if (!(scale > 0) || n > scale) return null;
+    return { percent: Math.round((n / scale) * 100), text: `${n} / ${scale}` };
+  }
+  let percent: number;
+  if (n === 0) percent = 0;
+  else if (n < 1) percent = Math.round(n * 100);
+  else if (n > 10 && n <= 100) percent = n;
+  else return null;
+  return { percent, text: `${percent} / 100` };
+}
+
+// The meter percentage, or null.
+export function fitScore(value: unknown, max: number | null = null): number | null {
+  return fitScoreView(value, max)?.percent ?? null;
 }

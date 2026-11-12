@@ -259,3 +259,26 @@ describe("MyJobsTable", () => {
     });
   });
 });
+
+describe("MyJobsTable accessibility (D-040 h)", () => {
+  it("keeps table semantics with explicit roles when the phone layout drops them", () => {
+    renderTable([makeJob()]);
+    const table = screen.getByRole("table", { name: "My jobs" });
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).toEqual(expect.arrayContaining(["Title", "Company", "Status"]));
+    expect(screen.getAllByRole("rowgroup")).toHaveLength(2);
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+    // The header row is visually hidden on a phone but stays in the a11y tree.
+    const thead = table.querySelector("thead")!;
+    expect(thead.className).toMatch(/max-md:sr-only/);
+    expect(thead.className).not.toMatch(/max-md:hidden/);
+    expect(screen.getAllByRole("cell").length).toBeGreaterThan(0);
+  });
+
+  it("the status menu trigger is 44px high on a phone", () => {
+    renderTable([makeJob()]);
+    expect(screen.getByRole("button", { name: /Change status/ }).className).toMatch(
+      /max-md:min-h-11/,
+    );
+  });
+});
