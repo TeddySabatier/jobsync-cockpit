@@ -192,7 +192,7 @@ async function insertLookups(
   for (const model of LOOKUP_MODELS) {
     const spec = MODEL_SPECS[model];
     for (const row of (data as unknown as Record<string, { id: string; value: string }[]>)[model]) {
-      const newId = idMap.mint(row.id);
+      const newId = idMap.mint(row.id, model);
       const { id: _old, ...rest } = row;
       await tx[spec.delegate].create({
         data: { ...rest, id: newId, createdBy: userId },
@@ -275,7 +275,7 @@ export async function importBackup(
   const idMap = new IdMap();
   for (const model of INSERT_ORDER) {
     if (MODEL_SPECS[model].lookup) continue;
-    for (const row of rowsFor(data, model)) idMap.mint(row.id as string);
+    for (const row of rowsFor(data, model)) idMap.mint(row.id as string, model);
   }
 
   // Captured before the wipe so the old bytes can be unlinked after it commits,

@@ -59,6 +59,12 @@ const CALLS: Array<[string, string, Record<string, unknown>]> = [
   ["list_jobs", "jobs:read", {}],
   ["get_job", "jobs:read", { jobId: "j1" }],
   ["list_change_requests", "jobs:read", {}],
+  ["list_due_follow_ups", "jobs:read", {}],
+  [
+    "submit_follow_up",
+    "package:write",
+    { jobId: "j1", emailBody: "b", idempotencyKey: "k1" },
+  ],
   ["mark_change_request_done", "package:write", { packageId: "p1", response: "Done" }],
 ];
 

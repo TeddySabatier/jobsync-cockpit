@@ -185,8 +185,12 @@ export async function snoozeFollowUp(
   });
 }
 
-// Skip the current step. The marker moves to this step's number, so the next
-// step counts from now (the skip date). A skipped step also ends its snooze.
+// Skip the current step. Only a step that is due or snoozed can be skipped (like
+// snooze), so a double click or skip-then-reject cannot skip both steps from one
+// intent: after a skip the next step is "scheduled" and refuses. The marker
+// moves to this step's number, so the next step counts from now (the skip date);
+// a skip also ends its snooze and, in the same transaction, supersedes the open
+// (non-locked) follow-up drafts, like an outcome does.
 export async function skipFollowUpStep(
   userId: string,
   jobId: string,
@@ -194,14 +198,16 @@ export async function skipFollowUpStep(
 ): Promise<FollowUpStateView> {
   return prisma.$transaction(async (tx) => {
     const due = await getFollowUpDue(userId, jobId, now, tx);
-    if (!due.eligible || due.status === "expired") {
+    if (!due.eligible || (due.status !== "due" && due.status !== "snoozed")) {
       throw new CockpitError("INVALID_STATE");
     }
-    return writeState(tx, userId, jobId, {
+    const state = await writeState(tx, userId, jobId, {
       skippedThrough: due.step,
       skippedAt: now,
       snoozedUntil: null,
     });
+    await supersedeOpenFollowUps(tx, userId, jobId, now);
+    return state;
   });
 }
 

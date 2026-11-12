@@ -10,8 +10,10 @@ import path from "path";
 import {
   AttachFileSchema,
   ListChangeRequestsSchema,
+  ListDueFollowUpsSchema,
   ListJobsSchema,
   SubmitApplicationPackageSchema,
+  SubmitFollowUpSchema,
 } from "@/lib/cockpit/schemas";
 
 const botDir = path.resolve(__dirname, "../../scripts/bot");
@@ -150,12 +152,35 @@ describe("cockpit_limits.json matches the real schemas (issue #83)", () => {
   it.each([
     ["list_jobs", ListJobsSchema],
     ["list_change_requests", ListChangeRequestsSchema],
+    ["list_due_follow_ups", ListDueFollowUpsSchema],
   ])("%s: limit from listLimitMin to listLimitMax, refused outside (not clamped)", (_n, schema) => {
     const limit = (v: unknown) => schema.safeParse({ limit: v }).success;
     expect(limit(num("listLimitMin"))).toBe(true);
     expect(limit(num("listLimitMax"))).toBe(true);
     expect(limit(num("listLimitMin") - 1)).toBe(false);
     expect(limit(num("listLimitMax") + 1)).toBe(false);
+  });
+
+  // D-034: submit_follow_up shares the subject, body and key limits.
+  it("submit_follow_up: subject, emailBody and idempotencyKey follow the same table", () => {
+    const fu = (over: Record<string, unknown> = {}) =>
+      SubmitFollowUpSchema.safeParse({
+        jobId: "job-1",
+        emailSubject: "Re: Application",
+        emailBody: "Hello",
+        idempotencyKey: "k1",
+        ...over,
+      }).success;
+    expect(fu({ emailSubject: "s".repeat(num("subjectMax")) })).toBe(true);
+    expect(fu({ emailSubject: "s".repeat(num("subjectMax") + 1) })).toBe(false);
+    expect(fu({ emailSubject: "\u200B" })).toBe(false);
+    expect(fu({ emailBody: "b".repeat(num("emailBodyMax")) })).toBe(true);
+    expect(fu({ emailBody: "b".repeat(num("emailBodyMax") + 1) })).toBe(false);
+    expect(fu({ emailBody: "\u3000\u2060" })).toBe(false);
+    const pattern = new RegExp(limits.idempotencyKeyPattern as string);
+    for (const key of ["a", "A.b_c:d-", "k".repeat(100), "k".repeat(101), "", "bad key", "café"]) {
+      expect(fu({ idempotencyKey: key }), JSON.stringify(key)).toBe(pattern.test(key));
+    }
   });
 
   it("the Python script reads this table (nothing hard-coded)", () => {

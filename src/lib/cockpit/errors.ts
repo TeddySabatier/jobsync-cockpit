@@ -15,6 +15,8 @@ export const COCKPIT_ERROR_MESSAGES = {
   JOB_REJECTED: "This job was rejected and no longer accepts packages",
   INVALID_STATE: "The package is not in a state that allows this action",
   CONFLICT: "The package or job changed, or a send is in progress; fetch the current state and retry the whole request",
+  FOLLOW_UP_NOT_DUE:
+    "No follow-up is due for this job (it was not applied by email, a reply or outcome is recorded, follow-ups were stopped, snoozed or skipped, or the step is not due yet or has expired); do not retry",
   TOO_LARGE: "The content is too large",
   RATE_LIMITED: "Too many requests; try again later",
   // Action-side codes

@@ -10,14 +10,17 @@ import {
 } from "@/lib/cockpit/errors";
 import { attachFile } from "@/lib/cockpit/attachments";
 import { ACTIVE_PACKAGE_ORDER, activePackageWhere } from "@/lib/cockpit/activePackage";
+import { listDueFollowUps, submitFollowUp } from "@/lib/cockpit/followUpMcp";
 import { markChangeRequestDone, submitPackage } from "@/lib/cockpit/packages";
 import {
   AttachFileInputShape,
   GetJobInputShape,
   ListChangeRequestsInputShape,
+  ListDueFollowUpsInputShape,
   ListJobsInputShape,
   MarkChangeRequestDoneInputShape,
   SubmitApplicationPackageObject,
+  SubmitFollowUpObject,
   emptyToNull,
 } from "@/lib/cockpit/schemas";
 import { COCKPIT_TOOL_DESCRIPTIONS } from "./cockpitDescriptions";
@@ -130,6 +133,41 @@ export function registerCockpitTools(
           };
         },
       ),
+  );
+
+  server.tool(
+    "list_due_follow_ups",
+    COCKPIT_TOOL_DESCRIPTIONS.list_due_follow_ups,
+    ListDueFollowUpsInputShape,
+    (raw) =>
+      runTool(ctx, "jobs:read", false, raw, async (input) => ({
+        followUps: await listDueFollowUps(userId, input.limit),
+      })),
+  );
+
+  // registerTool with a strict object, like submit_application_package: an
+  // unknown key (a misspelling, or `kind`, `emailTo`, `cvFileId`) is refused by
+  // the SDK, never dropped.
+  server.registerTool(
+    "submit_follow_up",
+    {
+      description: COCKPIT_TOOL_DESCRIPTIONS.submit_follow_up,
+      inputSchema: SubmitFollowUpObject,
+    },
+    (raw) =>
+      runTool(ctx, "package:write", false, raw, async (input) => {
+        const r = await submitFollowUp(userId, input);
+        return {
+          packageId: r.package.id,
+          version: r.package.version,
+          status: r.package.status,
+          supersededIds: r.supersededIds,
+          idempotent: r.idempotent,
+          replyToPackageId: r.replyToPackageId,
+          emailTo: r.emailTo,
+          emailSubject: r.emailSubject,
+        };
+      }),
   );
 
   server.tool(
@@ -285,6 +323,8 @@ export function registerCockpitTools(
             select: {
               id: true,
               jobId: true,
+              // "application" or "follow_up": which tool answers it (descriptions).
+              kind: true,
               version: true,
               changeRequest: true,
               changeRequestedAt: true,

@@ -98,6 +98,27 @@ export type SubmitApplicationPackageInput = z.output<
   typeof SubmitApplicationPackageSchema
 >;
 
+// ---- submit_follow_up (D-034) ---------------------------------------------
+// The same subject and body rules as an application (one set of limits, one
+// blank check). No recipient, no CV, no fit: the follow-up replies to the
+// application (To and the base of the subject come from it, server side).
+// idempotencyKey is required: a retried follow-up must not supersede itself.
+export const SubmitFollowUpInputShape = {
+  jobId: z.string().min(1),
+  emailSubject: emailSubjectField.optional(),
+  emailBody: emailBodyField,
+  idempotencyKey: z.string().regex(/^[A-Za-z0-9._:-]{1,100}$/),
+};
+export const SubmitFollowUpObject = z.strictObject(SubmitFollowUpInputShape);
+export const SubmitFollowUpSchema = SubmitFollowUpObject;
+export type SubmitFollowUpInput = z.output<typeof SubmitFollowUpSchema>;
+
+// ---- list_due_follow_ups (D-034) ------------------------------------------
+export const ListDueFollowUpsInputShape = {
+  limit: z.number().int().min(1).max(100).default(20),
+};
+export const ListDueFollowUpsSchema = z.object(ListDueFollowUpsInputShape);
+
 // ---- list_jobs ------------------------------------------------------------
 export const ListJobsInputShape = {
   status: z.string().min(1).optional(),
