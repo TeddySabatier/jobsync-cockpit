@@ -8,7 +8,7 @@ import { CockpitError } from "@/lib/cockpit/errors";
 import { toPackageView, toSendHistoryView } from "@/lib/cockpit/packageView";
 import { letterPdfName, sanitizePdfName } from "@/lib/cockpit/letterName";
 import { resolveCockpitFile } from "@/lib/cockpit/files";
-import { pickActive } from "@/lib/cockpit/activePackage";
+import { pickActive, type PackageKind } from "@/lib/cockpit/activePackage";
 import { findGmailPublic } from "@/lib/cockpit/connectedAccount";
 import {
   QUEUE_TAB_STATUSES,
@@ -102,7 +102,8 @@ export async function getPackageDetail(id: string) {
   return run(async (userId) => {
     const { cvFile, ...row } = await getPackageWithJob(userId, id);
     const [versions, gmail, history] = await Promise.all([
-      listJobVersions(userId, row.jobId),
+      // The versions of this package's own kind: they are numbered per (job, kind).
+      listJobVersions(userId, row.jobId, row.kind as PackageKind),
       findGmailPublic(userId),
       listSendHistory(userId, row.id),
     ]);

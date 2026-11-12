@@ -1,10 +1,16 @@
 import { Prisma, type ApplicationPackage } from "@prisma/client";
 import prisma from "@/lib/db";
 import { log } from "@/lib/telemetry";
-import { ACTIVE_PACKAGE_ORDER, activePackageWhere } from "./activePackage";
+import {
+  ACTIVE_PACKAGE_ORDER,
+  activePackageWhere,
+  sentApplicationWhere,
+  type PackageKind,
+} from "./activePackage";
 import { walkCvLeaves } from "./cvLeaves";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
+import { skipNextStepInTx } from "./followUps";
 import { sortTodoRows, tabCounts } from "./queueOrder";
 import {
   MarkChangeRequestDoneSchema,
@@ -55,22 +61,44 @@ function p2002Target(e: unknown): string | null {
   return Array.isArray(target) ? target.join(",") : String(target ?? "");
 }
 
-// Same key, same job: the existing package. Same key, other job: CONFLICT
-// (D-008), so the bot never believes a different job was submitted.
-function replay(existing: ApplicationPackage, jobId: string): SubmitResult {
-  if (existing.jobId !== jobId) throw new CockpitError("CONFLICT");
+// Same key, same job and same kind: the existing package. Same key, other job
+// or other kind: CONFLICT (D-008), so the bot never believes a different job, or
+// an application instead of a follow-up, was submitted.
+function replay(
+  existing: ApplicationPackage,
+  jobId: string,
+  kind: PackageKind,
+): SubmitResult {
+  if (existing.jobId !== jobId || existing.kind !== kind) {
+    throw new CockpitError("CONFLICT");
+  }
   return { package: existing, supersededIds: [], idempotent: true };
 }
 
 const RETRYABLE_PRISMA_CODES = ["P2034", "P1008", "P2028"];
 
+// D-031. The default is the V0 behaviour (an application). A "follow_up" keeps
+// its own version sequence, its own active package, supersede set and send-lock
+// check. It is NOT blocked by an earlier sent follow-up (ALREADY_SENT is the
+// application rule; the two-step cap and every other follow-up rule is
+// followUpDue.ts), and a rejected follow-up does not block a later one (a
+// rejected draft counts as a skipped step). Whether the job may get a follow-up
+// at all (eligibility, outcome, stopped) is the caller's check, not this one's.
+export type SubmitOptions = {
+  kind?: PackageKind;
+  // follow_up only: the application it replies to.
+  replyToPackageId?: string | null;
+};
+
 export async function submitPackage(
   userId: string,
   input: SubmitApplicationPackageInput,
+  opts: SubmitOptions = {},
 ): Promise<SubmitResult> {
+  const kind: PackageKind = opts.kind ?? "application";
   try {
     return await prisma.$transaction((tx) =>
-      submitInTransaction(tx, userId, input),
+      submitInTransaction(tx, userId, input, kind, opts.replyToPackageId ?? null),
     );
   } catch (e) {
     // Write conflict / deadlock (P2034), and what SQLite busy under concurrent
@@ -94,7 +122,7 @@ export async function submitPackage(
       const existing = await prisma.applicationPackage.findFirst({
         where: { userId, idempotencyKey: input.idempotencyKey },
       });
-      if (existing) return replay(existing, input.jobId);
+      if (existing) return replay(existing, input.jobId, kind);
     }
     // Version race (or anything else unique): the caller replays the submit.
     throw new CockpitError("CONFLICT");
@@ -105,6 +133,8 @@ async function submitInTransaction(
   tx: Db,
   userId: string,
   input: SubmitApplicationPackageInput,
+  kind: PackageKind,
+  replyToPackageId: string | null,
 ): Promise<SubmitResult> {
   // 1. The job must belong to the user.
   const job = await tx.job.findFirst({
@@ -118,27 +148,31 @@ async function submitInTransaction(
     const existing = await tx.applicationPackage.findFirst({
       where: { userId, idempotencyKey: input.idempotencyKey },
     });
-    if (existing) return replay(existing, job.id);
+    if (existing) return replay(existing, job.id, kind);
   }
 
-  // 3. Any past sent package blocks every later submit (no double apply).
-  const sent = await tx.applicationPackage.findFirst({
-    where: { jobId: job.id, status: "sent" },
-    select: { id: true },
-  });
-  if (sent) throw new CockpitError("ALREADY_SENT");
+  // 3. A sent application blocks every later application (no double apply).
+  // Per kind: a sent follow-up is not an application, and does not block the
+  // next follow-up (the cap is followUpDue.ts).
+  if (kind === "application") {
+    const sent = await tx.applicationPackage.findFirst({
+      where: sentApplicationWhere({ jobId: job.id }),
+      select: { id: true },
+    });
+    if (sent) throw new CockpitError("ALREADY_SENT");
 
-  // 4. The user said no to this job.
-  const active = await tx.applicationPackage.findFirst({
-    where: activePackageWhere({ jobId: job.id }),
-    orderBy: ACTIVE_PACKAGE_ORDER,
-    select: { status: true },
-  });
-  if (active?.status === "rejected") throw new CockpitError("JOB_REJECTED");
+    // 4. The user said no to this job.
+    const active = await tx.applicationPackage.findFirst({
+      where: activePackageWhere({ jobId: job.id }, "application"),
+      orderBy: ACTIVE_PACKAGE_ORDER,
+      select: { status: true },
+    });
+    if (active?.status === "rejected") throw new CockpitError("JOB_REJECTED");
+  }
 
   // 5. A send is in progress or unresolved: resolve it in the UI first.
   const locked = await tx.applicationPackage.findFirst({
-    where: { jobId: job.id, sendStartedAt: { not: null } },
+    where: { jobId: job.id, kind, sendStartedAt: { not: null } },
     select: { id: true },
   });
   if (locked) throw new CockpitError("CONFLICT");
@@ -151,9 +185,9 @@ async function submitInTransaction(
     }
   }
 
-  // 7. Next version.
+  // 7. Next version, per (job, kind).
   const max = await tx.applicationPackage.aggregate({
-    where: { jobId: job.id },
+    where: { jobId: job.id, kind },
     _max: { version: true },
   });
   const version = (max._max.version ?? 0) + 1;
@@ -166,6 +200,7 @@ async function submitInTransaction(
     where: {
       jobId: job.id,
       userId,
+      kind,
       status: { in: ["pending", "approved", "changes_requested"] },
       sendStartedAt: null,
     },
@@ -197,6 +232,8 @@ async function submitInTransaction(
       userId,
       jobId: job.id,
       version,
+      kind,
+      replyToPackageId: kind === "follow_up" ? replyToPackageId : null,
       status: "pending",
       emailTo: input.emailTo ?? null,
       emailSubject: input.emailSubject,
@@ -290,10 +327,22 @@ export async function rejectPackage(
   reason: string,
 ) {
   const { reason: rejectReason } = parse(RejectPackageSchema, { reason });
-  await transition(prisma, userId, id, ["pending", "approved"], {
-    status: "rejected",
-    rejectReason,
-    rejectedAt: new Date(),
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await transition(tx, userId, id, ["pending", "approved"], {
+      status: "rejected",
+      rejectReason,
+      rejectedAt: now,
+    });
+    // Rejecting a follow-up draft skips that step, so the bot is not asked to
+    // draft it again (V1 plan 3.1, D-031). In the same transaction.
+    const pkg = await tx.applicationPackage.findFirst({
+      where: { id, userId },
+      select: { kind: true, jobId: true },
+    });
+    if (pkg?.kind === "follow_up") {
+      await skipNextStepInTx(tx, userId, pkg.jobId, now);
+    }
   });
   return reload(userId, id);
 }
@@ -389,7 +438,8 @@ export async function markPackageAppliedManually(userId: string, id: string) {
       id,
       ["pending", "approved"],
       { status: "sent", sentVia: "manual", sentAt: now },
-      { OR: [{ emailTo: null }, { emailTo: "" }] },
+      // Applications only until F-4 (D-031): a follow-up never marks a job applied.
+      { kind: "application", OR: [{ emailTo: null }, { emailTo: "" }] },
     );
     const { jobId } = await tx.applicationPackage.findFirstOrThrow({
       where: { id, userId },
@@ -472,12 +522,18 @@ export async function updatePackageContent(
 // ---------------------------------------------------------------------------
 
 // One row per job: the active package (highest non-superseded version). By
-// §2.2 a job never has two non-superseded packages (a submit supersedes the
-// open ones; sent/rejected block further submits), so filtering on the tab
-// statuses is enough. Newest first.
-export async function listPackagesByTab(userId: string, tab: QueueTab) {
+// §2.2 a job never has two non-superseded packages of a kind (a submit
+// supersedes the open ones; sent/rejected block further submits), so filtering
+// on the tab statuses is enough. Newest first. The queue tabs list applications
+// only (D-031): follow-up drafts have their own tab, so the default is
+// "application".
+export async function listPackagesByTab(
+  userId: string,
+  tab: QueueTab,
+  kind: PackageKind = "application",
+) {
   const rows = await prisma.applicationPackage.findMany({
-    where: { userId, status: { in: QUEUE_TAB_STATUSES[tab] } },
+    where: { userId, kind, status: { in: QUEUE_TAB_STATUSES[tab] } },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -504,13 +560,16 @@ export async function listPackagesByTab(userId: string, tab: QueueTab) {
   return tab === "todo" ? sortTodoRows(rows) : rows;
 }
 
-// One count per tab, from a single groupBy (no rows are loaded).
+// One count per tab, from a single groupBy (no rows are loaded). Same kind
+// scope as listPackagesByTab, so a tab count matches its list (follow-up
+// drafts are not counted in the application tabs, D-031).
 export async function countPackagesByTab(
   userId: string,
+  kind: PackageKind = "application",
 ): Promise<Record<QueueTab, number>> {
   const groups = await prisma.applicationPackage.groupBy({
     by: ["status"],
-    where: { userId },
+    where: { userId, kind },
     _count: { _all: true },
   });
   return tabCounts(
@@ -556,10 +615,15 @@ export function listSendHistory(userId: string, packageId: string) {
   });
 }
 
-// All versions of a job, newest first (version selector).
-export function listJobVersions(userId: string, jobId: string) {
+// All versions of one kind of a job, newest first (version selector). Versions
+// are numbered per (job, kind), so the two kinds are separate lists.
+export function listJobVersions(
+  userId: string,
+  jobId: string,
+  kind: PackageKind = "application",
+) {
   return prisma.applicationPackage.findMany({
-    where: { userId, jobId },
+    where: { userId, jobId, kind },
     orderBy: { version: "desc" },
     select: { id: true, version: true, status: true },
   });
