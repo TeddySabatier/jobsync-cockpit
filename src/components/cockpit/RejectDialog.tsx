@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { destructiveConfirmClass } from "./destructiveConfirm";
 import { REJECT_REASON_CHIPS, TEXT_MAX } from "@/lib/cockpit/rejectReasons";
 
 // Reject (D-041): the reason is OPTIONAL. A chip fills it in one tap; free text
@@ -67,6 +68,7 @@ export default function RejectDialog({
           </Button>
           <Button
             variant="destructive"
+            className={destructiveConfirmClass}
             disabled={busy}
             onClick={() => onSubmit(text.trim())}
           >

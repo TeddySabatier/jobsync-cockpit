@@ -11,6 +11,7 @@ import { walkCvLeaves } from "./cvLeaves";
 import { CockpitError } from "./errors";
 import { resolveCockpitFile } from "./files";
 import { skipNextStepInTx } from "./followUps";
+import { sortTodoRows, tabCounts } from "./queueOrder";
 import {
   MarkChangeRequestDoneSchema,
   RejectPackageSchema,
@@ -622,12 +623,12 @@ export async function updatePackageContent(
 // on the tab statuses is enough. Newest first. The queue tabs list applications
 // only (D-031): follow-up drafts have their own tab, so the default is
 // "application".
-export function listPackagesByTab(
+export async function listPackagesByTab(
   userId: string,
   tab: QueueTab,
   kind: PackageKind = "application",
 ) {
-  return prisma.applicationPackage.findMany({
+  const rows = await prisma.applicationPackage.findMany({
     where: { userId, kind, status: { in: QUEUE_TAB_STATUSES[tab] } },
     orderBy: { createdAt: "desc" },
     select: {
@@ -639,6 +640,8 @@ export function listPackagesByTab(
       emailTo: true,
       cvFileId: true,
       cvPdfStale: true,
+      sendOutcome: true,
+      sendStartedAt: true,
       createdAt: true,
       job: {
         select: {
@@ -649,6 +652,26 @@ export function listPackagesByTab(
       },
     },
   });
+  // To do: send-unknown first, then approved, then pending (D-040).
+  return tab === "todo" ? sortTodoRows(rows) : rows;
+}
+
+// One count per tab, from a single groupBy (no rows are loaded). Same kind
+// scope as listPackagesByTab, so a tab count matches its list (follow-up
+// drafts are not counted in the application tabs, D-031).
+export async function countPackagesByTab(
+  userId: string,
+  kind: PackageKind = "application",
+): Promise<Record<QueueTab, number>> {
+  const groups = await prisma.applicationPackage.groupBy({
+    by: ["status"],
+    where: { userId, kind },
+    _count: { _all: true },
+  });
+  return tabCounts(
+    groups.map((g) => ({ status: g.status, count: g._count._all })),
+    QUEUE_TAB_STATUSES,
+  );
 }
 
 // Full package with its job and CV file row, scoped to the user.

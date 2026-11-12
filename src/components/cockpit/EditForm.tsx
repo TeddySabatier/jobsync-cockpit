@@ -110,7 +110,7 @@ function Field({
       <Label htmlFor={id}>{label}</Label>
       {children}
       {error && (
-        <p id={`${id}-error`} role="alert" className="text-sm text-destructive">
+        <p id={`${id}-error`} role="alert" className="text-sm text-destructive dark:text-red-400">
           {error}
         </p>
       )}
@@ -258,9 +258,9 @@ export default function EditForm({
         <div
           role="alert"
           data-testid="edit-conflict"
-          className="flex flex-wrap items-center gap-2 rounded-md border border-destructive p-3 text-sm"
+          className="flex flex-wrap items-center gap-2 rounded-md border border-destructive p-3 text-sm dark:border-red-400"
         >
-          <span>{RELOAD_MESSAGE}</span>
+          <span className="dark:text-red-400">{RELOAD_MESSAGE}</span>
           <Button
             type="button"
             variant="outline"

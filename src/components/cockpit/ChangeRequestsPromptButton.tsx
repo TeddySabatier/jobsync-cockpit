@@ -21,7 +21,6 @@ export function ChangeRequestsPromptButton({
       textTestId="change-requests-prompt-text"
       className={className}
       variant={variant}
-      showLabel
     />
   );
 }

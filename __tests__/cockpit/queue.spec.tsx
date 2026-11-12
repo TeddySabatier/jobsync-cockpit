@@ -27,6 +27,8 @@ const row = (over: Partial<QueueRowData> = {}): QueueRowData => ({
   emailTo: "jobs@acme.example",
   cvFileId: "f1",
   cvPdfStale: false,
+  sendStartedAt: null,
+  sendOutcome: null,
   createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
   job: {
     id: "j1",

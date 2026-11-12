@@ -50,7 +50,6 @@ export function CopyPromptButton({
   textTestId,
   className,
   variant = "outline",
-  showLabel = false,
 }: {
   buildPrompt: () => string;
   label: string;
@@ -61,8 +60,6 @@ export function CopyPromptButton({
   // Replaces the default compact look (the action bar wants a full-size button).
   className?: string;
   variant?: "outline" | "default";
-  // Keep the label visible below sm (the default hides it to save toolbar room).
-  showLabel?: boolean;
 }) {
   const [manualText, setManualText] = useState<string | null>(null);
 
@@ -80,15 +77,13 @@ export function CopyPromptButton({
       <Button
         size="sm"
         variant={variant}
-        className={className ?? "h-8 gap-1 cursor-pointer"}
+        className={className ?? "h-8 gap-1 cursor-pointer max-sm:h-11 max-sm:min-w-11"}
         data-testid={testId}
         title={title}
         onClick={onClick}
       >
         <ClipboardCopy className="h-3.5 w-3.5" />
-        <span className={showLabel ? undefined : "sr-only sm:not-sr-only sm:whitespace-nowrap"}>
-          {label}
-        </span>
+        <span className="whitespace-nowrap">{label}</span>
       </Button>
       <Dialog open={manualText !== null} onOpenChange={(open) => !open && setManualText(null)}>
         <DialogContent className="max-w-2xl">
