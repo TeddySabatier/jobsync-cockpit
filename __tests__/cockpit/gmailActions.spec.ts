@@ -8,6 +8,8 @@ vi.mock("@/utils/user.utils", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+import { revalidatePath } from "next/cache";
+import { getCurrentUser } from "@/utils/user.utils";
 import prisma from "@/lib/db";
 import { encrypt } from "@/lib/encryption";
 import { disconnectGmail, getGmailSettings } from "@/actions/cockpitGmail.actions";
@@ -43,6 +45,12 @@ describe("disconnectGmail", () => {
       "refresh-1",
     );
     expect(deleteMany).toHaveBeenCalledWith({ where: { userId: "u1" } });
+    // The token lookup is scoped to the session user and selects only what it needs.
+    expect(findAccount).toHaveBeenCalledWith({
+      where: { userId: "u1" },
+      select: { encryptedRefreshToken: true, iv: true },
+    });
+    expect(revalidatePath).toHaveBeenCalledWith("/dashboard/review/settings");
   });
 
   it("deletes the row even when the revoke fails or the key is lost", async () => {
@@ -62,6 +70,28 @@ describe("disconnectGmail", () => {
     findAccount.mockResolvedValue(null);
     expect((await disconnectGmail()).success).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe.each([
+  ["disconnectGmail", () => disconnectGmail()],
+  ["getGmailSettings", () => getGmailSettings()],
+])("%s guards", (_n, call) => {
+  it("flag off: COCKPIT_DISABLED, no DB access, no Google call, no revalidation", async () => {
+    vi.stubEnv("COCKPIT_ENABLED", "false");
+    vi.mocked(revalidatePath).mockClear();
+    expect(await call()).toMatchObject({ success: false, code: "COCKPIT_DISABLED" });
+    expect(findAccount).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("anonymous + flag off: UNAUTHENTICATED", async () => {
+    vi.stubEnv("COCKPIT_ENABLED", "false");
+    vi.mocked(getCurrentUser).mockResolvedValueOnce(null);
+    expect(await call()).toMatchObject({ success: false, code: "UNAUTHENTICATED" });
+    expect(findAccount).not.toHaveBeenCalled();
   });
 });
 

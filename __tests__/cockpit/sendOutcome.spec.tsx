@@ -33,8 +33,6 @@ const LONG_BODY =
 const detail = (over: Partial<PackageDetail["package"]> = {}): PackageDetail => ({
   package: {
     id: "p1",
-    userId: "u1",
-    jobId: "j1",
     version: 1,
     status: "approved",
     emailTo: "jobs@acme.example",
@@ -46,21 +44,12 @@ const detail = (over: Partial<PackageDetail["package"]> = {}): PackageDetail => 
     cvJson: null,
     cvFileId: "f1",
     cvPdfStale: false,
-    sourceFolder: null,
-    idempotencyKey: null,
     rejectReason: null,
     changeRequest: null,
     changeRequestedAt: null,
-    changeRequestHandledAt: null,
     changeRequestResponse: null,
-    editedAt: null,
-    approvedAt: null,
-    rejectedAt: null,
     sendStartedAt: null,
     sendOutcome: null,
-    sentAt: null,
-    sentVia: null,
-    createdAt: UPDATED,
     updatedAt: UPDATED,
     job: {
       id: "j1",
@@ -77,6 +66,7 @@ const detail = (over: Partial<PackageDetail["package"]> = {}): PackageDetail => 
   attachment: { fileName: "0000-uuid.pdf", size: 12288 },
   letterAttachment: { fileName: "Cover_Letter.pdf" },
   gmail: { email: "you@example.com", scopes: "gmail.send" },
+  gmailSendAllowed: true,
 });
 
 beforeEach(() => {

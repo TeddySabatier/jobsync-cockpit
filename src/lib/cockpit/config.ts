@@ -5,6 +5,14 @@ export function isCockpitEnabled(): boolean {
   return process.env.COCKPIT_ENABLED === "true";
 }
 
+// True when the connected Gmail address is the one the owner allowed for
+// sending (COCKPIT_GMAIL_ALLOWED_ADDRESS, compared trimmed and lower-cased).
+export function isGmailSendAllowed(accountEmail: string | null | undefined): boolean {
+  const allowed = process.env.COCKPIT_GMAIL_ALLOWED_ADDRESS?.trim().toLowerCase();
+  if (!accountEmail || !allowed) return false;
+  return accountEmail.trim().toLowerCase() === allowed;
+}
+
 // New MCP token scopes (SPEC §3). Spread into the default token scopes.
 export const COCKPIT_SCOPES = ["jobs:read", "package:write"] as const;
 

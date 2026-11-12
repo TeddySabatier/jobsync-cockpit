@@ -161,6 +161,8 @@ A send (Gmail or manual) moves the job status to **Applied** only when it is sti
 
 ### UI actions (`success: false`, `code`)
 
+After any failure except `UNAUTHENTICATED` and `COCKPIT_DISABLED` the page is refreshed, so a stale button disappears.
+
 | Code | Meaning / action |
 |------|------------------|
 | `COCKPIT_DISABLED` | Set `COCKPIT_ENABLED=true` and restart |
