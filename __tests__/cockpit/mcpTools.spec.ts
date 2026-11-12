@@ -137,6 +137,36 @@ describe("registered tools", () => {
     expect(ok.isError).toBe(false);
     expect(await prisma.applicationPackage.count({ where: { jobId } })).toBe(1);
   });
+
+  // Issue #82: no visible character is blank, over the real MCP stack + SQLite.
+  it.each([
+    ["zero width space", "\u200B"],
+    ["word joiner and BOM", "\u2060\uFEFF"],
+    ["soft hyphen", "\u00AD"],
+    ["NBSP", "\u00A0\u00A0"],
+    ["line and paragraph separator", "\u2028\u2029"],
+    ["ideographic space", "\u3000"],
+  ])("submit_application_package refuses a subject or body made only of %s and stores nothing", async (_n, v) => {
+    const c = await asUser(userA);
+    const jobId = await newJob(userA);
+    const badSubject = await c.call("submit_application_package", submitArgs(jobId, { emailSubject: v }));
+    const badBody = await c.call("submit_application_package", submitArgs(jobId, { emailBody: v }));
+    const fine = await c.call(
+      "submit_application_package",
+      submitArgs(jobId, { emailSubject: `${v}Hi${v}`, emailBody: `${v}Hello${v}` }),
+    );
+    await c.close();
+    expect(badSubject.isError).toBe(true);
+    expect(badSubject.text).toMatch(/blank/i);
+    expect(badBody.isError).toBe(true);
+    expect(badBody.text).toMatch(/blank/i);
+    expect(fine.isError).toBe(false);
+    // Only the good call stored a package, and its text is kept as sent.
+    const rows = await prisma.applicationPackage.findMany({ where: { jobId } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].emailSubject).toBe(`${v}Hi${v}`);
+    expect(rows[0].emailBody).toBe(`${v}Hello${v}`);
+  });
 });
 
 describe("tool descriptions", () => {

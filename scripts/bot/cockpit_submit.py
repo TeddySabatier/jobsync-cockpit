@@ -48,14 +48,21 @@ from pathlib import Path
 # request then waits about 20 seconds before falling back to IPv4.
 DEFAULT_URL = "http://127.0.0.1:3737/api/mcp"
 TIMEOUT_SECONDS = 90
-MAX_BASE64_CHARS = 7_000_000  # the server's limit for attach_file
+# The server's limits live in ONE table shared with the test stub (cockpit_limits.json);
+# __tests__/cockpit/botLimits.spec.ts checks it against the server's Zod schemas.
+with open(Path(__file__).with_name("cockpit_limits.json"), encoding="utf-8") as _limits_file:
+    LIMITS = json.load(_limits_file)
+MAX_BASE64_CHARS = LIMITS["base64Max"]  # the server's limit for attach_file
 MAX_PDF_BYTES = MAX_BASE64_CHARS // 4 * 3
-MAX_SUBJECT = 300
-MAX_TEXT = 20_000  # emailBody and letterMd
-MAX_CV_JSON = 200_000
-MAX_FIT_ANALYSIS = 20_000
-MAX_FILE_NAME = 120
-MAX_CHANGE_REQUESTS = 100  # the server's own maximum for list_change_requests
+MAX_SUBJECT = LIMITS["subjectMax"]
+MAX_TEXT = LIMITS["emailBodyMax"]  # emailBody and letterMd (same cap)
+MAX_CV_JSON = LIMITS["cvJsonMax"]
+MAX_FIT_ANALYSIS = LIMITS["fitAnalysisMax"]
+MAX_FILE_NAME = LIMITS["fileNameMax"]
+MAX_ADDRESS = LIMITS["emailAddressMax"]
+MAX_SOURCE_FOLDER = LIMITS["sourceFolderMax"]
+MIN_LIST_LIMIT = LIMITS["listLimitMin"]
+MAX_CHANGE_REQUESTS = LIMITS["listLimitMax"]  # the server's own maximum for list_jobs / list_change_requests
 LOOPBACK = ("localhost", "127.0.0.1", "::1")
 MARKER_NAME = ".cockpit-submitted.json"
 UUID = r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
@@ -229,6 +236,28 @@ def u16len(text):
     return len(text.encode("utf-16-le", errors="surrogatepass")) // 2
 
 
+def truncate16(text, limit):
+    """At most `limit` UTF-16 units (the server's count), never splitting a character."""
+    while u16len(text) > limit:
+        text = text[:-1]
+    return text
+
+
+# Characters with no visible glyph besides whitespace and the Z*, Cc and Cf categories: the
+# Hangul fillers, the Braille blank and the combining grapheme joiner. The server's blank
+# check (src/lib/cockpit/schemas.ts, isBlankText) strips the same set.
+_INVISIBLE_EXTRA = frozenset("\u034F\u115F\u1160\u2800\u3164\uFFA0")
+
+
+def is_blank_text(text):
+    """True for a string with no visible character: empty, whitespace, zero-width characters,
+    soft hyphen, NBSP, U+2028/2029, U+3000, any other Unicode space, control or format character."""
+    return all(
+        c.isspace() or c in _INVISIBLE_EXTRA or unicodedata.category(c) in ("Zs", "Zl", "Zp", "Cc", "Cf")
+        for c in text
+    )
+
+
 def idempotency_key(company, role, link, revision_package="", manual_digest=""):
     """Identifies ONE posting (company, role and link), not a day and not a folder:
     two postings with the same company and title but different links get different
@@ -316,13 +345,13 @@ def validate_package(subject, recipient, body, letter, fit, cv_json=None, fit_an
     Limits and the address pattern are the server's own."""
     if fit not in ("A", "B"):
         raise CockpitError("VALIDATION", "The fit must be A or B.")
-    if not subject or u16len(subject) > MAX_SUBJECT or "\r" in subject or "\n" in subject:
+    if is_blank_text(subject) or u16len(subject) > MAX_SUBJECT or "\r" in subject or "\n" in subject:
         raise CockpitError("VALIDATION", "The subject must be one line of 1 to %d characters." % MAX_SUBJECT)
     if recipient and (
-        len(recipient) > 254 or not EMAIL_RE.match(recipient) or any(c in recipient for c in "\r\n,")
+        u16len(recipient) > MAX_ADDRESS or not EMAIL_RE.match(recipient) or any(c in recipient for c in "\r\n,")
     ):
         raise CockpitError("VALIDATION", "The recipient is not a valid single email address.")
-    if not body.strip():
+    if is_blank_text(body):
         raise CockpitError("VALIDATION", "The email body is empty.")
     if u16len(body) > MAX_TEXT or u16len(letter) > MAX_TEXT:
         raise CockpitError("VALIDATION", "The letter or email body is longer than %d characters." % MAX_TEXT)
@@ -636,7 +665,7 @@ def cmd_submit(args, url, token):
                 "fitAnalysis": fit_analysis,
                 "cvJson": cv_json,
                 "cvFileId": uploaded[0],
-                "sourceFolder": (folder.resolve().name or "application")[:300],
+                "sourceFolder": truncate16(folder.resolve().name or "application", MAX_SOURCE_FOLDER),
                 "idempotencyKey": key,
             })
         )
@@ -680,7 +709,8 @@ def cmd_changes(args, url, token):
     email, so twenty of them are megabytes in the bot's context. --full (or --package ID, which
     implies it for that one request) prints everything."""
     # --package must see every open request (100 is the server's maximum), not just the first --limit.
-    limit = MAX_CHANGE_REQUESTS if args.package else args.limit
+    # A --limit outside the server's 1..100 is clamped here: the server would refuse it.
+    limit = MAX_CHANGE_REQUESTS if args.package else min(max(args.limit, MIN_LIST_LIMIT), MAX_CHANGE_REQUESTS)
     items = json.loads(call(url, token, "list_change_requests", {"limit": limit}))
     listed = len(items)
     if args.package:

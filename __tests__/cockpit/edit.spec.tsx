@@ -300,6 +300,17 @@ describe("edit form: client validation mirrors the zod rules", () => {
     expect(e.emailBody).toBe("Must not be blank");
   });
 
+  it("says 'Must not be blank' for a subject and body with no visible character (issue #82)", () => {
+    for (const v of ["\u200B", "\u2060\uFEFF", "\u00AD", "\u00A0", "\u2028\u2029", "\u3000"]) {
+      const e = validateEditValues({ ...base, emailSubject: v, emailBody: v });
+      expect(e.emailSubject).toBe("Must not be blank");
+      expect(e.emailBody).toBe("Must not be blank");
+    }
+    const kept = validateEditValues({ ...base, emailSubject: "\u200Bx", emailBody: "\u200Bx" });
+    expect(kept.emailSubject).toBeUndefined();
+    expect(kept.emailBody).toBeUndefined();
+  });
+
   it("blocks Save and shows the error", async () => {
     render(<EditForm detail={fixture()} onClose={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("To"), { target: { value: "not-an-email" } });

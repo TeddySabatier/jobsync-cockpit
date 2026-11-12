@@ -31,6 +31,15 @@ import cockpit_submit as cs
 TOKEN = "jsync_TESTTOKEN_do_not_print_1234567890"
 PDF = b"%PDF-1.4\n% synthetic cv\n%%EOF\n"
 KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{1,100}$")
+CONFLICT_TEXT = "The package or job changed, or a send is in progress; fetch the current state and retry the whole request"
+LIMITS = json.loads((Path(__file__).parent / "cockpit_limits.json").read_text(encoding="utf-8"))
+SUBMIT_KEYS = ("jobId", "emailTo", "emailSubject", "emailBody", "letterMd", "fitGrade", "fitAnalysis",
+               "cvJson", "cvFileId", "sourceFolder", "idempotencyKey")
+# The server's blank rule, written out independently of the script's: only whitespace, separators,
+# control / format characters (zero width, soft hyphen, BOM) and the fillers that draw nothing.
+BLANK_RE = re.compile(
+    r"^[\s\u00AD\u034F\u115F\u1160\u180E\u200B-\u200F\u2028-\u202F\u205F-\u206F\u2800\u3000\u3164\uFEFF\uFFA0\x00-\x1f\x7f-\x9f]*$"
+)
 JOB = "00000000-0000-4000-8000-%012d"
 LINK = "https://example.com/job/1"
 
@@ -55,6 +64,8 @@ class Stub:
         self.fail_once = {}  # tool -> isError text, for the NEXT call only
         self.plain = {}  # tool -> plain-text answer (rate limit, scope, "Error: ...")
         self.change_requests = []
+        self.locked = set()  # job ids with a send in progress: a new package there is a CONFLICT
+        self.races = set()  # job ids whose NEXT new submit loses a version race (CONFLICT, package changed)
         self.tools = [
             "add_job", "find_job", "get_job", "attach_file", "submit_application_package",
             "list_jobs", "list_change_requests", "mark_change_request_done",
@@ -125,22 +136,82 @@ class Stub:
 
     def invalid_input(self, name, arguments):
         """The server's input checks that a bot bug could hit (limits, PDF magic, key pattern)."""
+        # The limits come from the shared table (LIMITS); lengths are UTF-16 units like the server's.
         if name == "attach_file":
-            content = arguments.get("contentBase64", "")
-            if len(content) > cs.MAX_BASE64_CHARS:
-                return "contentBase64 is too long"
-            if not base64.b64decode(content)[:5] == b"%PDF-":
-                return "The file is not a PDF"
+            return self.check(arguments, required=("fileName", "mimeType", "contentBase64"),
+                              allowed=("fileName", "mimeType", "contentBase64"), checks=(
+                lambda a: self.length_problem("fileName", a["fileName"], LIMITS["fileNameMin"], LIMITS["fileNameMax"]),
+                lambda a: None if a["mimeType"] == "application/pdf" else "mimeType must be application/pdf",
+                lambda a: self.length_problem("contentBase64", a["contentBase64"], 0, LIMITS["base64Max"]),
+                lambda a: None if base64.b64decode(a["contentBase64"])[:5] == b"%PDF-" else "The file is not a PDF",
+            ))
         if name == "submit_application_package":
-            if not KEY_RE.match(arguments.get("idempotencyKey", "")):
-                return "idempotencyKey has an invalid format"
-            if len(arguments.get("emailSubject", "")) > cs.MAX_SUBJECT or not arguments.get("emailSubject"):
-                return "emailSubject must be 1 to 300 characters"
-            for field in ("emailBody", "letterMd"):
-                if len(arguments.get(field) or "") > cs.MAX_TEXT:
-                    return field + " is too long"
-            if arguments.get("fitGrade") not in ("A", "B"):
-                return "fitGrade must be A or B"
+            return self.check(arguments, required=("jobId", "emailSubject", "emailBody", "fitGrade"),
+                              allowed=SUBMIT_KEYS, checks=(
+                lambda a: self.length_problem("jobId", a["jobId"], 1, None),
+                lambda a: self.address_problem(a.get("emailTo")),
+                lambda a: self.length_problem("emailSubject", a["emailSubject"], 1, LIMITS["subjectMax"]),
+                lambda a: "emailSubject must be one line" if re.search("[\r\n]", a["emailSubject"]) else None,
+                lambda a: "emailSubject must not be blank" if BLANK_RE.match(a["emailSubject"]) else None,
+                lambda a: self.length_problem("emailBody", a["emailBody"], 1, LIMITS["emailBodyMax"]),
+                lambda a: "emailBody must not be blank" if BLANK_RE.match(a["emailBody"]) else None,
+                lambda a: self.length_problem("letterMd", a.get("letterMd") or "", 0, LIMITS["letterMdMax"]),
+                lambda a: None if a["fitGrade"] in ("A", "B") else "fitGrade must be A or B",
+                lambda a: self.json_problem("fitAnalysis", a.get("fitAnalysis"), LIMITS["fitAnalysisMax"]),
+                lambda a: self.json_problem("cvJson", a.get("cvJson"), LIMITS["cvJsonMax"]),
+                lambda a: self.length_problem("cvFileId", a["cvFileId"], 1, None) if "cvFileId" in a else None,
+                lambda a: self.length_problem("sourceFolder", a.get("sourceFolder") or "", 0, LIMITS["sourceFolderMax"]),
+                lambda a: None if "idempotencyKey" not in a or re.match(LIMITS["idempotencyKeyPattern"], a["idempotencyKey"])
+                else "idempotencyKey has an invalid format",
+            ))
+        if name in ("list_jobs", "list_change_requests"):
+            limit = arguments.get("limit", 50)
+            if isinstance(limit, bool) or not isinstance(limit, int) or not LIMITS["listLimitMin"] <= limit <= LIMITS["listLimitMax"]:
+                return "limit must be an integer from %d to %d" % (LIMITS["listLimitMin"], LIMITS["listLimitMax"])
+        return None
+
+    @staticmethod
+    def check(arguments, required, allowed, checks):
+        missing = [k for k in required if arguments.get(k) is None]
+        if missing:
+            return "Required: " + ", ".join(missing)
+        unknown = [k for k in arguments if k not in allowed]  # the shapes are strict
+        if unknown:
+            return "Unrecognized key: " + ", ".join(unknown)
+        for check in checks:
+            problem = check(arguments)
+            if problem:
+                return problem
+        return None
+
+    @staticmethod
+    def length_problem(field, value, low, high):
+        if not isinstance(value, str):
+            return field + " must be a string"
+        units = len(value.encode("utf-16-le", errors="surrogatepass")) // 2
+        if units < low or (high is not None and units > high):
+            return "%s must be %d to %s characters" % (field, low, high if high is not None else "any number of")
+        return None
+
+    @staticmethod
+    def json_problem(field, value, limit):
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            return field + " must be an object"
+        # JSON.stringify: compact, non-ASCII kept, counted in UTF-16 units
+        text = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+        if len(text.encode("utf-16-le", errors="surrogatepass")) // 2 > limit:
+            return "%s: serialized JSON must be at most %d characters" % (field, limit)
+        return None
+
+    @staticmethod
+    def address_problem(value):
+        if value is None or value == "":
+            return None  # "" means apply via link
+        if not isinstance(value, str) or len(value) > LIMITS["emailAddressMax"] or not cs.EMAIL_RE.match(value) \
+                or re.search("[\r\n,]", value):
+            return "emailTo must be one valid email address"
         return None
 
     def tool(self, name, arguments):
@@ -189,6 +260,19 @@ class Stub:
             if key in self.keys and self.keys[key][0] != job:
                 return {"isError": True, "content": [{"type": "text", "text": "CONFLICT: That key belongs to another job."}]}
             again = key in self.keys
+            if not again and job in self.locked:
+                # A send is in progress or unresolved on this job (step 5 of the real submit)
+                return {"isError": True, "content": [{"type": "text", "text": "CONFLICT: " + CONFLICT_TEXT}]}
+            if not again and job in self.races:
+                # The job changed under the submit (a competing package took the next version):
+                # the real server rolls back and answers CONFLICT; the other writer's package stays.
+                self.races.discard(job)
+                rival = self.packages.setdefault(job, [])
+                for p in rival:
+                    if p["status"] in ("pending", "approved", "changes_requested"):
+                        p["status"] = "superseded"
+                rival.append({"id": "rival-pkg-%d" % (len(rival) + 1), "version": len(rival) + 1, "status": "pending"})
+                return {"isError": True, "content": [{"type": "text", "text": "CONFLICT: " + CONFLICT_TEXT}]}
             superseded = []
             if not again:
                 package_id = "pkg-%d" % (len(self.keys) + 1)
@@ -372,7 +456,7 @@ class TokenTests(unittest.TestCase):
     def test_plain_bom_and_utf16_files(self):
         self.assertEqual(self.load((TOKEN + "\r\n").encode()), TOKEN)
         self.assertEqual(self.load(b"\xef\xbb\xbf" + TOKEN.encode()), TOKEN)
-        self.assertEqual(self.load(("﻿" + TOKEN + "\r\n").encode("utf-16")), TOKEN)
+        self.assertEqual(self.load(("\uFEFF" + TOKEN + "\r\n").encode("utf-16")), TOKEN)
 
     def test_garbage_and_empty_are_refused(self):
         with self.assertRaises(cs.CockpitError):
@@ -1225,3 +1309,248 @@ class ReviewRound2Tests(FolderMixin, unittest.TestCase):
         self.assertEqual(len(calls), 2)
         slept.assert_called_once_with(0.2)
         self.assertEqual(cs.read_marker(folder, "k")["digest"], "d")
+
+
+# Strings with no visible character (issue #82): the server refuses them as blank, so must the script.
+INVISIBLE_ONLY = {
+    "zero width space": "\u200B",
+    "zero width non-joiner": "\u200C\u200C",
+    "zero width joiner": "\u200D",
+    "word joiner": "\u2060",
+    "BOM": "\uFEFF",
+    "soft hyphen": "\u00AD",
+    "NBSP": "\u00A0\u00A0",
+    "line separator": "\u2028",
+    "paragraph separator": "\u2029",
+    "ideographic space": "\u3000",
+    "thin and narrow spaces": "\u2009\u202F\u205F",
+    "control characters": "\x00\x07",
+    "Hangul filler": "\u3164",
+    "Braille blank": "\u2800",
+    "mix": " \u200B\t\u00A0\uFEFF\n\u2060 ",
+}
+
+
+class BlankTextTests(FolderMixin, unittest.TestCase):
+    def setUp(self):
+        self.stub = Stub()
+        self.addCleanup(self.stub.close)
+
+    def test_is_blank_text(self):
+        for name, text in INVISIBLE_ONLY.items():
+            self.assertTrue(cs.is_blank_text(text), name)
+        self.assertTrue(cs.is_blank_text(""))
+        for text in ("a", "é", "你", "\U0001f600", "\u200Bx\u200B", "a\u200Db", "\u00AD."):
+            self.assertFalse(cs.is_blank_text(text), repr(text))
+
+    def test_validate_package_refuses_a_subject_or_body_with_no_visible_character(self):
+        ok = dict(subject="Application", recipient="", body="Hello", letter="Hello", fit="A")
+        for name, text in INVISIBLE_ONLY.items():
+            for field in ("subject", "body"):
+                with self.assertRaises(cs.CockpitError, msg="%s %s" % (field, name)) as raised:
+                    cs.validate_package(**dict(ok, **{field: text}))
+                self.assertEqual(raised.exception.code, "VALIDATION")
+        # invisible characters around real text are fine, and the text is not changed
+        cs.validate_package(**dict(ok, subject="\u200BHi\u00AD", body="\u2060Hello\uFEFF"))
+
+    def test_the_command_refuses_before_any_request_and_the_stub_agrees(self):
+        folder = self.make_folder()
+        for name, text in INVISIBLE_ONLY.items():
+            code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(folder), "--company", "Acme",
+                                   "--role", "Dev", "--subject", text, "--fit", "A", "--url", LINK])
+            self.assertEqual((code, result["error"]), (1, "VALIDATION"), name)
+            body = self.make_folder(**{"letter.md": text})
+            code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(body), "--company", "Acme",
+                                   "--role", "Dev", "--subject", "Application", "--fit", "A", "--url", LINK,
+                                   "--to", "hr@example.com"])  # with a recipient the letter is the whole body
+            self.assertEqual((code, result["error"]), (1, "VALIDATION"), name)
+            reply = self.stub.tool("submit_application_package", {
+                "jobId": JOB % 1, "idempotencyKey": "k", "emailSubject": text, "emailBody": "b", "fitGrade": "A"})
+            self.assertTrue(reply["isError"], name)
+            reply = self.stub.tool("submit_application_package", {
+                "jobId": JOB % 1, "idempotencyKey": "k", "emailSubject": "s", "emailBody": text, "fitGrade": "A"})
+            self.assertTrue(reply["isError"], name)
+        self.assertEqual(self.stub.calls, [])
+
+
+class StubLimitTests(FolderMixin, unittest.TestCase):
+    """Issue 83: the stub refuses exactly what the server refuses, and the script respects it.
+    The limits come from cockpit_limits.json, which __tests__/cockpit/botLimits.spec.ts checks
+    against the server's Zod schemas."""
+
+    def setUp(self):
+        self.stub = Stub()
+        self.addCleanup(self.stub.close)
+        self.job = self.stub.seed_job()
+
+    def submit(self, **over):
+        args = {"jobId": self.job, "emailSubject": "Application", "emailBody": "Hello", "fitGrade": "A",
+                "idempotencyKey": "key-%d" % len(self.stub.keys)}
+        args.update(over)
+        return self.stub.tool("submit_application_package", args)
+
+    def attach(self, **over):
+        args = {"fileName": "cv.pdf", "mimeType": "application/pdf", "contentBase64": base64.b64encode(PDF).decode()}
+        args.update(over)
+        return self.stub.tool("attach_file", args)
+
+    def assertAccepts(self, reply, label=""):
+        self.assertNotIn("isError", reply, "%s: %s" % (label, reply))
+
+    def assertRefuses(self, reply, label=""):
+        self.assertTrue(reply.get("isError"), label)
+        self.assertIn("Input validation error", reply["content"][0]["text"], label)
+
+    def test_the_table_has_the_limits_the_script_uses(self):
+        self.assertEqual(
+            (cs.MAX_SUBJECT, cs.MAX_TEXT, cs.MAX_CV_JSON, cs.MAX_FIT_ANALYSIS, cs.MAX_FILE_NAME, cs.MAX_SOURCE_FOLDER,
+             cs.MAX_ADDRESS, cs.MAX_BASE64_CHARS, cs.MIN_LIST_LIMIT, cs.MAX_CHANGE_REQUESTS),
+            (LIMITS["subjectMax"], LIMITS["emailBodyMax"], LIMITS["cvJsonMax"], LIMITS["fitAnalysisMax"],
+             LIMITS["fileNameMax"], LIMITS["sourceFolderMax"], LIMITS["emailAddressMax"], LIMITS["base64Max"],
+             LIMITS["listLimitMin"], LIMITS["listLimitMax"]))
+
+    def test_each_text_limit_is_enforced_at_the_boundary(self):
+        cases = {
+            "emailSubject": LIMITS["subjectMax"],
+            "emailBody": LIMITS["emailBodyMax"],
+            "letterMd": LIMITS["letterMdMax"],
+            "sourceFolder": LIMITS["sourceFolderMax"],
+        }
+        for field, limit in cases.items():
+            self.assertAccepts(self.submit(**{field: "x" * limit}), field)
+            self.assertRefuses(self.submit(**{field: "x" * (limit + 1)}), field)
+        self.assertAccepts(self.submit(emailSubject="\U0001f600" * (LIMITS["subjectMax"] // 2)))  # UTF-16 units
+        self.assertRefuses(self.submit(emailSubject="\U0001f600" * (LIMITS["subjectMax"] // 2 + 1)))
+
+    def test_email_body_needs_a_character_and_a_visible_one(self):
+        self.assertRefuses(self.submit(emailBody=""))
+        self.assertRefuses(self.submit(emailBody="   "))
+        self.assertRefuses(self.submit(emailSubject=""))
+        self.assertAccepts(self.submit(emailBody="x"))
+
+    def test_file_name_is_1_to_120_and_must_be_a_pdf(self):
+        self.assertAccepts(self.attach(fileName="f" * LIMITS["fileNameMax"]))
+        self.assertRefuses(self.attach(fileName="f" * (LIMITS["fileNameMax"] + 1)))
+        self.assertRefuses(self.attach(fileName=""))
+        self.assertRefuses(self.attach(mimeType="text/plain"))
+        self.assertRefuses(self.attach(contentBase64="A" * (LIMITS["base64Max"] + 1)))
+
+    def test_email_to_pattern(self):
+        self.assertAccepts(self.submit(emailTo="hr@example.com"))
+        self.assertAccepts(self.submit(emailTo=""))
+        for bad in ("nobody", "a@b", "a@example.com,b@example.com", "a@example.com\n", "a..b@example.com",
+                    "prénom@example.com", "a" * 250 + "@example.com"):
+            self.assertRefuses(self.submit(emailTo=bad), repr(bad))
+
+    def test_json_caps_count_the_compact_serialization(self):
+        for field in ("cvJson", "fitAnalysis"):
+            limit = LIMITS[field + "Max"]
+            overhead = len(json.dumps({"x": ""}, separators=(",", ":")))
+            self.assertAccepts(self.submit(**{field: {"x": "y" * (limit - overhead)}}), field)
+            self.assertRefuses(self.submit(**{field: {"x": "y" * (limit - overhead + 1)}}), field)
+            self.assertRefuses(self.submit(**{field: ["not", "an", "object"]}), field)
+
+    def test_unknown_keys_missing_fields_and_the_key_pattern(self):
+        self.assertRefuses(self.submit(emailTooo="hr@example.com"))
+        self.assertRefuses(self.submit(fitGrade="C"))
+        self.assertRefuses(self.submit(idempotencyKey="bad key!"))
+        self.assertRefuses(self.submit(idempotencyKey="k" * 101))
+        self.assertRefuses(self.submit(jobId=""))
+        self.assertRefuses(self.submit(cvFileId=""))
+        reply = self.stub.tool("submit_application_package", {"jobId": self.job, "fitGrade": "A"})
+        self.assertRefuses(reply)
+
+    def test_list_limit_is_1_to_100_and_not_clamped_by_the_server(self):
+        for tool in ("list_jobs", "list_change_requests"):
+            for good in (1, 50, 100):
+                self.assertAccepts(self.stub.tool(tool, {"limit": good}), "%s %s" % (tool, good))
+            for bad in (0, -1, 101, 1.5, "10"):
+                self.assertRefuses(self.stub.tool(tool, {"limit": bad}), "%s %r" % (tool, bad))
+
+    def test_conflict_when_a_send_is_in_progress(self):
+        self.stub.locked.add(self.job)
+        reply = self.submit()
+        self.assertTrue(reply["isError"])
+        self.assertTrue(reply["content"][0]["text"].startswith("CONFLICT"))
+        self.assertEqual(self.stub.keys, {})
+        self.assertEqual(self.stub.packages[self.job], [])
+
+    def test_conflict_when_the_package_changed_under_the_submit(self):
+        first = self.submit(idempotencyKey="first")
+        self.assertAccepts(first)
+        self.stub.races.add(self.job)
+        reply = self.submit(idempotencyKey="second")
+        self.assertTrue(reply["content"][0]["text"].startswith("CONFLICT"))
+        self.assertNotIn("second", self.stub.keys)
+        self.assertEqual([p["status"] for p in self.stub.packages[self.job]], ["superseded", "pending"])
+        self.assertEqual(self.submit(idempotencyKey="second").get("isError"), None)  # the race happens once
+
+    def test_a_replay_of_a_stored_key_is_not_a_conflict_even_when_locked(self):
+        self.assertAccepts(self.submit(idempotencyKey="same"))
+        self.stub.locked.add(self.job)
+        again = json.loads(self.submit(idempotencyKey="same")["content"][0]["text"])
+        self.assertTrue(again["idempotent"])
+
+    # ---- the script respects the same limits
+
+    def test_the_script_checks_every_limit_before_any_request(self):
+        ok = dict(subject="s", recipient="", body="b", letter="l", fit="A")
+        cs.validate_package(**dict(ok, subject="s" * LIMITS["subjectMax"], body="b" * LIMITS["emailBodyMax"],
+                                   letter="l" * LIMITS["letterMdMax"]))
+        at_limit = "a" * (LIMITS["emailAddressMax"] - len("@example.com")) + "@example.com"
+        cs.validate_package(**dict(ok, recipient=at_limit))  # exactly at the address limit is fine
+        for bad in (dict(subject="s" * (LIMITS["subjectMax"] + 1)), dict(body="b" * (LIMITS["emailBodyMax"] + 1)),
+                    dict(letter="l" * (LIMITS["letterMdMax"] + 1)), dict(recipient="a" + at_limit)):
+            with self.assertRaises(cs.CockpitError):
+                cs.validate_package(**dict(ok, **bad))
+        for field in ("cv_json", "fit_analysis"):
+            limit = LIMITS[{"cv_json": "cvJsonMax", "fit_analysis": "fitAnalysisMax"}[field]]
+            overhead = len(json.dumps({"x": ""}, separators=(",", ":")))
+            cs.validate_package(**dict(ok, **{field: {"x": "y" * (limit - overhead)}}))
+            with self.assertRaises(cs.CockpitError):
+                cs.validate_package(**dict(ok, **{field: {"x": "y" * (limit - overhead + 1)}}))
+
+    def test_what_the_script_sends_is_accepted_by_the_strict_stub(self):
+        folder = self.make_folder()  # with a 200-character pdf name
+        (folder / "Jane_Doe_CV_Acme.pdf").unlink()
+        (folder / ("c" * 200 + ".pdf")).write_bytes(PDF)
+        code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(folder), "--company", "Acme",
+                               "--role", "Dev", "--subject", "Application", "--fit", "A", "--url", LINK])
+        self.assertEqual(code, 0, result)
+        attach = next(a for n, a in self.stub.calls if n == "attach_file")
+        submit = next(a for n, a in self.stub.calls if n == "submit_application_package")
+        self.assertLessEqual(len(attach["fileName"]), LIMITS["fileNameMax"])
+        self.assertTrue(attach["fileName"].endswith(".pdf"))
+        self.assertLessEqual(len(submit["sourceFolder"]), LIMITS["sourceFolderMax"])
+
+    def test_source_folder_is_cut_to_the_limit_in_utf16_units(self):
+        self.assertEqual(cs.truncate16("x" * 400, LIMITS["sourceFolderMax"]), "x" * LIMITS["sourceFolderMax"])
+        cut = cs.truncate16("\U0001F600" * 200, LIMITS["sourceFolderMax"])
+        self.assertEqual(cut, "\U0001F600" * (LIMITS["sourceFolderMax"] // 2))  # never half an emoji
+        self.assertEqual(cs.truncate16("short", LIMITS["sourceFolderMax"]), "short")
+
+    def test_the_script_clamps_a_list_limit_the_server_would_refuse(self):
+        for asked, sent in ((0, LIMITS["listLimitMin"]), (-5, LIMITS["listLimitMin"]), (500, LIMITS["listLimitMax"]), (7, 7)):
+            self.stub.calls.clear()
+            code, result, _ = run(["--endpoint", self.stub.url, "changes", "--limit", str(asked)])
+            self.assertEqual(code, 0, result)
+            self.assertEqual(self.stub.calls[-1][1]["limit"], sent)
+
+    def test_a_send_in_progress_is_reported_as_conflict_and_changes_nothing(self):
+        self.stub.locked.add(self.job)
+        folder = self.make_folder()
+        code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(folder), "--company", "Acme",
+                               "--role", "Backend Engineer", "--subject", "Application", "--fit", "A", "--url", LINK])
+        self.assertEqual((code, result["error"]), (1, "CONFLICT"), result)
+        self.assertEqual(self.stub.keys, {})
+        self.assertFalse((folder / cs.MARKER_NAME).exists())
+
+    def test_a_package_that_changed_under_the_submit_is_not_overwritten_by_the_replay(self):
+        self.stub.races.add(self.job)
+        folder = self.make_folder()
+        code, result, _ = run(["--endpoint", self.stub.url, "submit", "--folder", str(folder), "--company", "Acme",
+                               "--role", "Backend Engineer", "--subject", "Application", "--fit", "A", "--url", LINK])
+        self.assertEqual(code, 1, result)
+        self.assertEqual(self.stub.keys, {})  # nothing of ours was stored
+        self.assertEqual([p["id"] for p in self.stub.packages[self.job]], ["rival-pkg-1"])
+        self.assertEqual(self.stub.packages[self.job][0]["status"], "pending")  # the other writer's package stays

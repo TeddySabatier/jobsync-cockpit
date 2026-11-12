@@ -17,8 +17,16 @@ const emailAddress = z
 // "" means "apply via link"; the Schemas below turn it into null.
 const emailToField = z.union([z.literal(""), emailAddress]).optional();
 
-// Whitespace-only is empty. Checked without trimming the stored value.
-const notBlank = (v: string) => v.trim().length > 0;
+// A string with no visible character is blank: whitespace (incl. NBSP, U+2028,
+// U+2029, U+3000), any other Unicode separator (Z*), control or format
+// character (Cc, Cf: zero-width space/joiners U+200B-200D, U+2060, BOM U+FEFF,
+// soft hyphen U+00AD), and the characters that render as empty space though
+// they are letters or marks (Hangul fillers, Braille blank, combining grapheme
+// joiner). Only the test strips them; the stored text is never changed.
+// scripts/bot/cockpit_submit.py applies the same rule (is_blank_text).
+const INVISIBLE = /[\s\p{Z}\p{Cc}\p{Cf}\u034F\u115F\u1160\u2800\u3164\uFFA0]/gu;
+export const isBlankText = (v: string) => v.replace(INVISIBLE, "").length === 0;
+const notBlank = (v: string) => !isBlankText(v);
 
 const emailSubjectField = z
   .string()
