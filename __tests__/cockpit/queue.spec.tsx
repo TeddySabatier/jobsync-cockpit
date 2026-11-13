@@ -19,6 +19,9 @@ import { readinessChips, type QueueRowData } from "@/components/cockpit/QueueRow
 import { parseQueueTab } from "@/components/cockpit/queueTabs";
 
 const row = (over: Partial<QueueRowData> = {}): QueueRowData => ({
+  kind: "application",
+  followUpStep: null,
+  followUp: null,
   id: "p1",
   jobId: "j1",
   version: 2,

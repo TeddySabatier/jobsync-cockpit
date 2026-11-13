@@ -33,6 +33,10 @@ const LONG_BODY =
   "\nTHE-VERY-LAST-LINE";
 
 const detail = (over: Partial<PackageDetail["package"]> = {}): PackageDetail => ({
+  kind: "application",
+  followUp: null,
+  followUpStep: null,
+  replyTo: null,
   package: {
     id: "p1",
     version: 1,

@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { formatFollowUpDay, replySubject } from "@/lib/cockpit/followUpView";
 import { formatBytes, type PackageDetail } from "./Panels";
 
 // Free-mail providers (international and the common French ones). Matched on
@@ -253,6 +254,7 @@ export default function SendDialog({
     }
   }, [open]);
 
+  const isFollowUp = detail.kind === "follow_up";
   const to = pkg.emailTo?.trim() ?? "";
   const contactSource = pkg.contactSource?.trim() || null;
   const warning = recipientWarning(to, pkg.job.Company.label, pkg.job.jobUrl, contactSource);
@@ -301,9 +303,11 @@ export default function SendDialog({
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Send this application</DialogTitle>
+          <DialogTitle>{isFollowUp ? "Send this follow-up" : "Send this application"}</DialogTitle>
           <DialogDescription>
-            This sends a real email from your Gmail account.
+            {isFollowUp
+              ? "This sends a real email from your Gmail account, as a reply to your application."
+              : "This sends a real email from your Gmail account."}
           </DialogDescription>
         </DialogHeader>
 
@@ -373,12 +377,28 @@ export default function SendDialog({
           <dt className="text-muted-foreground">From</dt>
           <dd className="[overflow-wrap:anywhere]">{detail.gmail?.email ?? "not connected"}</dd>
           <dt className="text-muted-foreground">Subject</dt>
-          <dd className="break-words">{pkg.emailSubject}</dd>
+          <dd className="break-words" data-testid="send-subject">
+            {isFollowUp ? replySubject(pkg.emailSubject) : pkg.emailSubject}
+          </dd>
+          {isFollowUp && (
+            <>
+              <dt className="text-muted-foreground">Reply in thread</dt>
+              <dd className="[overflow-wrap:anywhere]" data-testid="send-thread">
+                {detail.followUp?.threadUrl
+                  ? `Yes: in the Gmail thread of your email of ${
+                      detail.replyTo?.sentAt ? formatFollowUpDay(detail.replyTo.sentAt) : "the application"
+                    }`
+                  : "No Gmail thread is recorded for the application (it was marked sent by hand): sent as a new email with the same subject"}
+              </dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Attachment</dt>
-          <dd className="[overflow-wrap:anywhere]">
-            {detail.attachment
-              ? `${detail.attachment.fileName} (${formatBytes(detail.attachment.size)})`
-              : "None"}
+          <dd className="[overflow-wrap:anywhere]" data-testid="send-attachment">
+            {isFollowUp
+              ? "None (a follow-up has no attachment)"
+              : detail.attachment
+                ? `${detail.attachment.fileName} (${formatBytes(detail.attachment.size)})`
+                : "None"}
           </dd>
           {detail.letterAttachment && (
             <>

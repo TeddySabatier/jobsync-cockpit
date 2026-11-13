@@ -1,6 +1,6 @@
 // Builds the text the owner pastes into Claude to draft the follow-ups that are
-// due (cockpit/DECISIONS.md D-034; plan 3.6, the "Follow-ups" copy button comes
-// later). Pure and client-safe: no server imports. It lives apart from
+// due (cockpit/DECISIONS.md D-034, D-042: the "Copy prompt: draft due
+// follow-ups" button on Review). Pure and client-safe: no server imports. It lives apart from
 // claudePrompt.ts, which builds the prompt for one application.
 
 export type FollowUpsPromptInput = {
@@ -33,7 +33,7 @@ export function buildFollowUpsPrompt(input: FollowUpsPromptInput = {}): string {
       "(with a NEW idempotencyKey: the old key only returns the old draft, idempotent: true), " +
       "an item with kind \"application\" with submit_application_package, never the other way round.\n",
   );
-  out.push("4. Tell me how many drafts you created and what to check in Review (the Follow-ups tab).\n\n");
+  out.push("4. Tell me how many drafts you created and what to check in Review (the drafts are in To do, with a Follow-up chip).\n\n");
 
   out.push("Rules for each follow-up:\n");
   out.push("- Short and polite: a few sentences, no pressure.\n");

@@ -37,6 +37,9 @@ import {
 // TextDialog, recipient wrapping. Synthetic data only.
 
 const row = (over: Partial<QueueRowData> = {}): QueueRowData => ({
+  kind: "application",
+  followUpStep: null,
+  followUp: null,
   id: "p1",
   jobId: "j1",
   version: 1,

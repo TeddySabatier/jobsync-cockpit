@@ -37,6 +37,10 @@ const detail = (
   over: Partial<PackageDetail["package"]> = {},
   extra: Partial<Omit<PackageDetail, "package">> = {},
 ): PackageDetail => ({
+  kind: "application",
+  followUp: null,
+  followUpStep: null,
+  replyTo: null,
   package: {
     id: "p1",
     version: 1,

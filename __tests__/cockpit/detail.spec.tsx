@@ -52,6 +52,10 @@ const detailFixture = (
   over: Overrides = {},
   extra: Partial<Omit<PackageDetail, "package">> = {},
 ): PackageDetail => ({
+  kind: "application",
+  followUp: null,
+  followUpStep: null,
+  replyTo: null,
   package: {
     id: "p2",
     version: 2,

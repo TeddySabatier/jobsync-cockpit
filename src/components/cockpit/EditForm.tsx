@@ -311,6 +311,8 @@ export default function EditForm({
         </Field>
       </section>
 
+      {/* A follow-up is an email only: it never carries a letter (D-042). */}
+      {detail.kind !== "follow_up" && (
       <section className="flex flex-col gap-3 rounded-lg border bg-card p-4">
         <h2 className="text-sm font-semibold">Cover letter</h2>
         <div className="grid grid-cols-1 gap-4 @3xl/main:grid-cols-2">
@@ -341,6 +343,7 @@ export default function EditForm({
           </div>
         </div>
       </section>
+      )}
 
       {cv && leaves.length > 0 && (
         <section

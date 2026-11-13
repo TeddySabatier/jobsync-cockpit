@@ -15,6 +15,7 @@ export const ALLOWED: Record<string, string[]> = {
     "getTodoCount",
   ],
   "cockpitFollowUps.actions.ts": [
+    "setApplicationOutcome",
     "snoozeFollowUp",
     "skipFollowUpStep",
     "stopFollowUps",

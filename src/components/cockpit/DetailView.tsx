@@ -2,7 +2,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Info } from "lucide-react";
+import { Info, Reply } from "lucide-react";
+import { followUpLabel, formatFollowUpDay } from "@/lib/cockpit/followUpView";
+import { FollowUpChip, FollowUpPanel, GmailThreadLink } from "./FollowUpControls";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,6 +96,11 @@ export default function DetailView({
 
   const company = pkg.job.Company.label;
   const title = pkg.job.JobTitle.label;
+  const isFollowUp = detail.kind === "follow_up";
+  // The follow-up card: on a follow-up, and on a sent application that has a
+  // follow-up state to show (D-042).
+  const showFollowUpPanel =
+    !!detail.followUp && detail.followUp.reason !== "no_sent_application";
 
   return (
     <div className="flex flex-col gap-4 py-4">
@@ -149,8 +156,9 @@ export default function DetailView({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {isFollowUp && <FollowUpChip step={detail.followUpStep} />}
             <Badge variant="secondary">{statusLabel(pkg.status)}</Badge>
-            {pkg.cvPdfStale && <Badge variant="outline">PDF stale</Badge>}
+            {!isFollowUp && pkg.cvPdfStale && <Badge variant="outline">PDF stale</Badge>}
           </div>
         </div>
         <select
@@ -193,6 +201,35 @@ export default function DetailView({
         </Alert>
       )}
 
+      {isFollowUp && (
+        <Alert data-testid="follow-up-banner">
+          <Reply />
+          <AlertDescription className="flex flex-col gap-1">
+            <span className="font-medium">
+              {`${followUpLabel(detail.followUpStep)} · Replies to your email of ${
+                detail.replyTo?.sentAt ? formatFollowUpDay(detail.replyTo.sentAt) : "an earlier date"
+              }`}
+            </span>
+            {detail.replyTo?.emailSubject && (
+              <span className="text-muted-foreground [overflow-wrap:anywhere]">
+                {`Original subject: ${detail.replyTo.emailSubject}`}
+              </span>
+            )}
+            <span className="flex flex-wrap items-center gap-x-4">
+              <GmailThreadLink url={detail.followUp?.threadUrl ?? null} />
+              {detail.replyTo && (
+                <Link
+                  href={`/dashboard/review/${detail.replyTo.id}`}
+                  className="inline-flex min-h-11 items-center text-sm underline md:min-h-0"
+                >
+                  View the application
+                </Link>
+              )}
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
+
       <PreviousReviewInfo pkg={pkg} />
 
       {editing && canEdit ? (
@@ -207,18 +244,34 @@ export default function DetailView({
       ) : (
         <>
           {/* Reading order = DOM order: Summary, Email, Letter, CV, Fit, Posting. */}
-          <div className="grid grid-cols-1 gap-4 @3xl/main:grid-cols-2">
-            <div className="@3xl/main:col-span-2">
-              <SummaryStrip detail={detail} />
+          {isFollowUp ? (
+            // A follow-up is an email only: no CV, letter or fit (D-042).
+            <div className="grid grid-cols-1 gap-4 @3xl/main:grid-cols-2">
+              <EmailPanel detail={detail} />
+              {showFollowUpPanel && detail.followUp && <FollowUpPanel summary={detail.followUp} />}
+              <div className="@3xl/main:col-span-2">
+                <PostingPanel pkg={pkg} />
+              </div>
             </div>
-            <EmailPanel detail={detail} />
-            <LetterPanel pkg={pkg} fileName={detail.letterAttachment?.fileName} />
-            <CvPanel detail={detail} />
-            <FitPanel pkg={pkg} />
-            <div className="@3xl/main:col-span-2">
-              <PostingPanel pkg={pkg} />
+          ) : (
+            <div className="grid grid-cols-1 gap-4 @3xl/main:grid-cols-2">
+              <div className="@3xl/main:col-span-2">
+                <SummaryStrip detail={detail} />
+              </div>
+              {showFollowUpPanel && detail.followUp && (
+                <div className="@3xl/main:col-span-2">
+                  <FollowUpPanel summary={detail.followUp} />
+                </div>
+              )}
+              <EmailPanel detail={detail} />
+              <LetterPanel pkg={pkg} fileName={detail.letterAttachment?.fileName} />
+              <CvPanel detail={detail} />
+              <FitPanel pkg={pkg} />
+              <div className="@3xl/main:col-span-2">
+                <PostingPanel pkg={pkg} />
+              </div>
             </div>
-          </div>
+          )}
 
           {(adjacent.previousId || adjacent.nextId) && (
             <p className="hidden text-xs text-muted-foreground md:block">

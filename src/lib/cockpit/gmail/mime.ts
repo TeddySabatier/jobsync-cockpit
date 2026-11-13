@@ -8,16 +8,37 @@ export interface MimeInput {
   to: string;
   subject: string;
   bodyText: string;
-  attachment: { fileName: string; content: Buffer };
+  // The CV. Optional since F-4 (D-042): a follow-up carries no attachment and
+  // is then a single text/plain part.
+  attachment?: { fileName: string; content: Buffer } | null;
   // More PDFs after the first one (the generated cover letter, D-015).
   extraAttachments?: { fileName: string; content: Buffer }[];
+  // Threading header of a follow-up (D-042): the Message-ID of the email it
+  // replies to, read from our own database only. Must match MESSAGE_ID_PATTERN.
+  inReplyTo?: string | null;
 }
 
-// Test seams only; production callers pass nothing.
+// `now` and `boundary` are test seams. `messageId` is also passed by the send
+// service (newMessageId()) so it can store the header it sent (D-042).
 export interface MimeOptions {
   now?: Date;
   boundary?: string;
   messageId?: string;
+}
+
+// A strict `<local@domain>` Message-ID: no spaces, no angle brackets and no
+// second `@`, nothing else on the line. In-Reply-To / References values must
+// match it (plan 3.4), on top of the CR/LF guard.
+export const MESSAGE_ID_PATTERN =
+  /^<[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]{1,200}@[A-Za-z0-9.-]{1,200}>$/;
+
+export function isValidMessageId(v: string | null | undefined): v is string {
+  return typeof v === "string" && MESSAGE_ID_PATTERN.test(v);
+}
+
+// The Message-ID the send service generates and stores (SentEmail.messageIdHeader).
+export function newMessageId(): string {
+  return `<${randomUUID()}@jobsync.local>`;
 }
 
 const CRLF = "\r\n";
@@ -56,13 +77,17 @@ function encodeSubject(subject: string): string {
 
 // Returns the RFC 5322 message text (CRLF throughout).
 export function buildMimeMessage(
-  { from, to, subject, bodyText, attachment, extraAttachments = [] }: MimeInput,
+  { from, to, subject, bodyText, attachment, extraAttachments = [], inReplyTo }: MimeInput,
   opts: MimeOptions = {},
 ): string {
   header("From", from);
   header("To", to);
   header("Subject", subject);
-  const all = [attachment, ...extraAttachments];
+  if (inReplyTo !== undefined && inReplyTo !== null) {
+    header("In-Reply-To", inReplyTo);
+    if (!isValidMessageId(inReplyTo)) throw new Error("Invalid In-Reply-To");
+  }
+  const all = [...(attachment ? [attachment] : []), ...extraAttachments];
   for (const a of all) {
     header("attachment name", a.fileName);
     // shortcut: ASCII-only attachment names, no RFC 2231 (names are sanitized
@@ -74,24 +99,43 @@ export function buildMimeMessage(
   if (!from || !to) throw new Error("From and To are required");
 
   const boundary = opts.boundary ?? `cockpit-${randomBytes(16).toString("hex")}`;
-  const messageId = opts.messageId ?? `<${randomUUID()}@jobsync.local>`;
+  const messageId = opts.messageId ?? newMessageId();
+  header("Message-ID", messageId);
   const date = (opts.now ?? new Date()).toUTCString();
   const body = bodyText.replace(/\r?\n/g, CRLF);
+  const encodedBody = wrap76(Buffer.from(body, "utf8").toString("base64"));
 
-  return [
+  const head = [
     `From: ${from}`,
     `To: ${to}`,
     `Subject: ${encodeSubject(subject)}`,
     "MIME-Version: 1.0",
     `Date: ${date}`,
     `Message-ID: ${messageId}`,
+    ...(inReplyTo ? [`In-Reply-To: ${inReplyTo}`, `References: ${inReplyTo}`] : []),
+  ];
+
+  // No attachment (a follow-up): one plain text part, no multipart wrapper.
+  if (all.length === 0) {
+    return [
+      ...head,
+      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      encodedBody,
+      "",
+    ].join(CRLF);
+  }
+
+  return [
+    ...head,
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     "",
     `--${boundary}`,
     "Content-Type: text/plain; charset=UTF-8",
     "Content-Transfer-Encoding: base64",
     "",
-    wrap76(Buffer.from(body, "utf8").toString("base64")),
+    encodedBody,
     ...all.flatMap((a) => [
       `--${boundary}`,
       `Content-Type: application/pdf; name="${a.fileName}"`,

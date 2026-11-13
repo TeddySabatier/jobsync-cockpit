@@ -3,6 +3,7 @@ import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ChangeRequestsPromptButton } from "./ChangeRequestsPromptButton";
 import FocusRefresh from "./FocusRefresh";
+import { FollowUpsPromptButton } from "./FollowUpsPromptButton";
 import { todoGroup } from "@/lib/cockpit/queueOrder";
 import QueueRow, { type QueueRowData } from "./QueueRow";
 import QueueTabs from "./QueueTabs";
@@ -31,6 +32,7 @@ export default function QueueView({
 }) {
   const { rows, gmail, gmailCalloutNeeded } = data;
   const counts = "counts" in data ? data.counts : undefined;
+  const dueFollowUps = "dueFollowUps" in data ? (data.dueFollowUps ?? 0) : 0;
   return (
     <div className="flex flex-col gap-4 py-4">
       <FocusRefresh />
@@ -66,6 +68,20 @@ export default function QueueView({
             .
           </AlertDescription>
         </Alert>
+      )}
+
+      {dueFollowUps > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm"
+          data-testid="follow-ups-due"
+        >
+          <span className="min-w-[12rem] flex-1">
+            {dueFollowUps === 1
+              ? "1 follow-up is due. Copy the prompt and paste it into Claude: the draft comes back here in To do."
+              : `${dueFollowUps} follow-ups are due. Copy the prompt and paste it into Claude: the drafts come back here in To do.`}
+          </span>
+          <FollowUpsPromptButton dueCount={dueFollowUps} className="h-11 gap-2" variant="default" />
+        </div>
       )}
 
       {tab === "changes" && rows.length > 0 && (

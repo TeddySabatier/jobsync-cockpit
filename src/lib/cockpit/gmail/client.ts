@@ -19,6 +19,7 @@ export interface GmailClient {
   sendRaw(
     accessToken: string,
     raw: string,
+    threadId?: string | null,
   ): Promise<{ id: string; threadId: string }>;
   revoke(token: string): Promise<void>;
 }
@@ -148,9 +149,12 @@ export async function revokeToken(token: string): Promise<void> {
 
 // Called only by the send service (send.ts), through the GmailClient interface.
 // The stored refresh token is decrypted there, after the send lock is taken.
+// `threadId` (a follow-up, D-042) puts the message into that Gmail thread; it
+// comes from the user's own SentEmail row, never from client input.
 export async function sendRaw(
   accessToken: string,
   raw: string,
+  replyThreadId?: string | null,
 ): Promise<{ id: string; threadId: string }> {
   const json = await googleRequest("send", SEND_URL, {
     method: "POST",
@@ -158,7 +162,7 @@ export async function sendRaw(
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ raw }),
+    body: JSON.stringify(replyThreadId ? { raw, threadId: replyThreadId } : { raw }),
   });
   const id = str(json.id);
   const threadId = str(json.threadId);

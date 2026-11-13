@@ -109,38 +109,89 @@ export type DueFollowUpItem = {
 // oldest due first, at most `limit`. A job that already has an open follow-up
 // draft (pending, approved or changes_requested) is left out: the owner is
 // reviewing it, and a change request is answered through list_change_requests.
+// Applied jobs with a sent email application, no open follow-up draft and no
+// outcome or stop: the only jobs that can have a step to draft.
+function dueCandidateWhere(userId: string) {
+  return {
+    userId,
+    Status: { value: "applied" },
+    AND: [
+      {
+        applicationPackages: {
+          some: { ...sentApplicationWhere({ userId }), emailTo: { not: null } },
+        },
+      },
+      {
+        applicationPackages: {
+          none: {
+            userId,
+            kind: "follow_up",
+            status: { in: ["pending", "approved", "changes_requested"] },
+          },
+        },
+      },
+      {
+        OR: [
+          { followUp: { is: null } },
+          { followUp: { is: { outcome: null, stopped: false } } },
+        ],
+      },
+    ],
+  };
+}
+
+// How many follow-ups are due and not drafted yet (the review badge and the
+// "draft due follow-ups" prompt, D-042). Same rule as listDueFollowUps, without
+// the posting and email texts.
+export async function countDueFollowUps(userId: string, now: Date = new Date()): Promise<number> {
+  const jobs = await prisma.job.findMany({
+    where: dueCandidateWhere(userId),
+    orderBy: { createdAt: "desc" },
+    take: CANDIDATE_CAP,
+    select: {
+      followUp: {
+        select: {
+          outcome: true,
+          stopped: true,
+          skippedThrough: true,
+          skippedAt: true,
+          snoozedUntil: true,
+        },
+      },
+      applicationPackages: {
+        where: { userId, status: "sent" },
+        orderBy: { version: "desc" },
+        select: { kind: true, sentAt: true, emailTo: true },
+      },
+    },
+  });
+  const timezone = getFollowUpTimezone();
+  const windowDays = getFollowUpWindowDays();
+  let n = 0;
+  for (const job of jobs) {
+    const application = job.applicationPackages.find((p) => p.kind === "application");
+    if (!application) continue;
+    const due = computeFollowUpDue({
+      now,
+      jobStatus: "applied",
+      application,
+      sentFollowUps: job.applicationPackages.filter((p) => p.kind === "follow_up"),
+      state: job.followUp,
+      timezone,
+      windowDays,
+    });
+    if (due.eligible && due.status === "due") n++;
+  }
+  return n;
+}
+
 export async function listDueFollowUps(
   userId: string,
   limit: number,
   now: Date = new Date(),
 ): Promise<DueFollowUpItem[]> {
   const jobs = await prisma.job.findMany({
-    where: {
-      userId,
-      Status: { value: "applied" },
-      AND: [
-        {
-          applicationPackages: {
-            some: { ...sentApplicationWhere({ userId }), emailTo: { not: null } },
-          },
-        },
-        {
-          applicationPackages: {
-            none: {
-              userId,
-              kind: "follow_up",
-              status: { in: ["pending", "approved", "changes_requested"] },
-            },
-          },
-        },
-        {
-          OR: [
-            { followUp: { is: null } },
-            { followUp: { is: { outcome: null, stopped: false } } },
-          ],
-        },
-      ],
-    },
+    where: dueCandidateWhere(userId),
     // Newest first: if the cap is ever reached, the old (long expired) jobs are
     // the ones left out, not the recently applied ones that can be due.
     orderBy: { createdAt: "desc" },
